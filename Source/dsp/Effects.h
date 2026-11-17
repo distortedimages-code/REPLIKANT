@@ -14,38 +14,7 @@
 #pragma once
 
 #include "Space.h"
-#if defined (__clang__)
- #pragma clang diagnostic push
- #pragma clang diagnostic ignored "-Wshadow"
- #pragma clang diagnostic ignored "-Wshadow-field"
- #pragma clang diagnostic ignored "-Wshadow-field-in-constructor"
- #pragma clang diagnostic ignored "-Wshadow-uncaptured-local"
- #pragma clang diagnostic ignored "-Wfloat-equal"
- #pragma clang diagnostic ignored "-Wsign-conversion"
- #pragma clang diagnostic ignored "-Wimplicit-int-conversion"
- #pragma clang diagnostic ignored "-Wshorten-64-to-32"
- #pragma clang diagnostic ignored "-Wconversion"
- #pragma clang diagnostic ignored "-Wunused-parameter"
- #pragma clang diagnostic ignored "-Wextra-semi"
- #pragma clang diagnostic ignored "-Wzero-as-null-pointer-constant"
- #pragma clang diagnostic ignored "-Wcast-align"
- #pragma clang diagnostic ignored "-Wdeprecated"
-#elif defined (__GNUC__)
- #pragma GCC diagnostic push
- #pragma GCC diagnostic ignored "-Wshadow"
- #pragma GCC diagnostic ignored "-Wfloat-equal"
- #pragma GCC diagnostic ignored "-Wsign-conversion"
- #pragma GCC diagnostic ignored "-Wconversion"
- #pragma GCC diagnostic ignored "-Wunused-parameter"
- #pragma GCC diagnostic ignored "-Wzero-as-null-pointer-constant"
-#endif
-#include "signalsmith-linear/fft.h"
-#include "signalsmith-stretch.h"
-#if defined (__clang__)
- #pragma clang diagnostic pop
-#elif defined (__GNUC__)
- #pragma GCC diagnostic pop
-#endif
+#include <memory>
 
 #include <array>
 #include <complex>
@@ -73,6 +42,8 @@ namespace dsp
     class Spectral
     {
     public:
+        Spectral();
+        ~Spectral();
         void prepare (double sampleRate);
         void reset();
         void set (const SpectralSettings& s)   { target = s; }
@@ -88,7 +59,8 @@ namespace dsp
         float mix = 0.5f;
         std::vector<float> ring, window, mags, smooth;
         int ringPos = 0, sinceSlice = 0;
-        signalsmith::linear::Pow2FFT<float> fft;
+        struct FFT;                                    // (Signalsmith's, kept out of this header: it brings
+        std::unique_ptr<FFT> fft;                      //  Accelerate, whose names clash with JUCE's)
         std::vector<std::complex<float>> fa, fb;
         std::vector<std::pair<float, float>> found;   // (level, hz): the slice's peaks (kept: no allocation)
         struct Osc
@@ -117,15 +89,18 @@ namespace dsp
     class PitchShift
     {
     public:
+        PitchShift();
+        ~PitchShift();
         void prepare (double sampleRate);
         void reset();
         void set (const PitchSettings& s)     { target = s; }
         void process (float* left, float* right, int n);
 
     private:
+        struct Shifter;                      // Signalsmith Stretch (kept out of this header, as the FFT)
         struct Voice
         {
-            signalsmith::stretch::SignalsmithStretch<float> st;
+            std::unique_ptr<Shifter> st;
             std::vector<float> buf;          // the delay after it (and the grains' line)
             int w = 0;
             float grain = 0.0f, delay = 0.0f, ratio = 1.0f;

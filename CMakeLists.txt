@@ -183,6 +183,18 @@ if(RK_BUILD_TESTS)
         juce::juce_recommended_warning_flags)
     add_test(NAME PlayerTests COMMAND PlayerTests)
 
+    # the look: fonts and text layout (a tooltip with characters the pixel fonts lack must not recurse)
+    juce_add_console_app(UiTests PRODUCT_NAME "UiTests")
+    juce_generate_juce_header(UiTests)
+    target_sources(UiTests PRIVATE Tests/UiTests.cpp Source/ui/Pixel.cpp)
+    target_compile_definitions(UiTests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    target_link_libraries(UiTests PRIVATE
+        RkFonts
+        juce::juce_gui_basics
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+    add_test(NAME UiTests COMMAND UiTests)
+
     # Update checker: version compare, GitHub answer parsing, checksum, bundle replacement
     juce_add_console_app(UpdaterTests PRODUCT_NAME "UpdaterTests")
     juce_generate_juce_header(UpdaterTests)

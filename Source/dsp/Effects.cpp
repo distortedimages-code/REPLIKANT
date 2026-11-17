@@ -3,8 +3,53 @@
 #include <algorithm>
 #include <cmath>
 
+#if defined (__clang__)
+ #pragma clang diagnostic push
+ #pragma clang diagnostic ignored "-Wshadow"
+ #pragma clang diagnostic ignored "-Wshadow-field"
+ #pragma clang diagnostic ignored "-Wshadow-field-in-constructor"
+ #pragma clang diagnostic ignored "-Wshadow-uncaptured-local"
+ #pragma clang diagnostic ignored "-Wfloat-equal"
+ #pragma clang diagnostic ignored "-Wsign-conversion"
+ #pragma clang diagnostic ignored "-Wimplicit-int-conversion"
+ #pragma clang diagnostic ignored "-Wshorten-64-to-32"
+ #pragma clang diagnostic ignored "-Wconversion"
+ #pragma clang diagnostic ignored "-Wunused-parameter"
+ #pragma clang diagnostic ignored "-Wextra-semi"
+ #pragma clang diagnostic ignored "-Wzero-as-null-pointer-constant"
+ #pragma clang diagnostic ignored "-Wcast-align"
+ #pragma clang diagnostic ignored "-Wdeprecated"
+#elif defined (__GNUC__)
+ #pragma GCC diagnostic push
+ #pragma GCC diagnostic ignored "-Wshadow"
+ #pragma GCC diagnostic ignored "-Wfloat-equal"
+ #pragma GCC diagnostic ignored "-Wsign-conversion"
+ #pragma GCC diagnostic ignored "-Wconversion"
+ #pragma GCC diagnostic ignored "-Wunused-parameter"
+ #pragma GCC diagnostic ignored "-Wzero-as-null-pointer-constant"
+#endif
+#include "signalsmith-linear/fft.h"
+#include "signalsmith-stretch.h"
+#if defined (__clang__)
+ #pragma clang diagnostic pop
+#elif defined (__GNUC__)
+ #pragma GCC diagnostic pop
+#endif
+
 namespace dsp
 {
+struct Spectral::FFT { signalsmith::linear::Pow2FFT<float> f; };
+struct PitchShift::Shifter { signalsmith::stretch::SignalsmithStretch<float> s; };
+
+Spectral::Spectral() : fft (std::make_unique<FFT>()) {}
+Spectral::~Spectral() = default;
+PitchShift::PitchShift()
+{
+    for (auto& x : v)
+        x.st = std::make_unique<Shifter>();
+}
+PitchShift::~PitchShift() = default;
+
 namespace
 {
     constexpr double kTwoPi = 6.283185307179586;
@@ -31,7 +76,7 @@ void Spectral::prepare (double rate)
     }
     mags.assign ((size_t) N / 2 + 1, 0.0f);
     smooth.assign ((size_t) N / 2 + 1, 0.0f);
-    fft.resize ((size_t) N);
+    fft->f.resize ((size_t) N);
     fa.assign ((size_t) N, {});
     fb.assign ((size_t) N, {});
     found.reserve ((size_t) N / 2);
@@ -65,7 +110,7 @@ void Spectral::analyse()
 {
     for (int i = 0; i < N; ++i)
         fa[(size_t) i] = ring[(size_t) ((ringPos + i) % N)] * window[(size_t) i];
-    fft.fft (fa.data(), fb.data());
+    fft->f.fft (fa.data(), fb.data());
     const int H = N / 2;
     float total = 0.0f;
     const float blur = std::clamp (target.blur, 0.0f, 0.98f);
@@ -194,7 +239,7 @@ void PitchShift::prepare (double rate)
     for (auto& x : v)
     {
         x.buf.assign ((size_t) size, 0.0f);
-        x.st.presetDefault (1, (float) sr);   // (presetCheaper drifts ~11 cents on a pure tone)
+        x.st->s.presetDefault (1, (float) sr);   // (presetCheaper drifts ~11 cents on a pure tone)
     }
     grainLen = (float) (sr * 0.08);
     in.assign (512, 0.0f);
@@ -210,7 +255,7 @@ void PitchShift::reset()
         std::fill (x.buf.begin(), x.buf.end(), 0.0f);
         x.w = 0;
         x.grain = 0.0f;
-        x.st.reset();
+        x.st->s.reset();
     }
 }
 
@@ -260,10 +305,10 @@ void PitchShift::chunk (float* L, float* R, int n)
             const float back = std::max (x.delay, (float) n);
             for (int i = 0; i < n; ++i)
                 fbIn[(size_t) i] = in[(size_t) i] + fb * read (x, back - (float) i);
-            x.st.setTransposeSemitones (semis);
+            x.st->s.setTransposeSemitones (semis);
             const float* ins[1] = { fbIn.data() };
             float* outs[1] = { out.data() };
-            x.st.process (ins, n, outs, n);
+            x.st->s.process (ins, n, outs, n);
             for (int i = 0; i < n; ++i)
             {
                 x.delay += (wantDelay - x.delay) * 0.0005f;

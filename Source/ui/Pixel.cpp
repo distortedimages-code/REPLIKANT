@@ -351,8 +351,8 @@ Look::Look()
 
 juce::Typeface::Ptr Look::getTypefaceForFont (const juce::Font& f)
 {
-    if (f.getTypefacePtr() != nullptr)
-        return f.getTypefacePtr();
+    // (never f.getTypefacePtr() here: for a font without one, JUCE comes back to this very function to find it, and a
+    // fallback font for a character the pixel fonts lack (a tooltip's arrow) went round until the stack ran out)
     if (f.getTypefaceName() == juce::Font::getDefaultSansSerifFontName()
         || f.getTypefaceName() == juce::Font::getDefaultMonospacedFontName())
         return vt();
