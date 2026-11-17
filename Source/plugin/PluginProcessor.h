@@ -67,7 +67,14 @@ public:
 
     InstrumentPtr getInstrument() const;
     void newInstrument();
-    void openInstrument (const juce::File&);
+    void openInstrument (const juce::File&, bool withItsSound = true);
+    // a pack (zip), a .replikant or an instrument folder: brought in (a pack is unpacked into the instruments' folder)
+    void importAny (const juce::File&);
+    // the pack of the current instrument and its sound, made (worker) into the Packs folder; `done` gets it (or an
+    // empty file) on the message thread
+    void buildPack (std::function<void (const juce::File&)> done);
+    juce::File packFor (const Instrument&) const;
+    juce::String soundSignature() const;            // changes when the sound does
     void exportInstrument (bool bitwig, bool allKeys, const juce::File& target);
     juce::File instrumentsRoot() const;
 
@@ -131,6 +138,9 @@ private:
     std::vector<std::shared_ptr<Instrument>> alive;
     bool mappingDirty = false;
     int mappingCountdown = 0;
+    juce::String savedSound;                       // the sound last written into the instrument's folder
+    juce::String pendingSound;
+    int soundCountdown = 0;
 
     // MIDI to the synth
     std::unique_ptr<juce::MidiOutput> portOwner, retiredPort;

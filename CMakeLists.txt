@@ -171,11 +171,13 @@ if(RK_BUILD_TESTS)
     # the player on made-up samples: anti-aliasing, ALIASING, phase modulation, voices, filters, mods, FX mode, CPU
     juce_add_console_app(PlayerTests PRODUCT_NAME "PlayerTests")
     juce_generate_juce_header(PlayerTests)
-    target_sources(PlayerTests PRIVATE Tests/PlayerTests.cpp Source/engine/Instrument.cpp Source/engine/Player.cpp)
+    target_sources(PlayerTests PRIVATE Tests/PlayerTests.cpp Source/engine/Instrument.cpp Source/engine/Player.cpp
+        Source/plugin/MidiClock.cpp)
     target_compile_definitions(PlayerTests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
     target_link_libraries(PlayerTests PRIVATE
         rk_core
         juce::juce_audio_utils
+        juce::juce_audio_devices
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
     add_test(NAME PlayerTests COMMAND PlayerTests)

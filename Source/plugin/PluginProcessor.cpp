@@ -332,6 +332,27 @@ void ReplikantProcessor::timerCallback()
         clock.setRunning (false);
         sendChangeMessage();
     }
+    // the sound goes into the instrument's folder once it stops moving (2 s): opened again, it sounds the same
+    if (auto ins = getInstrument(); ins != nullptr && ins->folder.isDirectory() && ! isSampling())
+    {
+        static int tick = 0;
+        if (++tick % 5 == 0)
+        {
+            const auto now = soundSignature();
+            if (now != pendingSound)
+            {
+                pendingSound = now;
+                soundCountdown = 4;
+            }
+            else if (now != savedSound && --soundCountdown <= 0)
+            {
+                savedSound = now;
+                const auto folder = ins->folder;
+                const auto sound = soundToVar();
+                worker.post ({}, [folder, sound] { instrumentio::saveSound (folder, sound); });
+            }
+        }
+    }
     // the mapping settings of the instrument: re-rendered once they stop moving
     if (mappingDirty && --mappingCountdown <= 0)
     {
@@ -432,9 +453,9 @@ void ReplikantProcessor::newInstrument()
     publish (nullptr);
 }
 
-void ReplikantProcessor::openInstrument (const juce::File& f)
+void ReplikantProcessor::openInstrument (const juce::File& f, bool withItsSound)
 {
-    worker.post ("OUVERTURE"_fr, [this, f]
+    worker.post ("OUVERTURE"_fr, [this, f, withItsSound]
     {
         juce::String err;
         auto ins = instrumentio::load (f, err);
@@ -443,9 +464,12 @@ void ReplikantProcessor::openInstrument (const juce::File& f)
             juce::MessageManager::callAsync ([this, err] { if (onMessage) onMessage (err); });
             return;
         }
-        juce::MessageManager::callAsync ([this, ins]
+        juce::MessageManager::callAsync ([this, ins, withItsSound]
         {
             instrumentName = ins->name;
+            if (withItsSound && ins->sound.isObject())
+                soundFromVar (ins->sound);
+            savedSound = withItsSound || ! ins->sound.isObject() ? soundSignature() : juce::String();
             // the mapping settings come with the instrument
             session.placement = ins->session.placement;
             session.extend = ins->session.extend;
@@ -457,6 +481,66 @@ void ReplikantProcessor::openInstrument (const juce::File& f)
             settingsChanged();
         });
         worker.renderAndPublish (ins, true);
+    });
+}
+
+void ReplikantProcessor::importAny (const juce::File& f)
+{
+    if (isSampling())
+        return;
+    if (f.isDirectory() || f.hasFileExtension ("replikant"))
+    {
+        openInstrument (f, true);
+        return;
+    }
+    const auto root = instrumentsRoot();
+    worker.post ("IMPORT", [this, f, root]
+    {
+        juce::String err;
+        const auto folder = instrumentio::importPack (f, root, err);
+        juce::MessageManager::callAsync ([this, folder, err, name = f.getFileName()]
+        {
+            if (folder == juce::File())
+            {
+                if (onMessage) onMessage (err);
+                return;
+            }
+            if (onMessage) onMessage ("Importé : "_fr + name + " → " + folder.getFullPathName());
+            openInstrument (folder, true);
+        });
+    });
+}
+
+juce::File ReplikantProcessor::packFor (const Instrument& ins) const
+{
+    return instrumentsRoot().getChildFile ("Packs").getChildFile (instrumentio::safeName (ins.name) + ".zip");
+}
+
+juce::String ReplikantProcessor::soundSignature() const
+{
+    return juce::JSON::toString (soundToVar(), true);
+}
+
+void ReplikantProcessor::buildPack (std::function<void (const juce::File&)> done)
+{
+    auto ins = getInstrument();
+    if (ins == nullptr || ins->samples.empty())
+    {
+        if (done) done ({});
+        return;
+    }
+    const auto sound = soundToVar();
+    const auto zip = packFor (*ins);
+    worker.post ("PACK", [this, ins, sound, zip, done]
+    {
+        const auto r = instrumentio::exportPack (*ins, sound, zip);
+        juce::MessageManager::callAsync ([this, r, zip, done]
+        {
+            if (r.failed() && onMessage)
+                onMessage (r.getErrorMessage());
+            if (done)
+                done (r.wasOk() ? zip : juce::File());
+        });
     });
 }
 
@@ -638,7 +722,7 @@ void ReplikantProcessor::setStateInformation (const void* data, int size)
     if (xml->hasAttribute ("instrument"))
     {
         if (f.isDirectory())
-            openInstrument (f);
+            openInstrument (f, false);     // (the project's own sound, not the one kept with the instrument)
         else
             juce::MessageManager::callAsync ([this, f] { if (onMessage) onMessage ("Instrument introuvable : "_fr + f.getFullPathName()); });
     }

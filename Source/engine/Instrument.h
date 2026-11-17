@@ -28,6 +28,7 @@ struct Instrument
     // per recording, the same an octave, two and three lower in rate (a voice pitched far up reads the nearest)
     std::vector<std::array<rk::Channels, 3>> octaves;
     rk::NoiseFloor noise;
+    juce::var sound;                          // the player's sound kept with it (settings, routes, scenes), if any
 
     // what plays for a key and velocity: the sample (or its rendered key) and the shift still to apply live
     struct Source
@@ -72,4 +73,15 @@ namespace instrumentio
     // recordings, mapped
     juce::Result exportWavFolder (const Instrument&, const juce::File& folder, bool allKeys);
     juce::Result exportBitwig (const Instrument&, const juce::File& file, bool allKeys);
+
+    // the sound kept in an instrument's description, the rest of it untouched
+    juce::Result saveSound (const juce::File& folder, const juce::var& sound);
+
+    // a pack to share: one zip holding <Name>/<Name>.replikant (with the sound) and <Name>/Samples/*.wav
+    // (unzipped by hand, it is an instrument folder as well)
+    juce::Result exportPack (const Instrument&, const juce::var& sound, const juce::File& zip);
+    // unpacks a pack into `root` (a folder of its own, its name made unique); returns that folder
+    juce::File importPack (const juce::File& zip, const juce::File& root, juce::String& error);
+    // what can be dropped on the window: a pack, a .replikant, a folder holding one
+    bool isImportable (const juce::File&);
 }

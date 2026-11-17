@@ -458,8 +458,28 @@ static void testCapture()
     CHECK (std::abs (v[1].audio[0][0] - 1.0f) < 1e-5f && std::abs (v[0].audio[0][0] - 0.5f) < 1e-5f, "instrument normalisation");
 }
 
+static void testSizeEstimate()
+{
+    rk::Session s;
+    s.lowNote = 36; s.highNote = 84; s.noteMode = rk::NoteMode::interval; s.interval = 12;   // 5 notes
+    s.layers = 2; s.roundRobins = 1; s.hold = 2.0; s.releaseMax = 1.0; s.preMs = 1.0; s.extend = 0;
+    s.renderKeys = false; s.fileBits = 24;
+    const auto e = rk::estimateSize (s, 48000.0, 2);
+    // 10 recordings of 1 ms + 2 s + 1 s (the tail: min (1, 1 + 0.4)), stereo, 24-bit
+    const double frames = 10 * 3.001 * 48000.0 * 2;
+    CHECK (e.recordings == 10 && std::abs ((double) e.diskBytes - frames * 3.0) < 10000.0, "disk %lld", (long long) e.diskBytes);
+    s.fileBits = 32;
+    CHECK (std::abs ((double) rk::estimateSize (s, 48000.0, 2).diskBytes - frames * 4.0) < 10000.0, "32-bit disk");
+    CHECK (std::abs ((double) rk::estimateSize (s, 96000.0, 2).diskBytes - frames * 8.0) < 20000.0, "96 kHz doubles it");
+    s.renderKeys = true;
+    const auto r = rk::estimateSize (s, 48000.0, 2);
+    CHECK (r.renderedKeys == 49 * 2 - 10, "keys rendered %d", r.renderedKeys);
+    CHECK (r.memoryBytes > e.memoryBytes * 5, "the rendered keys weigh in memory");
+}
+
 int main()
 {
+    testSizeEstimate();
     testNames();
     testSinc();
     testPitch();

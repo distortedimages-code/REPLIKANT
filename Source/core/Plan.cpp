@@ -82,6 +82,40 @@ double estimatedSeconds (const Session& s)
     return 1.0 + (double) planJobs (s).size() * perJob;
 }
 
+SizeEstimate estimateSize (const Session& s, double sr, int channels)
+{
+    SizeEstimate e;
+    const auto jobs = planJobs (s);
+    e.recordings = (int) jobs.size();
+    if (e.recordings == 0 || sr <= 0.0)
+        return e;
+    channels = std::clamp (channels, 1, 2);
+    // as the recorder holds them (ONE-SHOT: short holds, the rest is its tail)
+    const double hold = s.oneShot ? std::min (s.hold, 0.5) : s.hold;
+    const double tailMax = s.oneShot ? std::max (s.releaseMax, s.hold) : s.releaseMax;
+    const double tail = std::min (tailMax, 1.0 + tailMax * 0.4);
+    const double each = s.preMs * 0.001 + hold + tail;
+    e.secondsOfAudio = each * e.recordings;
+    const double frames = e.secondsOfAudio * sr * channels;
+    e.diskBytes = (int64_t) (frames * (s.fileBits == 32 ? 4.0 : 3.0)) + (int64_t) e.recordings * 200 + 4096;
+    // in memory: floats, the octave copies (1/2 + 1/4 + 1/8), then each key of each zone rendered
+    double memory = frames * 4.0 * 1.875;
+    if (s.renderKeys)
+    {
+        const auto notes = plannedNotes (s);
+        if (! notes.empty())
+        {
+            const int lo = std::clamp (*std::min_element (notes.begin(), notes.end()) - s.extend, 0, 127);
+            const int hi = std::clamp (*std::max_element (notes.begin(), notes.end()) + s.extend, 0, 127);
+            const int layers = (int) plannedVelocities (s).size();
+            e.renderedKeys = std::max (0, (hi - lo + 1) * layers * std::max (1, s.roundRobins) - e.recordings);
+            memory += (double) e.renderedKeys * each * sr * channels * 4.0;
+        }
+    }
+    e.memoryBytes = (int64_t) memory;
+    return e;
+}
+
 std::vector<Zone> keyZones (const std::vector<int>& rootsIn, Placement p, int kLo, int kHi)
 {
     std::vector<int> R (rootsIn);

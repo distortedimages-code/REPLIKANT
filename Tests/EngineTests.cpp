@@ -224,6 +224,51 @@ int main()
         }
     }
 
+    // a pack to share: out with its sound, in at a friend's (another folder), the same instrument and sound
+    {
+        juce::var snd (new juce::DynamicObject());      // (held by the var: a raw pointer would be freed by the first var)
+        snd.getDynamicObject()->setProperty ("params", juce::var (new juce::DynamicObject()));
+        snd["params"].getDynamicObject()->setProperty ("cutoff", 777.0);
+        const auto zip = home.getChildFile ("Packs").getChildFile ("Test synth.zip");
+        auto r = instrumentio::exportPack (*ins, snd, zip);
+        CHECK (r.wasOk() && zip.existsAsFile(), "pack: %s", r.getErrorMessage().toRawUTF8());
+        juce::ZipFile z (zip);
+        bool layout = z.getNumEntries() == 7;
+        for (int i = 0; i < z.getNumEntries(); ++i)
+            layout = layout && z.getEntry (i)->filename.startsWith ("Test synth/");
+        CHECK (layout, "pack layout (%d entries)", z.getNumEntries());
+        juce::String err;
+        const auto friendRoot = home.getChildFile ("Chez un pote");
+        const auto unpacked = instrumentio::importPack (zip, friendRoot, err);
+        CHECK (unpacked.isDirectory() && unpacked.isAChildOf (friendRoot), "import: %s", err.toRawUTF8());
+        auto back = instrumentio::load (unpacked, err);
+        CHECK (back != nullptr && back->samples.size() == ins->samples.size(), "pack loads: %s", err.toRawUTF8());
+        if (back != nullptr)
+        {
+            CHECK (std::abs ((double) back->sound["params"]["cutoff"] - 777.0) < 1.0e-9, "the sound came with it");
+            bool same = true;
+            for (size_t i = 0; i < back->samples.size(); ++i)
+                same = same && back->samples[i].root == ins->samples[i].root && back->samples[i].loop.start == ins->samples[i].loop.start
+                       && std::abs (back->samples[i].audio[0][1000] - ins->samples[i].audio[0][1000]) < 1.0e-6f;
+            CHECK (same, "the same samples");
+        }
+        // twice: a second folder, not the first one overwritten
+        const auto again = instrumentio::importPack (zip, friendRoot, err);
+        CHECK (again.isDirectory() && again != unpacked, "imported twice: %s", again.getFileName().toRawUTF8());
+        // a sound saved into the folder; then the instrument saved again keeps it
+        r = instrumentio::saveSound (unpacked, snd);
+        CHECK (r.wasOk(), "save sound");
+        if (back != nullptr)
+        {
+            back->sound = juce::var();
+            instrumentio::save (*back, unpacked);
+            auto third = instrumentio::load (unpacked, err);
+            CHECK (third != nullptr && std::abs ((double) third->sound["params"]["cutoff"] - 777.0) < 1.0e-9, "the sound survives a save");
+        }
+        CHECK (instrumentio::isImportable (zip) && instrumentio::isImportable (unpacked) && ! instrumentio::isImportable (home.getChildFile ("x.wav")),
+               "what can be dropped");
+    }
+
     std::printf ("%d checks, %d failed\n", checks, failures);
     worker.onInstrument = nullptr;
     return failures == 0 ? 0 : 1;

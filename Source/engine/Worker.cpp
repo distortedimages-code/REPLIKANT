@@ -210,7 +210,9 @@ void Worker::run()
             task = std::move (tasks.front());
             tasks.pop_front();
         }
-        setStatus ([&] (Status& st) { st.busy = true; st.text = task.first; st.progress = 0.0f; });
+        // (a task without a label is a quiet one: a small save, nothing to show)
+        if (task.first.isNotEmpty())
+            setStatus ([&] (Status& st) { st.busy = true; st.text = task.first; st.progress = 0.0f; });
         task.second();
         bool more;
         {

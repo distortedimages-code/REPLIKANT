@@ -75,6 +75,17 @@ namespace rk
     std::vector<Job> planJobs (const Session&);              // note by note, soft to loud, take by take
     double estimatedSeconds (const Session&);
 
+    // What the instrument will weigh, before it is recorded: on disk (the WAV files, the zip shared about the same),
+    // and in memory once open (the recordings in float, their octave copies, the keys rendered). The tails are
+    // counted as they usually end (before RELACHE MAX, in the noise), as the duration estimate does.
+    struct SizeEstimate
+    {
+        int recordings = 0, renderedKeys = 0;
+        double secondsOfAudio = 0.0;          // all the recordings end to end
+        int64_t diskBytes = 0, memoryBytes = 0;
+    };
+    SizeEstimate estimateSize (const Session&, double sampleRate, int channels);
+
     std::vector<Zone> keyZones (const std::vector<int>& roots, Placement, int lowestKey, int highestKey);
     std::vector<Zone> velocityZones (const std::vector<int>& velocities);
 

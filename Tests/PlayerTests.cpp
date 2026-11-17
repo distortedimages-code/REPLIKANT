@@ -6,6 +6,7 @@
 #include "../Source/engine/Player.h"
 #include "../Source/core/Analysis.h"
 #include "../Source/core/Sinc.h"
+#include "../Source/plugin/MidiClock.h"
 
 #include <chrono>
 #include <cstdio>
@@ -655,6 +656,54 @@ static void testCpu()
     }
 }
 
+static void testClock()
+{
+    // out of the plug-in, following the host: Start, then 24 ticks a beat on its grid, Stop
+    MidiClock clock;
+    clock.setDestination ("host", "DAW");
+    clock.setMode (MidiClock::Mode::host);
+    juce::MidiBuffer out;
+    std::vector<int> ticks;
+    bool started = false, stopped = false;
+    for (int b = 0; b < 100; ++b)
+    {
+        out.clear();
+        const double ppq = 0.5 + b * 480.0 / 24000.0;          // 480 samples a block at 120 bpm, 48 kHz
+        clock.process (true, ppq, 120.0, 480, sr, out);
+        for (const auto m : out)
+        {
+            const auto msg = m.getMessage();
+            if (msg.getRawData()[0] == 0xF8) ticks.push_back (b * 480 + m.samplePosition);
+            if (msg.getRawData()[0] == 0xFA) started = true;
+        }
+    }
+    out.clear();
+    clock.process (false, 0.0, 120.0, 480, sr, out);
+    for (const auto m : out)
+        stopped = stopped || m.getMessage().getRawData()[0] == 0xFC;
+    bool even = ticks.size() > 2;
+    for (size_t i = 1; i < ticks.size(); ++i)
+        even = even && std::abs ((ticks[i] - ticks[i - 1]) - 1000) <= 1;
+    CHECK (started && stopped && ticks.size() == 48 && even && ticks[0] == 0, "host clock: %zu ticks, start %d stop %d, first at %d",
+           ticks.size(), (int) started, (int) stopped, ticks.empty() ? -1 : ticks[0]);
+
+    // its own tempo, out of the plug-in: started by its button
+    MidiClock own;
+    own.setDestination ("host", "DAW");
+    std::atomic<float> tempo { 90.0f };
+    own.bindTempo (&tempo);
+    own.setRunning (true);
+    int count = 0;
+    for (int b = 0; b < 99; ++b)      // (0.99 s: the 37th tick would fall on the second exactly)
+    {
+        out.clear();
+        own.process (false, 0.0, 120.0, 480, sr, out);
+        for (const auto m : out)
+            count += m.getMessage().getRawData()[0] == 0xF8;
+    }
+    CHECK (count == 36, "own clock at 90 bpm over a second: %d ticks", count);   // 1.5 beats x 24
+}
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI gui;
@@ -667,6 +716,7 @@ int main()
     testVoices();
     testFilterModsFx();
     testStability();
+    testClock();
     testCpu();
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;

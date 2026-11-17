@@ -385,61 +385,170 @@ rk::Session sessionFromVar (const juce::var& v)
     return s;
 }
 
+namespace
+{
+    // writes an instrument's files into `folder` (nothing of the instrument changes)
+    juce::Result writeInstrument (const Instrument& ins, const juce::File& folder, const juce::var& sound)
+    {
+        auto samplesDir = folder.getChildFile ("Samples");
+        if (! samplesDir.createDirectory())
+            return juce::Result::fail ("Impossible de créer "_fr + samplesDir.getFullPathName());
+
+        juce::Array<juce::var> list;
+        std::set<juce::String> written;
+        for (auto& s : ins.samples)
+        {
+            const auto name = sampleFileName (ins.name, s);
+            const auto f = samplesDir.getChildFile (name);
+            const auto info = infoFor (ins, s, s.keyLo, s.keyHi, rk::mappedRoot (s, ins.session), false);
+            if (! rk::writeWav (f.getFullPathName().toStdString(), s.audio, s.sampleRate, ins.session.fileBits, info))
+                return juce::Result::fail ("Impossible d'écrire "_fr + f.getFullPathName());
+            written.insert (f.getFileName());
+
+            auto* o = new juce::DynamicObject();
+            o->setProperty ("file", "Samples/" + name);
+            o->setProperty ("root", s.root);
+            o->setProperty ("sent", s.sent);
+            o->setProperty ("manualTune", s.manualTune);
+            o->setProperty ("velocity", s.velocity);
+            o->setProperty ("rr", s.rr);
+            o->setProperty ("keyLo", s.keyLo);
+            o->setProperty ("keyHi", s.keyHi);
+            o->setProperty ("velLo", s.velLo);
+            o->setProperty ("velHi", s.velHi);
+            o->setProperty ("noteOff", s.noteOff);
+            o->setProperty ("loopStart", s.loop.start);
+            o->setProperty ("loopEnd", s.loop.end);
+            o->setProperty ("crossfade", s.loop.crossfade);
+            o->setProperty ("loopQuality", s.loop.quality);
+            o->setProperty ("detune", s.detuneCents);
+            o->setProperty ("pitchConfident", s.pitchConfident);
+            list.add (juce::var (o));
+        }
+        // recordings of an earlier version of this instrument that aren't part of it any more
+        for (auto& f : samplesDir.findChildFiles (juce::File::findFiles, false, "*.wav"))
+            if (written.count (f.getFileName()) == 0)
+                f.deleteFile();
+
+        const auto desc = folder.getChildFile (safeName (ins.name) + ".replikant");
+        // the sound already there stays, unless one is given
+        auto keep = sound;
+        if (keep.isVoid() && desc.existsAsFile())
+            keep = juce::JSON::parse (desc.loadFileAsString())["sound"];
+
+        auto* root = new juce::DynamicObject();
+        root->setProperty ("format", "REPLIKANT instrument");
+        root->setProperty ("version", 2);
+        root->setProperty ("name", ins.name);
+        root->setProperty ("sampleRate", ins.sampleRate);
+        root->setProperty ("noiseDb", ins.noise.rmsDb());
+        root->setProperty ("session", sessionToVar (ins.session));
+        root->setProperty ("samples", list);
+        if (! keep.isVoid())
+            root->setProperty ("sound", keep);
+        if (! desc.replaceWithText (juce::JSON::toString (juce::var (root))))
+            return juce::Result::fail ("Impossible d'écrire "_fr + desc.getFullPathName());
+        return juce::Result::ok();
+    }
+}
+
 juce::Result save (Instrument& ins, const juce::File& folder)
 {
-    auto samplesDir = folder.getChildFile ("Samples");
-    if (! samplesDir.createDirectory())
-        return juce::Result::fail ("Impossible de créer "_fr + samplesDir.getFullPathName());
-
-    juce::Array<juce::var> list;
-    std::set<juce::String> written;
+    const auto r = writeInstrument (ins, folder, ins.sound);
+    if (r.failed())
+        return r;
     for (auto& s : ins.samples)
-    {
         s.file = sampleFileName (ins.name, s).toStdString();
-        const auto f = samplesDir.getChildFile (juce::String (s.file));
-        const auto info = infoFor (ins, s, s.keyLo, s.keyHi, rk::mappedRoot (s, ins.session), false);
-        if (! rk::writeWav (f.getFullPathName().toStdString(), s.audio, s.sampleRate, ins.session.fileBits, info))
-            return juce::Result::fail ("Impossible d'écrire "_fr + f.getFullPathName());
-        written.insert (f.getFileName());
-
-        auto* o = new juce::DynamicObject();
-        o->setProperty ("file", "Samples/" + juce::String (s.file));
-        o->setProperty ("root", s.root);
-        o->setProperty ("sent", s.sent);
-        o->setProperty ("manualTune", s.manualTune);
-        o->setProperty ("velocity", s.velocity);
-        o->setProperty ("rr", s.rr);
-        o->setProperty ("keyLo", s.keyLo);
-        o->setProperty ("keyHi", s.keyHi);
-        o->setProperty ("velLo", s.velLo);
-        o->setProperty ("velHi", s.velHi);
-        o->setProperty ("noteOff", s.noteOff);
-        o->setProperty ("loopStart", s.loop.start);
-        o->setProperty ("loopEnd", s.loop.end);
-        o->setProperty ("crossfade", s.loop.crossfade);
-        o->setProperty ("loopQuality", s.loop.quality);
-        o->setProperty ("detune", s.detuneCents);
-        o->setProperty ("pitchConfident", s.pitchConfident);
-        list.add (juce::var (o));
-    }
-    // recordings of an earlier version of this instrument that aren't part of it any more
-    for (auto& f : samplesDir.findChildFiles (juce::File::findFiles, false, "*.wav"))
-        if (written.count (f.getFileName()) == 0)
-            f.deleteFile();
-
-    auto* root = new juce::DynamicObject();
-    root->setProperty ("format", "REPLIKANT instrument");
-    root->setProperty ("version", 1);
-    root->setProperty ("name", ins.name);
-    root->setProperty ("sampleRate", ins.sampleRate);
-    root->setProperty ("noiseDb", ins.noise.rmsDb());
-    root->setProperty ("session", sessionToVar (ins.session));
-    root->setProperty ("samples", list);
-    const auto desc = folder.getChildFile (safeName (ins.name) + ".replikant");
-    if (! desc.replaceWithText (juce::JSON::toString (juce::var (root))))
-        return juce::Result::fail ("Impossible d'écrire "_fr + desc.getFullPathName());
     ins.folder = folder;
+    return r;
+}
+
+juce::Result saveSound (const juce::File& folder, const juce::var& sound)
+{
+    auto found = folder.findChildFiles (juce::File::findFiles, false, "*.replikant");
+    if (found.isEmpty())
+        return juce::Result::fail ("Pas d'instrument dans "_fr + folder.getFullPathName());
+    auto json = juce::JSON::parse (found.getFirst().loadFileAsString());
+    auto* o = json.getDynamicObject();
+    if (o == nullptr)
+        return juce::Result::fail ("Fichier illisible : "_fr + found.getFirst().getFullPathName());
+    o->setProperty ("sound", sound);
+    if (! found.getFirst().replaceWithText (juce::JSON::toString (json)))
+        return juce::Result::fail ("Impossible d'écrire "_fr + found.getFirst().getFullPathName());
     return juce::Result::ok();
+}
+
+juce::Result exportPack (const Instrument& ins, const juce::var& sound, const juce::File& zip)
+{
+    const auto temp = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                          .getChildFile ("replikant-pack-" + juce::Uuid().toString());
+    const auto base = safeName (ins.name);
+    const auto dir = temp.getChildFile (base);
+    auto r = writeInstrument (ins, dir, sound);
+    if (r.wasOk())
+    {
+        juce::ZipFile::Builder b;
+        for (auto& f : dir.findChildFiles (juce::File::findFiles, true))
+            b.addFile (f, f.hasFileExtension ("wav") ? 0 : 9, base + "/" + f.getRelativePathFrom (dir).replaceCharacter ('\\', '/'));
+        zip.getParentDirectory().createDirectory();
+        const auto part = zip.getSiblingFile (zip.getFileName() + ".part");
+        part.deleteFile();
+        {
+            juce::FileOutputStream out (part);
+            if (! out.openedOk() || ! b.writeToStream (out, nullptr))
+                r = juce::Result::fail ("Impossible d'écrire "_fr + zip.getFullPathName());
+        }
+        if (r.wasOk() && ! part.moveFileTo (zip))
+            r = juce::Result::fail ("Impossible d'écrire "_fr + zip.getFullPathName());
+        part.deleteFile();
+    }
+    temp.deleteRecursively();
+    return r;
+}
+
+bool isImportable (const juce::File& f)
+{
+    if (f.isDirectory())
+        return ! f.findChildFiles (juce::File::findFiles, false, "*.replikant").isEmpty();
+    return f.hasFileExtension ("zip;replikant");
+}
+
+juce::File importPack (const juce::File& zip, const juce::File& root, juce::String& error)
+{
+    juce::ZipFile z (zip);
+    if (z.getNumEntries() == 0)
+    {
+        error = "Ce n'est pas un pack REPLIKANT : "_fr + zip.getFileName();
+        return {};
+    }
+    const auto temp = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                          .getChildFile ("replikant-import-" + juce::Uuid().toString());
+    // (JUCE refuses entries that would land outside the folder)
+    const auto r = z.uncompressTo (temp, true);
+    auto found = temp.findChildFiles (juce::File::findFiles, true, "*.replikant");
+    if (r.failed() || found.isEmpty())
+    {
+        temp.deleteRecursively();
+        error = r.failed() ? r.getErrorMessage() : "Pas d'instrument REPLIKANT dans "_fr + zip.getFileName();
+        return {};
+    }
+    const auto desc = found.getFirst();
+    auto name = juce::JSON::parse (desc.loadFileAsString())["name"].toString();
+    if (name.isEmpty())
+        name = desc.getFileNameWithoutExtension();
+    root.createDirectory();
+    auto target = root.getChildFile (safeName (name));
+    for (int n = 2; target.exists(); ++n)
+        target = root.getChildFile (safeName (name) + " " + juce::String (n));
+    const auto src = desc.getParentDirectory();
+    if (! src.moveFileTo (target) && ! src.copyDirectoryTo (target))
+    {
+        temp.deleteRecursively();
+        error = "Impossible de créer "_fr + target.getFullPathName();
+        return {};
+    }
+    temp.deleteRecursively();
+    return target;
 }
 
 std::shared_ptr<Instrument> load (const juce::File& where, juce::String& error)
@@ -468,10 +577,16 @@ std::shared_ptr<Instrument> load (const juce::File& where, juce::String& error)
     ins->session = sessionFromVar (json["session"]);
     ins->folder = desc.getParentDirectory();
     ins->noise.rms = rk::dbToGain ((float) (double) json.getProperty ("noiseDb", -96.0));
+    ins->sound = json["sound"];
     for (auto& v : *json["samples"].getArray())
     {
         rk::Sample s;
         const auto f = ins->folder.getChildFile (v["file"].toString());
+        if (! f.isAChildOf (ins->folder))
+        {
+            error = "Chemin refusé dans "_fr + desc.getFileName() + " : " + v["file"].toString();
+            return nullptr;
+        }
         rk::WavInfo info;
         if (! rk::readWav (f.getFullPathName().toStdString(), s.audio, s.sampleRate, info) || s.audio.empty())
         {
