@@ -206,6 +206,17 @@ static void testPitch()
     const auto m2 = mixDown (test::make (t));
     p = detectPitch (m2, sr, noteHz (24), 2000, (int) m2.size());
     CHECK (p.ok && std::abs (p.cents + 31.0) < 1.5, "C0 -31: %.2f cents", p.cents);
+    // RECALER: an oscillator a couple of semitones off, with a sub; and one a fifth flat
+    for (auto [off, sub] : { std::pair<double, double> { 2.3, 0.0 }, { -1.8, 0.4 }, { -4.85, 0.0 }, { 5.2, 0.3 }, { 0.07, 0.5 } })
+    {
+        test::Tone w;
+        w.hz = noteHz (48 + off);
+        w.subLevel = sub;
+        w.seconds = 1.5;
+        const auto mw = mixDown (test::make (w));
+        const auto pw = detectPitchWide (mw, sr, noteHz (48), 3000, (int) mw.size());
+        CHECK (pw.ok && std::abs (pw.cents - off * 100.0) < 2.0, "wide %+.2f st (sub %.1f): %.1f cents ok=%d", off, sub, pw.cents, (int) pw.ok);
+    }
     // noise: no pitch
     std::vector<float> noise (48000);
     std::mt19937 rng (3);
@@ -409,7 +420,23 @@ static void testCapture()
     auto r = processCapture (raw, sr, noteOn, noteOff, job, s, nf);
     CHECK (! r.silent, "silent");
     CHECK (std::abs (r.latency - 317) < 30, "latency %d", r.latency);
-    CHECK (r.sample.pitchConfident && std::abs (r.sample.detuneCents - 8.0f) < 1.0f, "detune %.2f", r.sample.detuneCents);
+    CHECK (r.sample.pitchConfident && std::abs (r.sample.detuneCents - 8.0f) < 1.0f && r.sample.root == 52, "detune %.2f", r.sample.detuneCents);
+    // a synth 3 semitones flat and 20 cents more: recaled on A2 (49)... the note it plays, -20 cents
+    {
+        test::Tone off = t;
+        off.hz = noteHz (52 - 3.2);
+        auto rr = processCapture (test::make (off), sr, noteOn, noteOff, job, s, nf);
+        CHECK (rr.sample.pitchConfident && rr.sample.root == 49 && rr.sample.sent == 52 && std::abs (rr.sample.detuneCents + 20.0f) < 1.5f,
+               "recaled root %d sent %d %.1f c", rr.sample.root, rr.sample.sent, rr.sample.detuneCents);
+        Session fine = s;
+        fine.tuning = Tuning::fine;
+        auto rf = processCapture (test::make (off), sr, noteOn, noteOff, job, fine, nf);
+        CHECK (rf.sample.root == 52 && ! rf.sample.pitchConfident, "fine mode leaves it: root %d", rf.sample.root);
+        std::vector<Sample> v { rr.sample };
+        Session offS = s;
+        offS.tuning = Tuning::off;
+        CHECK (mappedRoot (v[0], offS) == 52 && mappedRoot (v[0], s) == 49, "mapped root");
+    }
     CHECK (r.sample.loop.valid() && r.sample.loop.end <= r.sample.noteOff, "loop %d..%d note-off %d",
            r.sample.loop.start, r.sample.loop.end, r.sample.noteOff);
     const double tail = (r.sample.length() - r.sample.noteOff) / sr;

@@ -103,6 +103,7 @@ void Worker::renderAndPublish (std::shared_ptr<Instrument> ins, bool publishFirs
         if (cancelled())
             return;
         ins->rebuildIndex();
+        ins->prepareForPlaying();
         if (publishFirst && onInstrument)
             onInstrument (ins);
         if (! ins->session.renderKeys || ins->countKeysToRender() == 0)
@@ -126,6 +127,7 @@ void Worker::renderAndPublish (std::shared_ptr<Instrument> ins, bool publishFirs
         });
         if (cancelled())
             return;
+        next->prepareForPlaying();
         const double secs = (juce::Time::getMillisecondCounterHiRes() - t0) * 0.001;
         if (onInstrument)
             onInstrument (next);

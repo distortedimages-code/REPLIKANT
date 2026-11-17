@@ -29,7 +29,7 @@ else()
 endif()
 
 #==============================================================================
-# The DSP core, no JUCE inside: interpolation, formants, loops, pitch, captures, WAV chunks.
+# The DSP core, no JUCE inside: interpolation, formants, loops, pitch, captures, WAV chunks, and the player's DSP.
 add_library(rk_core STATIC
     Source/core/RkCore.cpp
     Source/core/Sinc.cpp
@@ -39,7 +39,16 @@ add_library(rk_core STATIC
     Source/core/Transpose.cpp
     Source/core/Plan.cpp
     Source/core/Wav.cpp
-    Source/core/Capture.cpp)
+    Source/core/Capture.cpp
+    # the player's settings (one table)
+    Source/engine/Sound.cpp
+    # the player's DSP: oversampling, analog filters, drives, modulators, effects
+    Source/dsp/Oversampler.cpp
+    Source/dsp/VAFilter.cpp
+    Source/dsp/Drive.cpp
+    Source/dsp/Modulators.cpp
+    Source/dsp/Space.cpp
+    Source/dsp/Effects.cpp)
 target_compile_features(rk_core PUBLIC cxx_std_17)
 # Signalsmith Stretch and Linear (MIT), vendored in ThirdParty
 target_include_directories(rk_core PUBLIC ThirdParty)
@@ -78,6 +87,7 @@ juce_generate_juce_header(REPLIKANT)
 set(RK_APP_SOURCES
     Source/plugin/PluginProcessor.cpp
     Source/plugin/Updater.cpp
+    Source/plugin/MidiClock.cpp
     Source/engine/Instrument.cpp
     Source/engine/Recorder.cpp
     Source/engine/Worker.cpp
@@ -137,6 +147,11 @@ if(RK_BUILD_TESTS)
     target_link_libraries(CoreTests PRIVATE rk_core)
     add_test(NAME CoreTests COMMAND CoreTests)
 
+    # the player's DSP: filters, drives, effects, modulators
+    add_executable(DspTests Tests/DspTests.cpp)
+    target_link_libraries(DspTests PRIVATE rk_core)
+    add_test(NAME DspTests COMMAND DspTests)
+
     # a whole session on the test synth: recorder, worker, instrument, player, saving, exports
     juce_add_console_app(EngineTests PRODUCT_NAME "EngineTests")
     juce_generate_juce_header(EngineTests)
@@ -152,6 +167,18 @@ if(RK_BUILD_TESTS)
         juce::juce_recommended_warning_flags)
     add_test(NAME EngineTests COMMAND EngineTests)
     set_tests_properties(EngineTests PROPERTIES ENVIRONMENT "HOME=${CMAKE_CURRENT_BINARY_DIR}/test-home")
+
+    # the player on made-up samples: anti-aliasing, ALIASING, phase modulation, voices, filters, mods, FX mode, CPU
+    juce_add_console_app(PlayerTests PRODUCT_NAME "PlayerTests")
+    juce_generate_juce_header(PlayerTests)
+    target_sources(PlayerTests PRIVATE Tests/PlayerTests.cpp Source/engine/Instrument.cpp Source/engine/Player.cpp)
+    target_compile_definitions(PlayerTests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    target_link_libraries(PlayerTests PRIVATE
+        rk_core
+        juce::juce_audio_utils
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+    add_test(NAME PlayerTests COMMAND PlayerTests)
 
     # Update checker: version compare, GitHub answer parsing, checksum, bundle replacement
     juce_add_console_app(UpdaterTests PRODUCT_NAME "UpdaterTests")

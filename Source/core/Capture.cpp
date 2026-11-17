@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 
 namespace rk
 {
@@ -11,6 +12,7 @@ CaptureResult processCapture (const Channels& rawIn, double sr, int noteOn, int 
     CaptureResult r;
     Sample& out = r.sample;
     out.root = job.note;
+    out.sent = job.note;
     out.velocity = job.velocity;
     out.rr = job.rr;
     out.sampleRate = sr;
@@ -71,9 +73,16 @@ CaptureResult processCapture (const Channels& rawIn, double sr, int noteOn, int 
     const auto mono = mixDown (out.audio);
     const int heldEnd = s.oneShot ? (int) mono.size() : out.noteOff;
     const int pitchFrom = std::min (heldEnd, (onset - start) + (int) (sr * 0.06));
-    const auto p = detectPitch (mono, sr, noteHz (job.note), pitchFrom, heldEnd);
+    const auto p = s.tuning == Tuning::snap ? detectPitchWide (mono, sr, noteHz (job.note), pitchFrom, heldEnd)
+                                            : detectPitch (mono, sr, noteHz (job.note), pitchFrom, heldEnd);
     out.pitchConfident = p.ok;
-    out.detuneCents = p.ok ? (float) p.cents : 0.0f;
+    if (p.ok)
+    {
+        // RECALER: mapped on the note it plays, the cents what is left; otherwise the note sent and its cents
+        const int semis = s.tuning == Tuning::snap ? (int) std::lround (p.cents / 100.0) : 0;
+        out.root = std::clamp (job.note + semis, 0, 127);
+        out.detuneCents = (float) (p.cents - 100.0 * semis);
+    }
 
     if (s.loop && ! s.oneShot)
     {
@@ -91,22 +100,29 @@ CaptureResult processCapture (const Channels& rawIn, double sr, int noteOn, int 
 
 void shareTuning (std::vector<Sample>& samples)
 {
-    for (int root = 0; root < 128; ++root)
+    // grouped by the note sent: the note found most often (RECALER), then the mean of their cents on it
+    for (int sent = 0; sent < 128; ++sent)
     {
+        std::map<int, int> votes;
+        for (auto& s : samples)
+            if ((s.sent >= 0 ? s.sent : s.root) == sent && s.pitchConfident && ! s.manualTune)
+                ++votes[s.root];
+        if (votes.empty())
+            continue;
+        int root = votes.begin()->first, most = 0;
+        for (auto& [r, n] : votes)
+            if (n > most)
+                most = n, root = r;
         double sum = 0.0;
         int n = 0;
         for (auto& s : samples)
-            if (s.root == root && s.pitchConfident)
-            {
-                sum += s.detuneCents;
-                ++n;
-            }
-        if (n == 0)
-            continue;
-        const auto mean = (float) (sum / n);
+            if ((s.sent >= 0 ? s.sent : s.root) == sent && s.pitchConfident && ! s.manualTune && s.root == root)
+                sum += s.detuneCents, ++n;
+        const auto mean = (float) (sum / std::max (1, n));
         for (auto& s : samples)
-            if (s.root == root)
+            if ((s.sent >= 0 ? s.sent : s.root) == sent && ! s.manualTune)
             {
+                s.root = root;
                 s.detuneCents = mean;
                 s.pitchConfident = true;
             }

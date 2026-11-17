@@ -11,26 +11,27 @@
 double Instrument::shiftFor (int i, int key) const
 {
     const auto& s = samples[(size_t) i];
-    double shift = key - s.root;
-    if (session.tune && s.pitchConfident)
+    double shift = key - rk::mappedRoot (s, session) - session.tuneCents / 100.0;
+    if ((session.tuneOn() || s.manualTune) && s.pitchConfident)
         shift -= s.detuneCents / 100.0;
     return shift;
 }
 
-std::vector<Instrument::Source> Instrument::sourcesFor (int key, int velocity) const
+int Instrument::sourcesFor (int key, int velocity, Source* out, int maxOut, bool recordedOnly) const
 {
-    std::vector<Source> out;
-    if (key < 0 || key > 127)
-        return out;
+    // (audio thread: nothing allocated)
+    if (key < 0 || key > 127 || maxOut <= 0)
+        return 0;
     const auto& cand = byKey[(size_t) key];
-    std::vector<int> hits;
+    int hits[maxSources];
+    int n = 0;
     for (int i : cand)
     {
         const auto& s = samples[(size_t) i];
-        if (velocity >= s.velLo && velocity <= s.velHi)
-            hits.push_back (i);
+        if (velocity >= s.velLo && velocity <= s.velHi && n < maxSources)
+            hits[n++] = i;
     }
-    if (hits.empty() && ! cand.empty())
+    if (n == 0 && ! cand.empty())
     {
         // no layer for that velocity (zones edited, or a hole): the nearest one
         int bestD = 1000;
@@ -44,18 +45,20 @@ std::vector<Instrument::Source> Instrument::sourcesFor (int key, int velocity) c
         {
             const auto& s = samples[(size_t) i];
             const int d = velocity < s.velLo ? s.velLo - velocity : velocity - s.velHi;
-            if (d == bestD)
-                hits.push_back (i);
+            if (d == bestD && n < maxSources)
+                hits[n++] = i;
         }
     }
-    std::sort (hits.begin(), hits.end(), [this] (int a, int b) { return samples[(size_t) a].rr < samples[(size_t) b].rr; });
-    for (int i : hits)
+    std::sort (hits, hits + n, [this] (int a, int b) { return samples[(size_t) a].rr < samples[(size_t) b].rr; });
+    n = std::min (n, maxOut);
+    for (int h = 0; h < n; ++h)
     {
+        const int i = hits[h];
         const auto& s = samples[(size_t) i];
         Source src;
         src.index = i;
         const int j = key - s.keyLo;
-        if ((size_t) i < keyOf.size() && j >= 0 && j < (int) keyOf[(size_t) i].size() && keyOf[(size_t) i][(size_t) j] >= 0)
+        if (! recordedOnly && (size_t) i < keyOf.size() && j >= 0 && j < (int) keyOf[(size_t) i].size() && keyOf[(size_t) i][(size_t) j] >= 0)
         {
             src.sample = &keys[(size_t) keyOf[(size_t) i][(size_t) j]];
             src.semitones = 0.0;
@@ -65,9 +68,30 @@ std::vector<Instrument::Source> Instrument::sourcesFor (int key, int velocity) c
             src.sample = &s;
             src.semitones = shiftFor (i, key);
         }
-        out.push_back (src);
+        out[h] = src;
     }
-    return out;
+    return n;
+}
+
+void Instrument::prepareForPlaying()
+{
+    bool same = octaves.size() == samples.size();
+    for (size_t i = 0; same && i < samples.size(); ++i)
+        same = ! octaves[i][0].empty() && (int) octaves[i][0][0].size() == (samples[i].length() + 1) / 2;
+    if (! same)
+    {
+        octaves.assign (samples.size(), {});
+        for (size_t i = 0; i < samples.size(); ++i)
+        {
+            octaves[i][0] = rk::halfRate (samples[i].audio);
+            octaves[i][1] = rk::halfRate (octaves[i][0]);
+            octaves[i][2] = rk::halfRate (octaves[i][1]);
+        }
+    }
+    for (auto* list : { &samples, &keys })
+        for (auto& s : *list)
+            if (s.attackEnd < 0)
+                s.attackEnd = rk::attackEndOf (s.audio, s.sampleRate);
 }
 
 void Instrument::rebuildIndex()
@@ -97,6 +121,10 @@ int64_t Instrument::memoryBytes() const
     for (auto* list : { &samples, &keys })
         for (auto& s : *list)
             b += (int64_t) s.length() * s.channels() * (int64_t) sizeof (float);
+    for (auto& o : octaves)
+        for (auto& level : o)
+            for (auto& c : level)
+                b += (int64_t) c.size() * (int64_t) sizeof (float);
     return b;
 }
 
@@ -149,6 +177,7 @@ namespace
     const EnumNames<rk::Placement> placements { { { rk::Placement::centred, "centred" }, { rk::Placement::up, "up" }, { rk::Placement::down, "down" } } };
     const EnumNames<rk::Align> aligns { { { rk::Align::perNote, "perNote" }, { rk::Align::fixedLatency, "fixedLatency" } } };
     const EnumNames<rk::Normalise> normalises { { { rk::Normalise::instrument, "instrument" }, { rk::Normalise::perSample, "perSample" }, { rk::Normalise::off, "off" } } };
+    const EnumNames<rk::Tuning> tunings { { { rk::Tuning::snap, "snap" }, { rk::Tuning::fine, "fine" }, { rk::Tuning::off, "off" } } };
     const EnumNames<rk::Algo> algos { { { rk::Algo::formant, "formant" }, { rk::Algo::classic, "classic" }, { rk::Algo::fixedTime, "fixedTime" } } };
 
     juce::var intList (const std::vector<int>& v)
@@ -180,7 +209,8 @@ namespace
     {
         rk::WavInfo w;
         w.root = root;
-        w.detuneCents = (! rendered && ins.session.tune && s.pitchConfident) ? s.detuneCents : 0.0f;
+        w.detuneCents = rendered ? 0.0f : ((ins.session.tuneOn() || s.manualTune) && s.pitchConfident ? s.detuneCents : 0.0f)
+                                           + (float) ins.session.tuneCents;
         w.loop = s.loop;
         w.hasRange = true;
         w.keyLo = keyLo;
@@ -208,7 +238,7 @@ namespace
             const auto& s = ins.samples[i];
             if (! allKeys)
             {
-                items.push_back ({ s, s.root, s.keyLo, s.keyHi, false, sampleFileName (ins.name, s) });
+                items.push_back ({ s, rk::mappedRoot (s, ins.session), s.keyLo, s.keyHi, false, sampleFileName (ins.name, s) });
                 continue;
             }
             for (int k = s.keyLo; k <= s.keyHi; ++k)
@@ -249,7 +279,7 @@ namespace
     juce::Result writeItem (const Instrument& ins, const ExportItem& it, const juce::File& f)
     {
         const auto info = infoFor (ins, it.sample, it.keyLo, it.keyHi, it.root, it.rendered);
-        if (! rk::writeWav (f.getFullPathName().toStdString(), it.sample.audio, it.sample.sampleRate, 24, info))
+        if (! rk::writeWav (f.getFullPathName().toStdString(), it.sample.audio, it.sample.sampleRate, ins.session.fileBits, info))
             return juce::Result::fail ("Impossible d'écrire "_fr + f.getFullPathName());
         return juce::Result::ok();
     }
@@ -268,7 +298,7 @@ juce::String safeName (const juce::String& n)
 
 juce::String sampleFileName (const juce::String& instrument, const rk::Sample& s)
 {
-    return safeName (instrument) + " " + juce::String (rk::noteName (s.root)) + " v" + juce::String (s.velocity)
+    return safeName (instrument) + " " + juce::String (rk::noteName (s.sent >= 0 ? s.sent : s.root)) + " v" + juce::String (s.velocity)
          + " rr" + juce::String (s.rr + 1) + ".wav";
 }
 
@@ -299,8 +329,10 @@ juce::var sessionToVar (const rk::Session& s)
     o->setProperty ("thresholdDb", s.thresholdDb);
     o->setProperty ("normalise", normalises.name (s.normalise));
     o->setProperty ("normaliseDb", s.normaliseDb);
-    o->setProperty ("tune", s.tune);
+    o->setProperty ("tuning", tunings.name (s.tuning));
+    o->setProperty ("tuneCents", s.tuneCents);
     o->setProperty ("removeDc", s.removeDc);
+    o->setProperty ("fileBits", s.fileBits);
     o->setProperty ("placement", placements.name (s.placement));
     o->setProperty ("extend", s.extend);
     o->setProperty ("algo", algos.name (s.algo));
@@ -338,8 +370,13 @@ rk::Session sessionFromVar (const juce::var& v)
     s.thresholdDb = juce::jlimit (3.0, 40.0, get (v, "thresholdDb", s.thresholdDb));
     s.normalise = normalises.value (v["normalise"], s.normalise);
     s.normaliseDb = juce::jlimit (-24.0, 0.0, get (v, "normaliseDb", s.normaliseDb));
-    s.tune = get (v, "tune", s.tune);
+    if (v.hasProperty ("tuning"))
+        s.tuning = tunings.value (v["tuning"], s.tuning);
+    else if (v.hasProperty ("tune"))   // (0.1: on or off; on was the cents only)
+        s.tuning = (bool) v["tune"] ? rk::Tuning::fine : rk::Tuning::off;
+    s.tuneCents = juce::jlimit (-1200.0, 1200.0, get (v, "tuneCents", 0.0));
     s.removeDc = get (v, "removeDc", s.removeDc);
+    s.fileBits = (int) get (v, "fileBits", (double) s.fileBits) == 32 ? 32 : 24;
     s.placement = placements.value (v["placement"], s.placement);
     s.extend = juce::jlimit (0, 127, get (v, "extend", s.extend));
     s.algo = algos.value (v["algo"], s.algo);
@@ -360,14 +397,16 @@ juce::Result save (Instrument& ins, const juce::File& folder)
     {
         s.file = sampleFileName (ins.name, s).toStdString();
         const auto f = samplesDir.getChildFile (juce::String (s.file));
-        const auto info = infoFor (ins, s, s.keyLo, s.keyHi, s.root, false);
-        if (! rk::writeWav (f.getFullPathName().toStdString(), s.audio, s.sampleRate, 24, info))
+        const auto info = infoFor (ins, s, s.keyLo, s.keyHi, rk::mappedRoot (s, ins.session), false);
+        if (! rk::writeWav (f.getFullPathName().toStdString(), s.audio, s.sampleRate, ins.session.fileBits, info))
             return juce::Result::fail ("Impossible d'écrire "_fr + f.getFullPathName());
         written.insert (f.getFileName());
 
         auto* o = new juce::DynamicObject();
         o->setProperty ("file", "Samples/" + juce::String (s.file));
         o->setProperty ("root", s.root);
+        o->setProperty ("sent", s.sent);
+        o->setProperty ("manualTune", s.manualTune);
         o->setProperty ("velocity", s.velocity);
         o->setProperty ("rr", s.rr);
         o->setProperty ("keyLo", s.keyLo);
@@ -441,6 +480,8 @@ std::shared_ptr<Instrument> load (const juce::File& where, juce::String& error)
         }
         s.file = f.getFileName().toStdString();
         s.root = juce::jlimit (0, 127, get (v, "root", info.root >= 0 ? info.root : 60));
+        s.sent = juce::jlimit (-1, 127, get (v, "sent", s.root));
+        s.manualTune = get (v, "manualTune", false);
         s.velocity = juce::jlimit (1, 127, get (v, "velocity", 127));
         s.rr = juce::jmax (0, get (v, "rr", 0));
         s.keyLo = juce::jlimit (0, 127, get (v, "keyLo", s.root));
@@ -512,7 +553,9 @@ juce::Result exportBitwig (const Instrument& ins, const juce::File& file, bool a
         auto* key = e->createNewChildElement ("key");
         key->setAttribute ("root", it.root);
         key->setAttribute ("track", "1.0000");
-        const double tune = (! it.rendered && ins.session.tune && it.sample.pitchConfident) ? -it.sample.detuneCents / 100.0 : 0.0;
+        const double tune = it.rendered ? 0.0
+                          : -(((ins.session.tuneOn() || it.sample.manualTune) && it.sample.pitchConfident ? it.sample.detuneCents : 0.0)
+                              + ins.session.tuneCents) / 100.0;
         key->setAttribute ("tune", juce::String (tune, 3));
         key->setAttribute ("low", it.keyLo);
         key->setAttribute ("high", it.keyHi);

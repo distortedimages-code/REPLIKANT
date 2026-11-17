@@ -13,6 +13,9 @@ namespace rk
     enum class Placement { centred, up, down };           // where the recorded note sits in its zone
     enum class Align { perNote, fixedLatency };            // where each recording starts
     enum class Normalise { instrument, perSample, off };
+    // RECALER: the note each recording really plays is found (anywhere within half an octave of the note sent) and
+    // mapped on its key, then played in tune; FIN: only the cents (within a semitone); NON: the notes as sent
+    enum class Tuning { snap, fine, off };
 
     struct Session
     {
@@ -43,8 +46,11 @@ namespace rk
         double thresholdDb = 12.0;    // attack detected this far above the noise floor
         Normalise normalise = Normalise::instrument;
         double normaliseDb = -0.3;
-        bool tune = true;             // measure each note's pitch and play it in tune
+        Tuning tuning = Tuning::snap;
+        double tuneCents = 0.0;       // the whole instrument retuned by hand (cents, + = higher)
+        bool tuneOn() const           { return tuning != Tuning::off; }
         bool removeDc = true;
+        int fileBits = 24;            // the WAV files: 24-bit PCM or 32-bit float
 
         // mapping and the keys in between
         Placement placement = Placement::centred;
@@ -71,6 +77,9 @@ namespace rk
 
     std::vector<Zone> keyZones (const std::vector<int>& roots, Placement, int lowestKey, int highestKey);
     std::vector<Zone> velocityZones (const std::vector<int>& velocities);
+
+    // the note a sample is mapped on: what it plays (tuning on) or the note sent (tuning off)
+    int mappedRoot (const Sample&, const Session&);
 
     // keys and velocities for each sample, from the roots and velocities present
     void assignZones (std::vector<Sample>&, const Session&);

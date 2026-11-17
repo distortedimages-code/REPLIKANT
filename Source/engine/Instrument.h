@@ -25,6 +25,8 @@ struct Instrument
     std::vector<std::vector<int>> keyOf;      // per sample: index in `keys` for key keyLo + j, -1 = play the sample itself
     std::array<std::vector<int>, 128> byKey;  // samples whose zone holds the key
     juce::File folder;                        // where it is saved (empty = not yet)
+    // per recording, the same an octave, two and three lower in rate (a voice pitched far up reads the nearest)
+    std::vector<std::array<rk::Channels, 3>> octaves;
     rk::NoiseFloor noise;
 
     // what plays for a key and velocity: the sample (or its rendered key) and the shift still to apply live
@@ -34,13 +36,17 @@ struct Instrument
         double semitones = 0.0;
         int index = -1;                        // in `samples`
     };
-    // the round-robin takes answering (key, velocity), in rr order
-    std::vector<Source> sourcesFor (int key, int velocity) const;
+    // the round-robin takes answering (key, velocity), in rr order, into `out`; how many (no allocation).
+    // recordedOnly: the recordings themselves, never their rendered keys (played in varispeed)
+    static constexpr int maxSources = 64;
+    int sourcesFor (int key, int velocity, Source* out, int maxOut, bool recordedOnly = false) const;
 
     // the live shift of sample i at key k (k - root - its measured detune when tuning is on)
     double shiftFor (int sampleIndex, int key) const;
 
     void rebuildIndex();                       // byKey from the zones; keyOf reset to -1 if sizes changed
+    // what playing needs beside the audio: the octaves of the recordings, the attacks measured (worker thread)
+    void prepareForPlaying();
     int64_t memoryBytes() const;
     int countKeysToRender() const;
     bool hasLoops() const;

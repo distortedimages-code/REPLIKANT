@@ -140,7 +140,7 @@ int main()
     // playing: a key between two recordings, in tune
     {
         Player player;
-        player.prepare (sr);
+        player.prepare (sr, 512);
         player.setInstrument (ins.get());
         juce::AudioBuffer<float> out (2, 512);
         std::vector<float> heard;
@@ -149,7 +149,7 @@ int main()
         for (int b = 0; b < 120; ++b)
         {
             out.clear();
-            player.render (out, midi);
+            player.render (out, midi, {});
             midi.clear();
             for (int i = 0; i < 512; ++i)
                 heard.push_back (out.getSample (0, i));

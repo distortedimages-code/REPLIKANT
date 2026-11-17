@@ -40,6 +40,13 @@ namespace rk
     // measured with YIN on a few windows of [from, to) and kept when they agree.
     Pitch detectPitch (const std::vector<float>& mono, double sampleRate, double expectedHz, int from, int to);
 
+    // The note a sound really plays near the note sent (sentHz): anywhere within half an octave either side (an
+    // oscillator badly tuned, a patch a few semitones off). Its pitch class comes from one long window (the normalised
+    // autocorrelation by FFT, McLeod's key maxima: the shortest strong period), its octave is the one closest to the
+    // note sent (an octave switch on the synth stays on its key), then it is refined as detectPitch does.
+    // cents: against sentHz (up to +-600).
+    Pitch detectPitchWide (const std::vector<float>& mono, double sampleRate, double sentHz, int from, int to);
+
     // Fades, in place
     void fadeIn (Channels&, int samples);
     void fadeOutEnd (Channels&, int samples);

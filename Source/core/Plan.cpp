@@ -127,12 +127,17 @@ std::vector<Zone> velocityZones (const std::vector<int>& vIn)
     return z;
 }
 
+int mappedRoot (const Sample& x, const Session& s)
+{
+    return s.tuneOn() || x.manualTune || x.sent < 0 ? x.root : x.sent;
+}
+
 void assignZones (std::vector<Sample>& samples, const Session& s)
 {
     std::vector<int> roots, vels;
     for (auto& x : samples)
     {
-        roots.push_back (x.root);
+        roots.push_back (mappedRoot (x, s));
         vels.push_back (x.velocity);
     }
     std::sort (roots.begin(), roots.end());
@@ -147,7 +152,7 @@ void assignZones (std::vector<Sample>& samples, const Session& s)
     const auto vz = velocityZones (vels);
     for (auto& x : samples)
     {
-        const auto ri = (size_t) (std::lower_bound (roots.begin(), roots.end(), x.root) - roots.begin());
+        const auto ri = (size_t) (std::lower_bound (roots.begin(), roots.end(), mappedRoot (x, s)) - roots.begin());
         const auto vi = (size_t) (std::lower_bound (vels.begin(), vels.end(), x.velocity) - vels.begin());
         x.keyLo = kz[ri].lo;
         x.keyHi = kz[ri].hi;

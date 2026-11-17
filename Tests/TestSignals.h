@@ -21,7 +21,8 @@ namespace test
         double lfoHz = 0.0, lfoDepth = 0.0;                      // amplitude wobble
         double noiseDb = -100.0;
         double level = 0.5;
-        double tilt = 1.0;           // harmonic h at 1/h^tilt: 1 = sawtooth, 0 = flat (pulse train)
+        double tilt = 1.0;
+        double subLevel = 0.0;       // a square an octave down (a synth's sub-oscillator)           // harmonic h at 1/h^tilt: 1 = sawtooth, 0 = flat (pulse train)
         int channels = 2;
         int delay = 0;               // samples of silence first (latency)
     };
@@ -65,6 +66,9 @@ namespace test
                 double s = 0.0;
                 for (int h = 1; h <= H; ++h)
                     s += amp[(size_t) h] * std::sin (pi2 * t.hz * h * time + 0.3 * h);
+                if (t.subLevel > 0.0)
+                    for (int h = 1; h * t.hz * 0.5 < t.sr * 0.45; h += 2)
+                        s += t.subLevel * 0.6 / h * std::sin (pi2 * t.hz * 0.5 * h * time);
                 v = t.level * env * s;
             }
             for (int c = 0; c < t.channels; ++c)

@@ -35,7 +35,8 @@ namespace rk
 
     struct Sample
     {
-        int root = 60;                // MIDI note that was played
+        int root = 60;                // the note it plays (the note sent, or the one found when tuning is RECALER)
+        int sent = -1;                // MIDI note that was sent to the synth (-1: unknown, the root)
         int velocity = 127;           // velocity it was played with
         int rr = 0;                   // round-robin take
         int keyLo = 60, keyHi = 60;   // zone of keys
@@ -46,7 +47,9 @@ namespace rk
         Loop loop;
         float detuneCents = 0.0f;     // measured pitch minus the note, in cents
         bool pitchConfident = false;  // the measure is trustworthy (a clear pitch was found)
+        bool manualTune = false;      // root and detune set by hand: never measured again
         float peak = 0.0f;
+        int attackEnd = -1;           // where its attack ends (frames; 0 = no sharp attack, -1 = not measured yet)
         std::string file;             // file name in the instrument's folder
 
         int length() const            { return audio.empty() ? 0 : (int) audio[0].size(); }
@@ -57,5 +60,13 @@ namespace rk
     // a mono mix of all the channels
     std::vector<float> mixDown (const Channels&, int start = 0, int count = -1);
     float peakOf (const Channels&);
+
+    // The end of a sample's attack: its envelope's first peak (a few ms after it), when it comes within 80 ms of the
+    // start; 0 for a slow attack (nothing to keep apart)
+    int attackEndOf (const Channels&, double sampleRate);
+
+    // The same sound an octave lower in rate (half the frames), through a long halfband low pass (Kaiser, about
+    // 120 dB down above the new band), centred: frame m of the result is at frame 2m of the input
+    Channels halfRate (const Channels&);
     void applyGain (Channels&, float);
 }

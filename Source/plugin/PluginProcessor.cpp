@@ -26,19 +26,64 @@ struct ReplikantProcessor::Sink : Recorder::MidiSink
     }
 };
 
+namespace
+{
+    // the name a host shows: the setting with its section (the rows show it under the section's title)
+    juce::String hostName (int id)
+    {
+        const auto name = juce::String::fromUTF8 (snd::def (id).name);
+        auto in = [id] (int a, int b) { return id >= a && id <= b; };
+        if (id >= snd::m1Type)
+            return "M" + juce::String ((id - snd::m1Type) / snd::modSettings + 1) + " " + name;
+        if (in (snd::attack, snd::release))      return "Ampli " + name;
+        if (in (snd::fType, snd::quality))       return "Filtre " + name;
+        if (in (snd::fEnv, snd::velCutoff))      return "Env. filtre " + name;
+        if (in (snd::dAmt, snd::dMix))           return "Drive " + name;
+        if (in (snd::spVoices, snd::spMix))      return "Spectre " + name;
+        if (in (snd::piA, snd::piMix))           return "Pitch " + name;
+        if (in (snd::chMode, snd::chMix))        return "Chorus " + name;
+        if (in (snd::crBits, snd::crMix))        return "Crush " + name;
+        if (in (snd::rvSize, snd::rvMix))        return "Espace " + name;
+        return name;
+    }
+
+    // the settings that were there in 0.1 keep their version
+    int idVersion (int id)
+    {
+        return id == snd::volume || id == snd::attack || id == snd::release || id == snd::velocity || id == snd::bend ? 1 : 2;
+    }
+}
+
 juce::AudioProcessorValueTreeState::ParameterLayout ReplikantProcessor::layout()
 {
     using namespace juce;
     AudioProcessorValueTreeState::ParameterLayout l;
-    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "volume", 1 }, "Volume", NormalisableRange<float> (-36.0f, 12.0f, 0.1f), 0.0f,
-                                                  AudioParameterFloatAttributes().withLabel ("dB")));
-    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "attack", 1 }, "Attaque", NormalisableRange<float> (0.0f, 4000.0f, 0.1f, 0.3f), 1.0f,
-                                                  AudioParameterFloatAttributes().withLabel ("ms")));
-    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "release", 1 }, String::fromUTF8 ("Rel\xc3\xa2" "che"), NormalisableRange<float> (5.0f, 10000.0f, 0.1f, 0.3f), 300.0f,
-                                                  AudioParameterFloatAttributes().withLabel ("ms")));
-    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "velocity", 1 }, String::fromUTF8 ("V\xc3\xa9locit\xc3\xa9"), NormalisableRange<float> (0.0f, 1.0f), 0.7f));
-    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "bend", 1 }, "Pitch bend", NormalisableRange<float> (0.0f, 12.0f, 1.0f), 2.0f,
-                                                  AudioParameterFloatAttributes().withLabel ("st")));
+    for (int i = 0; i < snd::count; ++i)
+    {
+        const auto& d = snd::def (i);
+        const ParameterID pid { d.id, idVersion (i) };
+        const auto name = hostName (i);
+        if (d.kind == snd::Kind::choice)
+        {
+            StringArray c;
+            for (auto& t : snd::choicesOf (i))
+                c.add (String::fromUTF8 (t.c_str()));
+            l.add (std::make_unique<AudioParameterChoice> (pid, name, c, (int) d.def));
+        }
+        else if (d.kind == snd::Kind::toggle)
+            l.add (std::make_unique<AudioParameterBool> (pid, name, d.def > 0.5f));
+        else
+        {
+            NormalisableRange<float> range (d.lo, d.hi,
+                [i] (float, float, float t) { return snd::fromNorm (i, t); },
+                [i] (float, float, float v) { return snd::toNorm (i, v); },
+                [i] (float, float, float v) { return snd::legal (i, v); });
+            auto attributes = AudioParameterFloatAttributes()
+                .withLabel (d.unit)
+                .withStringFromValueFunction ([i] (float v, int) { return String::fromUTF8 (snd::text (i, v).c_str()); });
+            l.add (std::make_unique<AudioParameterFloat> (pid, name, range, d.def, attributes));
+        }
+    }
     return l;
 }
 
@@ -51,11 +96,9 @@ ReplikantProcessor::ReplikantProcessor()
       updater ([this]() -> juce::PropertiesFile& { return *globalSettings; })
 {
     instrumentName = "Mon synthé"_fr;
-    pVolume = params.getRawParameterValue ("volume");
-    pAttack = params.getRawParameterValue ("attack");
-    pRelease = params.getRawParameterValue ("release");
-    pVelocity = params.getRawParameterValue ("velocity");
-    pBend = params.getRawParameterValue ("bend");
+    for (int i = 0; i < snd::count; ++i)
+        player.bind (i, params.getRawParameterValue (snd::def (i).id));
+    clock.bindTempo (params.getRawParameterValue ("tempo"));
 
     juce::PropertiesFile::Options o;
     o.applicationName = "REPLIKANT";
@@ -99,7 +142,8 @@ bool ReplikantProcessor::isBusesLayoutSupported (const BusesLayout& l) const
 void ReplikantProcessor::prepareToPlay (double sr, int block)
 {
     sampleRate = sr;
-    player.prepare (sr);
+    player.prepare (sr, block);
+    inputCopy.setSize (2, juce::jmax (block, 4096) * 2, false, true, false);
     testSynth.prepare (sr);
     toSynth.reset (sr);
     toPlayer.reset (sr);
@@ -132,12 +176,6 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
             hasPending = false;
         }
     }
-    player.params.gainDb = pVolume->load();
-    player.params.attackMs = pAttack->load();
-    player.params.releaseMs = pRelease->load();
-    player.params.velocity = pVelocity->load();
-    player.params.bendRange = pBend->load();
-
     outMidi.clear();
     Sink sink (*this);
     const bool sampling = recorder.isRunning();
@@ -191,14 +229,42 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     if (numIn > 0 && n <= synthBuffer.getNumSamples())
         recorder.capture (chans, numIn, n);
 
+    // the transport (the modulators and the clock follow it)
+    Player::Transport transport;
+    if (auto* ph = getPlayHead())
+        if (auto pos = ph->getPosition())
+        {
+            transport.playing = pos->getIsPlaying();
+            if (auto b = pos->getBpm())
+                transport.bpm = *b;
+            if (auto q = pos->getPpqPosition())
+                transport.ppq = *q;
+            else
+                transport.playing = false;
+        }
+    if (transport.bpm <= 0.0)
+        transport.bpm = player.get (snd::tempo);
+
+    // the input, kept before the output is written over it (same buffer)
+    const int mon = sampling ? 1 : monitorAudio.load();
+    const float* kept[2] = { nullptr, nullptr };
+    if (numIn > 0 && n <= inputCopy.getNumSamples())
+    {
+        for (int c = 0; c < numIn; ++c)
+        {
+            inputCopy.copyFrom (c, 0, chans[c], n);
+            kept[c] = inputCopy.getReadPointer (c);
+        }
+    }
+
     // what is heard: the synth (monitor) and the instrument
     auto out = getBusBuffer (buffer, false, 0);
-    const bool monitor = monitorAudio.load() || sampling;
+    const bool direct = mon == 1;
     if (src == (int) Source::testSynth)
     {
         for (int c = 0; c < out.getNumChannels(); ++c)
         {
-            if (monitor && n <= synthBuffer.getNumSamples())
+            if (direct && n <= synthBuffer.getNumSamples())
                 out.copyFrom (c, 0, synthBuffer, juce::jmin (c, 1), 0, n);
             else
                 out.clear (c, 0, n);
@@ -207,11 +273,11 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     else if (src == (int) Source::sidechain)
     {
         // the main input goes through untouched; the sidechain is only heard when monitoring
-        if (monitor && numIn > 0)
+        if (direct && numIn > 0)
             for (int c = 0; c < out.getNumChannels(); ++c)
                 out.addFrom (c, 0, chans[juce::jmin (c, numIn - 1)], n);
     }
-    else if (! monitor)
+    else if (! direct)
         out.clear();
     for (int c = out.getNumChannels(); c < buffer.getNumChannels(); ++c)
         buffer.clear (c, 0, n);
@@ -221,8 +287,9 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     if (! thruAudio.load())
         playMidi.addEvents (midi, 0, n, 0);
     if (! sampling)
-        player.render (out, playMidi);
+        player.render (out, playMidi, transport, kept[0] != nullptr ? kept : nullptr, numIn, mon == 2);
 
+    clock.process (transport.playing, transport.ppq, transport.bpm, n, sampleRate, outMidi);
     midi.swapWith (outMidi);
 }
 
@@ -258,6 +325,13 @@ InstrumentPtr ReplikantProcessor::getInstrument() const
 void ReplikantProcessor::timerCallback()
 {
     collectOldInstruments();
+    // the clock a session started stops with it
+    if (clockStartedBySampling && ! isSampling())
+    {
+        clockStartedBySampling = false;
+        clock.setRunning (false);
+        sendChangeMessage();
+    }
     // the mapping settings of the instrument: re-rendered once they stop moving
     if (mappingDirty && --mappingCountdown <= 0)
     {
@@ -270,7 +344,8 @@ void ReplikantProcessor::timerCallback()
             next->session.algo = session.algo;
             next->session.formant = session.formant;
             next->session.renderKeys = session.renderKeys;
-            next->session.tune = session.tune;
+            next->session.tuning = session.tuning;
+            next->session.tuneCents = session.tuneCents;
             rk::assignZones (next->samples, next->session);
             next->keys.clear();
             next->keyOf.clear();
@@ -336,6 +411,11 @@ bool ReplikantProcessor::startSampling (juce::String& why)
         why = "La session n'a pas pu démarrer."_fr;
         return false;
     }
+    if (clockWithSampling && clock.getMode() == MidiClock::Mode::internal && ! clock.isRunning())
+    {
+        clock.setRunning (true);
+        clockStartedBySampling = true;
+    }
     sendChangeMessage();
     return true;
 }
@@ -372,7 +452,8 @@ void ReplikantProcessor::openInstrument (const juce::File& f)
             session.algo = ins->session.algo;
             session.formant = ins->session.formant;
             session.renderKeys = ins->session.renderKeys;
-            session.tune = ins->session.tune;
+            session.tuning = ins->session.tuning;
+            session.tuneCents = ins->session.tuneCents;
             settingsChanged();
         });
         worker.renderAndPublish (ins, true);
@@ -493,6 +574,9 @@ void ReplikantProcessor::loadGlobalSettings()
     }
     sourceAudio = (int) options.source;
     hostMidiOut = options.midiPort == "host";
+    clock.setDestination (s.getValue ("clockPort"), s.getValue ("clockPortName"));
+    clock.setMode ((MidiClock::Mode) juce::jlimit (0, 1, s.getIntValue ("clockMode", 0)));
+    clockWithSampling = s.getBoolValue ("clockWithSampling", false);
 }
 
 void ReplikantProcessor::saveGlobalSettings()
@@ -503,6 +587,10 @@ void ReplikantProcessor::saveGlobalSettings()
     s.setValue ("midiChannel", options.channel);
     s.setValue ("source", (int) options.source);
     s.setValue ("session", juce::JSON::toString (instrumentio::sessionToVar (session), true));
+    s.setValue ("clockPort", clock.destinationId());
+    s.setValue ("clockPortName", clock.destinationName());
+    s.setValue ("clockMode", (int) clock.getMode());
+    s.setValue ("clockWithSampling", clockWithSampling);
     s.saveIfNeeded();
 }
 
@@ -521,6 +609,8 @@ void ReplikantProcessor::getStateInformation (juce::MemoryBlock& dest)
         xml.setAttribute ("instrument", ins->folder.getFullPathName());
     if (auto st = params.copyState().createXml())
         xml.addChildElement (st.release());
+    xml.setAttribute ("routes", juce::JSON::toString (modsToVar(), true));
+    xml.setAttribute ("scenes", juce::JSON::toString (scenesToVar(), true));
     copyXmlToBinary (xml, dest);
 }
 
@@ -535,10 +625,14 @@ void ReplikantProcessor::setStateInformation (const void* data, int size)
     options.source = (Source) juce::jlimit (0, 2, xml->getIntAttribute ("source", (int) options.source));
     options.channel = juce::jlimit (1, 16, xml->getIntAttribute ("channel", options.channel));
     options.program = juce::jlimit (-1, 127, xml->getIntAttribute ("program", options.program));
-    options.monitor = xml->getBoolAttribute ("monitor", options.monitor);
+    options.monitor = juce::jlimit (0, 2, xml->getIntAttribute ("monitor", options.monitor));
     options.thru = xml->getBoolAttribute ("thru", options.thru);
     if (auto* st = xml->getChildByName (params.state.getType()))
         params.replaceState (juce::ValueTree::fromXml (*st));
+    // the routes, steps and loops of the modulators (not parameters)
+    if (xml->hasAttribute ("routes"))
+        modsFromVar (juce::JSON::parse (xml->getStringAttribute ("routes")));
+    scenesFromVar (juce::JSON::parse (xml->getStringAttribute ("scenes")));
     settingsChanged();
     const juce::File f (xml->getStringAttribute ("instrument"));
     if (xml->hasAttribute ("instrument"))
@@ -548,6 +642,162 @@ void ReplikantProcessor::setStateInformation (const void* data, int size)
         else
             juce::MessageManager::callAsync ([this, f] { if (onMessage) onMessage ("Instrument introuvable : "_fr + f.getFullPathName()); });
     }
+}
+
+//==============================================================================
+void ReplikantProcessor::setClockDestination (const juce::String& id, const juce::String& name)
+{
+    clock.setDestination (id, name);
+    saveGlobalSettings();
+    sendChangeMessage();
+}
+
+void ReplikantProcessor::setClockMode (MidiClock::Mode m)
+{
+    clock.setMode (m);
+    saveGlobalSettings();
+    sendChangeMessage();
+}
+
+void ReplikantProcessor::setClockRunning (bool on)
+{
+    clock.setRunning (on);
+    clockStartedBySampling = false;
+    sendChangeMessage();
+}
+
+//============================================================================== the sound
+juce::var ReplikantProcessor::modsToVar() const
+{
+    juce::Array<juce::var> mods;
+    for (int m = 0; m < snd::numMods; ++m)
+    {
+        auto* o = new juce::DynamicObject();
+        juce::Array<juce::var> routes, steps;
+        for (auto& r : player.routes[(size_t) m])
+        {
+            const int d = r.dest.load();
+            if (d < 0)
+                continue;
+            auto* ro = new juce::DynamicObject();
+            ro->setProperty ("to", juce::String (snd::def (d).id));
+            ro->setProperty ("amount", (double) r.amount.load());
+            routes.add (juce::var (ro));
+        }
+        for (auto& st : player.steps[(size_t) m])
+            steps.add ((double) st.load());
+        o->setProperty ("routes", routes);
+        o->setProperty ("steps", steps);
+        o->setProperty ("seed", (int) player.seeds[(size_t) m].load());
+        mods.add (juce::var (o));
+    }
+    return mods;
+}
+
+void ReplikantProcessor::modsFromVar (const juce::var& v)
+{
+    if (! v.isArray())
+        return;
+    for (int m = 0; m < snd::numMods && m < v.size(); ++m)
+    {
+        const auto& o = v[m];
+        player.clearRoutes (m);
+        if (auto* rs = o["routes"].getArray())
+            for (auto& r : *rs)
+            {
+                const int d = snd::find (r["to"].toString().toStdString());
+                if (d >= 0 && snd::def (d).modulatable)
+                    player.setRoute (m, d, (float) (double) r["amount"]);
+            }
+        if (auto* st = o["steps"].getArray())
+            for (int i = 0; i < snd::maxSteps && i < st->size(); ++i)
+                player.steps[(size_t) m][(size_t) i] = juce::jlimit (-1.0f, 1.0f, (float) (double) (*st)[i]);
+        if (o.hasProperty ("seed"))
+            player.seeds[(size_t) m] = (uint32_t) (int) o["seed"];
+    }
+}
+
+juce::var ReplikantProcessor::soundToVar() const
+{
+    auto* o = new juce::DynamicObject();
+    auto* p = new juce::DynamicObject();
+    for (int i = 0; i < snd::count; ++i)
+        if (i != snd::tempo)
+            p->setProperty (snd::def (i).id, (double) player.get (i));
+    o->setProperty ("params", juce::var (p));
+    o->setProperty ("mods", modsToVar());
+    o->setProperty ("scenes", scenesToVar());
+    return juce::var (o);
+}
+
+void ReplikantProcessor::soundFromVar (const juce::var& v)
+{
+    if (! v.isObject())
+        return;
+    if (auto* p = v["params"].getDynamicObject())
+        for (int i = 0; i < snd::count; ++i)
+        {
+            if (i == snd::tempo)
+                continue;
+            const auto& d = snd::def (i);
+            auto* param = params.getParameter (d.id);
+            if (param == nullptr)
+                continue;
+            const float value = p->hasProperty (d.id) ? (float) (double) p->getProperty (d.id) : d.def;
+            param->setValueNotifyingHost (param->convertTo0to1 (snd::legal (i, value)));
+        }
+    modsFromVar (v["mods"]);
+    scenesFromVar (v["scenes"]);
+    sendChangeMessage();
+}
+
+juce::var ReplikantProcessor::scenesToVar() const
+{
+    juce::Array<juce::var> all;
+    for (int sc = 0; sc < snd::numScenes; ++sc)
+    {
+        auto* o = new juce::DynamicObject();
+        for (int i = 0; i < snd::count; ++i)
+        {
+            const float v = player.sceneLock (sc, i);
+            if (! std::isnan (v))
+                o->setProperty (snd::def (i).id, (double) v);
+        }
+        all.add (juce::var (o));
+    }
+    return all;
+}
+
+void ReplikantProcessor::scenesFromVar (const juce::var& v)
+{
+    for (int sc = 0; sc < snd::numScenes; ++sc)
+    {
+        player.clearScene (sc);
+        if (! v.isArray() || sc >= v.size())
+            continue;
+        if (auto* o = v[sc].getDynamicObject())
+            for (auto& prop : o->getProperties())
+            {
+                const int id = snd::find (prop.name.toString().toStdString());
+                if (id >= 0)
+                    player.setSceneLock (sc, id, (float) (double) prop.value);
+            }
+    }
+}
+
+void ReplikantProcessor::resetSound()
+{
+    auto* o = new juce::DynamicObject();
+    o->setProperty ("params", juce::var (new juce::DynamicObject()));
+    juce::Array<juce::var> mods;
+    for (int m = 0; m < snd::numMods; ++m)
+        mods.add (juce::var (new juce::DynamicObject()));
+    o->setProperty ("mods", mods);
+    soundFromVar (juce::var (o));
+    for (int m = 0; m < snd::numMods; ++m)
+        player.clearRoutes (m);
+    for (int sc = 0; sc < snd::numScenes; ++sc)
+        player.clearScene (sc);
 }
 
 juce::AudioProcessorEditor* ReplikantProcessor::createEditor()

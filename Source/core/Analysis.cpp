@@ -1,7 +1,10 @@
 #include "Analysis.h"
 
+#include "signalsmith-linear/fft.h"
+
 #include <algorithm>
 #include <cmath>
+#include <complex>
 
 namespace rk
 {
@@ -229,6 +232,106 @@ Pitch detectPitch (const std::vector<float>& m, double sr, double expectedHz, in
             break;                          // clearly periodic already
     }
     return best;
+}
+
+Pitch detectPitchWide (const std::vector<float>& m, double sr, double sentHz, int from, int to)
+{
+    Pitch none;
+    if (sentHz <= 0.0 || m.empty())
+        return none;
+    to = std::min (to, (int) m.size());
+    from = std::max (0, from);
+    const double P = sr / sentHz;
+    const int minLag = std::max (2, (int) std::floor (P * 0.69));       // half an octave up (and a little)
+    int maxLag = (int) std::ceil (P * 4.4);                             // half an octave down, two octaves under (subs)
+    const int avail = to - from;
+    if (avail < (int) (P * 3.0) || avail < 256)
+        return detectPitch (m, sr, sentHz, from, to);
+    const int W = std::min (avail, std::max ((int) (sr * 0.6), 6 * maxLag));
+    maxLag = std::min (maxLag, W / 2);
+    if (maxLag <= minLag + 2)
+        return detectPitch (m, sr, sentHz, from, to);
+    const int start = from + (avail - W) / 2;
+
+    // autocorrelation by FFT (zero-padded: linear, not circular)
+    int N = 1;
+    while (N < 2 * W)
+        N <<= 1;
+    signalsmith::linear::Pow2FFT<float> fft ((size_t) N);
+    std::vector<std::complex<float>> a ((size_t) N), b ((size_t) N);
+    double mean = 0.0;
+    for (int i = 0; i < W; ++i)
+        mean += m[(size_t) (start + i)];
+    mean /= W;
+    for (int i = 0; i < W; ++i)
+        a[(size_t) i] = (float) (m[(size_t) (start + i)] - mean);
+    fft.fft (a.data(), b.data());
+    for (auto& v : b)
+        v = std::complex<float> (std::norm (v), 0.0f);
+    fft.ifft (b.data(), a.data());
+    std::vector<double> cum ((size_t) W + 1, 0.0);
+    for (int i = 0; i < W; ++i)
+    {
+        const double x = m[(size_t) (start + i)] - mean;
+        cum[(size_t) i + 1] = cum[(size_t) i] + x * x;
+    }
+    auto nsdf = [&] (int t)
+    {
+        const double e = cum[(size_t) (W - t)] + (cum[(size_t) W] - cum[(size_t) t]);
+        return e > 1.0e-20 ? 2.0 * (double) a[(size_t) t].real() / (double) N / e : 0.0;
+    };
+    // the key maxima: the highest point of each positive lobe after the first negative stretch
+    std::vector<std::pair<int, double>> keys;
+    int t = 1;
+    while (t <= maxLag && nsdf (t) > 0.0)
+        ++t;
+    int bestT = -1;
+    double bestV = -1.0;
+    for (; t <= maxLag + 1; ++t)
+    {
+        const double v = t <= maxLag ? nsdf (t) : -1.0;
+        if (v > 0.0)
+        {
+            if (v > bestV)
+                bestV = v, bestT = t;
+        }
+        else if (bestT >= 0)
+        {
+            if (bestT >= minLag)
+                keys.push_back ({ bestT, bestV });
+            bestT = -1;
+            bestV = -1.0;
+        }
+    }
+    double top = 0.0;
+    for (auto& k : keys)
+        top = std::max (top, k.second);
+    if (keys.empty() || top < 0.4)
+        return detectPitch (m, sr, sentHz, from, to);
+    int lag = keys.front().first;
+    for (auto& k : keys)
+        if (k.second >= 0.85 * top)
+        {
+            lag = k.first;
+            break;
+        }
+    double off = 0.0;
+    {
+        const double y0 = nsdf (lag - 1), y1 = nsdf (lag), y2 = nsdf (lag + 1), den = y0 - 2.0 * y1 + y2;
+        if (std::abs (den) > 1.0e-12)
+            off = std::clamp (0.5 * (y0 - y2) / den, -0.5, 0.5);
+    }
+    // its pitch class against the note sent, in the octave closest to it
+    double semis = 12.0 * std::log2 (P / ((double) lag + off));
+    semis -= 12.0 * std::round (semis / 12.0);
+    // refined around there (the narrow search also sees a sub an octave or two down)
+    auto p = detectPitch (m, sr, sentHz * std::pow (2.0, semis / 12.0), from, to);
+    if (! p.ok)
+        return p;
+    p.cents = 1200.0 * std::log2 (p.hz / sentHz);
+    p.cents -= 1200.0 * std::round (p.cents / 1200.0);   // (the refined pitch's octave folded back next to the note sent)
+    p.ok = std::abs (p.cents) <= 660.0;
+    return p;
 }
 
 void fadeIn (Channels& ch, int n)

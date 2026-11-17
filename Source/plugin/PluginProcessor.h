@@ -10,6 +10,7 @@
 #include "../engine/Player.h"
 #include "../engine/TestSynth.h"
 #include "Updater.h"
+#include "MidiClock.h"
 
 class ReplikantProcessor : public juce::AudioProcessor,
                            public juce::ChangeBroadcaster,
@@ -25,7 +26,7 @@ public:
         juce::String midiPortName;
         int channel = 1;
         int program = -1;
-        bool monitor = true;            // the input is heard
+        int monitor = 1;                // the input: 0 not heard, 1 heard as it is, 2 through the effects (FX mode)
         bool thru = false;              // notes played into REPLIKANT go to the synth instead of the instrument
     };
 
@@ -37,6 +38,7 @@ public:
     void releaseResources() override {}
     bool isBusesLayoutSupported (const BusesLayout&) const override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    using juce::AudioProcessor::processBlock;
 
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override                          { return true; }
@@ -78,6 +80,18 @@ public:
     // the editor's keyboard
     void audition (int note, int velocity, bool on);
 
+    // the MIDI clock
+    MidiClock clock;
+    bool clockWithSampling = false;               // a sampling session starts and stops it
+    void setClockDestination (const juce::String& id, const juce::String& name);
+    void setClockMode (MidiClock::Mode);
+    void setClockRunning (bool);
+
+    // the sound (the player's settings, routes and steps), as a value (saved with the instrument, in the project)
+    juce::var soundToVar() const;
+    void soundFromVar (const juce::var&);
+    void resetSound();
+
     Worker::Status status() const                    { return worker.getStatus(); }
     float inputLevel() const                         { return recorder.getMeter(); }
     Recorder::Phase phase() const                    { return recorder.getPhase(); }
@@ -96,6 +110,10 @@ private:
     void publish (std::shared_ptr<Instrument>);
     void collectOldInstruments();
     void loadGlobalSettings();
+    juce::var modsToVar() const;
+    void modsFromVar (const juce::var&);
+    juce::var scenesToVar() const;
+    void scenesFromVar (const juce::var&);
     void saveGlobalSettings();
     static juce::AudioProcessorValueTreeState::ParameterLayout layout();
 
@@ -119,18 +137,15 @@ private:
     std::atomic<juce::MidiOutput*> port { nullptr };
     std::atomic<bool> hostMidiOut { false };
     std::atomic<int> sourceAudio { 0 };      // Source, for the audio thread
-    std::atomic<bool> monitorAudio { true }, thruAudio { false };
+    std::atomic<int> monitorAudio { 1 };
+    std::atomic<bool> thruAudio { false };
     juce::MidiMessageCollector toSynth, toPlayer;   // from the editor
     juce::MidiBuffer playMidi, outMidi, synthMidi;
-    juce::AudioBuffer<float> synthBuffer;
+    juce::AudioBuffer<float> synthBuffer, inputCopy;
     bool wasSampling = false;
 
     double sampleRate = 48000.0;
-    std::atomic<float>* pVolume = nullptr;
-    std::atomic<float>* pAttack = nullptr;
-    std::atomic<float>* pRelease = nullptr;
-    std::atomic<float>* pVelocity = nullptr;
-    std::atomic<float>* pBend = nullptr;
+    bool clockStartedBySampling = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ReplikantProcessor)
 };

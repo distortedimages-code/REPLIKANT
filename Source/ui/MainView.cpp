@@ -186,8 +186,8 @@ void MainView::buildRows()
         add (g, num ("Programme", -1, 127, 1, [&o] { return (double) o.program; }, [&o] (double v) { o.program = (int) v; },
                      [] (double v) { return v < 0 ? juce::String ("AUCUN") : juce::String ((int) v + 1); }))
             .setTooltip ("Un changement de programme envoyé avant la session (AUCUN : le son réglé sur le synthé)."_fr);
-        add (g, choice ("Écoute"_fr, { "OUI", "NON" }, [&o] { return o.monitor ? 0 : 1; }, [&o] (int v) { o.monitor = v == 0; }))
-            .setTooltip ("Entendre le synthé à travers REPLIKANT."_fr);
+        add (g, choice ("Écoute"_fr, { "NON", "DIRECTE", "PAR LES EFFETS" }, [&o] { return o.monitor; }, [&o] (int v) { o.monitor = v; }))
+            .setTooltip ("Entendre le synthé (ou la piste) à travers REPLIKANT : tel quel, ou passé dans le filtre et les effets du player (multi-effet). Pendant une session, toujours tel quel."_fr);
     }
     groups.push_back ({ "Notes", 0, {}, {} });
     {
@@ -261,8 +261,8 @@ void MainView::buildRows()
         auto& t = add (g, num ("Cible", -24.0, 0.0, 0.1, [&s] { return s.normaliseDb; }, [&s] (double v) { s.normaliseDb = v; }, db));
         t.enabled = [&s] { return s.normalise != rk::Normalise::off; };
         add (g, choice ("Retirer le DC", { "OUI", "NON" }, [&s] { return s.removeDc ? 0 : 1; }, [&s] (int v) { s.removeDc = v == 0; }));
-        add (g, choice ("Accordage", { "AUTO", "NON" }, [&s] { return s.tune ? 0 : 1; }, [&s] (int v) { s.tune = v == 0; }), true)
-            .setTooltip ("Mesure la justesse de chaque note enregistrée et la corrige en jouant (un analogique est rarement pile)."_fr);
+        add (g, choice ("Accordage", { "RECALER", "FIN", "NON" }, [&s] { return (int) s.tuning; }, [&s] (int v) { s.tuning = (rk::Tuning) v; }), true)
+            .setTooltip ("RECALER : la note vraiment jouée est retrouvée (même à quelques demi-tons, un oscillateur mal réglé) et remise sur sa touche, puis jouée juste. FIN : seulement les cents. NON : les notes telles qu'envoyées."_fr);
     }
     //------------------------------------------------------------------ transposition
     groups.push_back ({ "Transposition", 2, {}, {} });
@@ -301,8 +301,8 @@ void MainView::buildRows()
         paramRow ("Relâche"_fr, "release", 5.0, 10000.0, 0.0, [] (double v) { return ui::ms (v / 1000.0); }, true);
         paramRow ("Vélocité"_fr, "velocity", 0.0, 1.0, 0.01, pct, false);
         paramRow ("Pitch bend", "bend", 0.0, 12.0, 1.0, semis, false);
-        auto& l = add (g, choice ("Boucles", { "OUI", "NON" }, [this] { return proc.player.params.loops.load() ? 0 : 1; },
-                                  [this] (int v) { proc.player.params.loops = v == 0; }));
+        auto& l = add (g, choice ("Boucles", { "OUI", "NON" }, [this] { return proc.player.get (snd::loops) > 0.5f ? 0 : 1; },
+                                  [this] (int v) { auto* p = proc.params.getParameter ("loops"); p->setValueNotifyingHost (v == 0 ? 1.0f : 0.0f); }));
         l.locked = nullptr;
         auto& o2 = proc.options;
         add (g, choice ("Clavier vers", { "INSTRUMENT", "SYNTHÉ"_fr }, [&o2] { return o2.thru ? 1 : 0; }, [&o2] (int v) { o2.thru = v == 1; }))
@@ -659,7 +659,7 @@ void MainView::toggleSampling()
         proc.stopSampling();
         return;
     }
-    if (proc.options.source != ReplikantProcessor::Source::testSynth && ! proc.options.monitor)
+    if (proc.options.source != ReplikantProcessor::Source::testSynth && proc.options.monitor == 0)
         showMessage ("L'écoute est coupée : tu n'entendras pas le synthé pendant la session."_fr, true);
     juce::String why;
     if (! proc.startSampling (why))
