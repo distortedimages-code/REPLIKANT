@@ -135,7 +135,7 @@ int main()
     }
     CHECK (lo == 43 && hi == 65, "keys %d..%d", lo, hi);
     CHECK ((int) ins->keys.size() == ins->countKeysToRender(), "%zu keys rendered, %d to render", ins->keys.size(), ins->countKeysToRender());
-    std::printf ("  %zu keys rendered, %.1f MB\n", ins->keys.size(), ins->memoryBytes() / 1048576.0);
+    std::printf ("  %zu keys rendered, %.1f MB\n", ins->keys.size(), (double) ins->memoryBytes() / 1048576.0);
 
     // playing: a key between two recordings, in tune
     {

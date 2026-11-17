@@ -32,6 +32,14 @@ jobs:
           VER=$(sed -n 's/^project(REPLIKANT VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
           python3 -m pip install --quiet --break-system-packages dmgbuild==1.6.7 || python3 -m pip install --quiet dmgbuild==1.6.7
           tools/dmg/make_dmg.sh pkg out/REPLIKANT-mac.dmg "$VER"
+      - name: Validate the Audio Unit (auval, as Logic does)
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          rm -rf ~/Library/Audio/Plug-Ins/Components/REPLIKANT.component
+          cp -R pkg/REPLIKANT.component ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          sleep 2
+          auval -v aumf Rplk Dimg
       - uses: actions/upload-artifact@v4
         with:
           name: REPLIKANT-mac

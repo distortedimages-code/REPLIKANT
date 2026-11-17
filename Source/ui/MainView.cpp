@@ -43,7 +43,7 @@ MainView::MainView (ReplikantProcessor& p) : proc (p)
     nameEditor.setFont (px::text (26.0f));
     nameEditor.setIndents (8, 4);
     nameEditor.onTextChange = [this] { proc.instrumentName = nameEditor.getText(); };
-    nameEditor.onReturnKey = [this] { unfocusAllComponents(); };
+    nameEditor.onReturnKey = [] { juce::Component::unfocusAllComponents(); };
     nameEditor.setTooltip ("Le nom de l'instrument : celui de son dossier et de ses fichiers."_fr);
     addAndMakeVisible (nameEditor);
 
@@ -61,7 +61,7 @@ MainView::MainView (ReplikantProcessor& p) : proc (p)
         f.createDirectory();
         f.revealToUser();
     };
-    audioButton.onClick = [this]
+    audioButton.onClick = []
     {
        #if JucePlugin_Build_Standalone
         if (auto* h = juce::StandalonePluginHolder::getInstance())

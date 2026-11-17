@@ -83,6 +83,14 @@ jobs:
           python3 -m pip install --quiet --break-system-packages dmgbuild==1.6.7 || python3 -m pip install --quiet dmgbuild==1.6.7
           tools/dmg/make_dmg.sh pkg out/REPLIKANT-mac.dmg "$VERSION"
 
+      - name: Validate the Audio Unit (auval, as Logic does)
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          rm -rf ~/Library/Audio/Plug-Ins/Components/REPLIKANT.component
+          cp -R pkg/REPLIKANT.component ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          sleep 2
+          auval -v aumf Rplk Dimg
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
