@@ -276,3 +276,25 @@ std::string text (int id, float v)
     return fmt (d.kind == Kind::integer ? "%.0f" : "%.2f", v);
 }
 }
+
+namespace snd
+{
+std::string longName (int id)
+{
+    const std::string name = def (id).name;
+    auto in = [id] (int a, int b) { return id >= a && id <= b; };
+    if (id >= m1Type)
+        return "M" + std::to_string ((id - m1Type) / modSettings + 1) + " " + name;
+    if (in (attack, release))      return "Ampli " + name;
+    if (in (fType, quality))       return "Filtre " + name;
+    if (in (fEnv, velCutoff))      return "Env. filtre " + name;
+    if (in (dAmt, dMix))           return "Drive " + name;
+    if (in (spVoices, spMix))      return "Spectre " + name;
+    if (in (piA, piMix))           return "Pitch " + name;
+    if (in (chMode, chMix))        return "Chorus " + name;
+    if (in (crBits, crMix))        return "Crush " + name;
+    if (in (rvSize, rvMix))        return "Espace " + name;
+    if (in (pmRatio, pmIndex))     return "PM " + name;
+    return name;
+}
+}

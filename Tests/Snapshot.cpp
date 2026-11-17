@@ -5,6 +5,7 @@
 #include <JuceHeader.h>
 #include "../Source/plugin/PluginProcessor.h"
 #include "../Source/plugin/PluginEditor.h"
+#include "../Source/ui/MainView.h"
 
 static void pump (int ms)
 {
@@ -113,8 +114,78 @@ int main (int argc, char** argv)
         pump (200);
         save (*ed, dir.getChildFile (file));
     }
+    // the player's pages, with a sound that shows something on each
+    MainView* view = nullptr;
+    std::function<void (juce::Component&)> find = [&] (juce::Component& c)
+    {
+        for (auto* child : c.getChildren())
+        {
+            if (auto* v = dynamic_cast<MainView*> (child)) { view = v; return; }
+            find (*child);
+        }
+    };
+    find (*ed);
+    auto set = [&] (int id, float v)
+    {
+        auto* param = proc.params.getParameter (snd::def (id).id);
+        param->setValueNotifyingHost (param->convertTo0to1 (v));
+    };
+    set (snd::fModel, 2.0f);
+    set (snd::cutoff, 1400.0f);
+    set (snd::reso, 0.55f);
+    set (snd::fEnv, 0.4f);
+    set (snd::fm, 0.2f);
+    set (snd::dModel, 3.0f);
+    set (snd::dAmt, 0.45f);
+    set (snd::spOn, 1.0f);
+    set (snd::rvOn, 1.0f);
+    set (snd::playMode, 1.0f);
+    set (snd::speed, 0.4f);
+    set (snd::m2Type, 1.0f);
+    proc.player.setRoute (0, snd::cutoff, 0.35f);
+    proc.player.setRoute (1, snd::cutoff, -0.2f);
+    proc.player.setRoute (1, snd::pmIndex, 0.6f);
+    proc.player.setRoute (2, snd::spMix, 0.5f);
+    proc.player.setSceneLock (0, snd::cutoff, 300.0f);
+    proc.player.setSceneLock (1, snd::cutoff, 6000.0f);
+    proc.player.setSceneLock (1, snd::rvMix, 0.7f);
+    set (snd::xfade, 0.35f);
+    if (view != nullptr)
+    {
+        const char* names[] = { "5-son.png", "6-lecture.png", "7-filtre.png", "8-spectre.png", "9-espace.png", "10-mods.png", "11-scenes.png" };
+        for (int pg = 0; pg < 7; ++pg)
+        {
+            view->showPage (1, pg);
+            for (int b = 0; b < 120; ++b)
+            {
+                buf.clear();
+                midi.clear();
+                proc.processBlock (buf, midi);
+                if (b % 8 == 0)
+                    pump (34);
+            }
+            pump (200);
+            save (*ed, dir.getChildFile (names[pg]));
+        }
+        view->showPage (0, 0);
+    }
     for (int n : { 48, 55, 63 })
         proc.audition (n, 0, false);
+
+    // the project keeps the sound: settings, routes, steps, scenes
+    {
+        proc.player.steps[1][3] = -0.75f;
+        juce::MemoryBlock state;
+        proc.getStateInformation (state);
+        ReplikantProcessor other;
+        other.setStateInformation (state.getData(), (int) state.getSize());
+        const bool same = std::abs (other.player.get (snd::cutoff) - proc.player.get (snd::cutoff)) < 0.01f
+                       && std::abs (other.player.routeAmount (1, snd::pmIndex) - 0.6f) < 1.0e-4f
+                       && std::abs (other.player.sceneLock (1, snd::rvMix) - 0.7f) < 1.0e-4f
+                       && std::abs (other.player.steps[1][3].load() + 0.75f) < 1.0e-4f
+                       && (int) other.player.get (snd::fModel) == 2;
+        std::printf ("state round trip: %s\n", same ? "same" : "DIFFERENT");
+    }
     ed.reset();
     pump (100);
     return 0;

@@ -89,6 +89,9 @@ public:
     static constexpr int maxPeaks = 33;
     std::array<std::atomic<float>, maxPeaks> peakHz {}, peakLevel {};
     std::atomic<float> outLevel { 0.0f };
+    static constexpr int scopeSize = 4096;                       // the output's last samples (the scope)
+    std::array<std::atomic<float>, scopeSize> scope {};
+    std::atomic<int> scopeWrite { 0 };
     std::array<std::atomic<float>, snd::count> shownNorm {};    // each setting as it is now (0..1)
     std::array<std::atomic<bool>, snd::count> shownMoved {};    // moved by a scene or a modulator
 

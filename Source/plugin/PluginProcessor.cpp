@@ -28,24 +28,8 @@ struct ReplikantProcessor::Sink : Recorder::MidiSink
 
 namespace
 {
-    // the name a host shows: the setting with its section (the rows show it under the section's title)
-    juce::String hostName (int id)
-    {
-        const auto name = juce::String::fromUTF8 (snd::def (id).name);
-        auto in = [id] (int a, int b) { return id >= a && id <= b; };
-        if (id >= snd::m1Type)
-            return "M" + juce::String ((id - snd::m1Type) / snd::modSettings + 1) + " " + name;
-        if (in (snd::attack, snd::release))      return "Ampli " + name;
-        if (in (snd::fType, snd::quality))       return "Filtre " + name;
-        if (in (snd::fEnv, snd::velCutoff))      return "Env. filtre " + name;
-        if (in (snd::dAmt, snd::dMix))           return "Drive " + name;
-        if (in (snd::spVoices, snd::spMix))      return "Spectre " + name;
-        if (in (snd::piA, snd::piMix))           return "Pitch " + name;
-        if (in (snd::chMode, snd::chMix))        return "Chorus " + name;
-        if (in (snd::crBits, snd::crMix))        return "Crush " + name;
-        if (in (snd::rvSize, snd::rvMix))        return "Espace " + name;
-        return name;
-    }
+    // the name a host shows: the setting with its section
+    juce::String hostName (int id)       { return juce::String::fromUTF8 (snd::longName (id).c_str()); }
 
     // the settings that were there in 0.1 keep their version
     int idVersion (int id)
@@ -353,6 +337,33 @@ void ReplikantProcessor::timerCallback()
             }
         }
     }
+    // a recording retuned by hand
+    if (retune.index >= 0 && --retune.countdown <= 0)
+    {
+        const auto r = retune;
+        retune.index = -1;
+        if (auto ins = getInstrument(); ins != nullptr && ! isSampling() && r.index < (int) ins->samples.size())
+        {
+            auto next = std::make_shared<Instrument> (*ins);
+            const auto& chosen = next->samples[(size_t) r.index];
+            const int sent = chosen.sent, oldRoot = chosen.root;
+            for (auto& smp : next->samples)
+                if (sent >= 0 ? smp.sent == sent : smp.root == oldRoot)
+                {
+                    smp.root = r.root;
+                    smp.detuneCents = (float) r.cents;
+                    smp.pitchConfident = true;
+                    smp.manualTune = true;
+                }
+            rk::assignZones (next->samples, next->session);
+            next->keys.clear();
+            next->keyOf.clear();
+            next->rebuildIndex();
+            if (next->folder.isDirectory())
+                instrumentio::save (*next, next->folder);
+            worker.renderAndPublish (next, true);
+        }
+    }
     // the mapping settings of the instrument: re-rendered once they stop moving
     if (mappingDirty && --mappingCountdown <= 0)
     {
@@ -386,6 +397,14 @@ void ReplikantProcessor::settingsChanged()
     hostMidiOut = options.midiPort == "host";
     saveGlobalSettings();
     sendChangeMessage();
+}
+
+void ReplikantProcessor::retuneSample (int index, int root, double cents)
+{
+    retune.index = index;
+    retune.root = juce::jlimit (0, 127, root);
+    retune.cents = juce::jlimit (-100.0, 100.0, cents);
+    retune.countdown = 6;      // 0.6 s after the last change
 }
 
 void ReplikantProcessor::mappingChanged()

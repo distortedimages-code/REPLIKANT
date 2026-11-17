@@ -86,17 +86,17 @@ void frameRect (juce::Graphics& g, juce::Rectangle<int> r, juce::Colour c, int t
     g.fillRect (r.removeFromRight (t));
 }
 
-void button (juce::Graphics& g, juce::Rectangle<int> r, bool on, bool pressed, juce::Colour accent)
+void button (juce::Graphics& g, juce::Rectangle<int> r, bool on, bool pressed, juce::Colour fill)
 {
     if (pressed)
         r.translate (0, 3);
     if (on)
     {
-        g.setColour (accent);
+        g.setColour (fill);
         g.fillRect (r);
         if (! pressed)
         {
-            g.setColour (accent.darker (0.45f));
+            g.setColour (fill.darker (0.45f));
             g.fillRect (r.removeFromBottom (4));
         }
     }
@@ -203,29 +203,89 @@ void knob (juce::Graphics& g, juce::Rectangle<int> area, float pos, juce::Colour
     }
 }
 
-void mascot (juce::Graphics& g, juce::Point<int> p, int s, bool blink)
+void mascot (juce::Graphics& g, juce::Point<int> p, int s, bool blink, bool testing, int phase)
 {
-    static const char* art[8] = {
-        "...XXXX...",
-        ".XXXXXXXX.",
-        "XXXXXXXXXX",
-        "XX.XXXX.XX",
-        "XXXXXXXXXX",
-        "XXXRRRRXXX",
-        ".XXXXXXXX.",
-        ".X.X..X.X.",
+    // an almond eye: L the lids, R the iris' dark rim, O the iris, P the pupil (Q: wider, under the test), G the glint
+    static const char* art[9] = {
+        "......LLLLLLLL......",
+        "...LLL........LLL...",
+        ".LL.....RRRR.....LL.",
+        "L......ROQQOR......L",
+        "L.....ROQPPGOR.....L",
+        ".L....ROQPPQOR....L.",
+        "..LL...ROQQOR...LL..",
+        "....LLL.RRRR.LLL....",
+        ".......LLLLLL.......",
     };
-    for (int y = 0; y < 8; ++y)
-        for (int x = 0; x < 10; ++x)
+    const juce::Colour lid (0xffd8d5cf), rim (0xff7a3f17), pupil (0xff050505);
+    if (blink)
+    {
+        // closed: the lids meet along the middle
+        static const char* shut = "L.LLLLLLLLLLLLLLLL.L";
+        g.setColour (lid);
+        for (int x = 0; x < 20; ++x)
+            if (shut[x] == 'L')
+                g.fillRect (p.x + x * s, p.y + 4 * s, s, s);
+        for (int x : { 1, 18 })
+            g.fillRect (p.x + x * s, p.y + 3 * s, s, s);
+        return;
+    }
+    for (int y = 0; y < 9; ++y)
+        for (int x = 0; x < 20; ++x)
         {
-            char ch = art[y][x];
-            if (blink && y == 3 && (x == 2 || x == 7))
-                ch = 'X';
+            const char ch = art[y][x];
             if (ch == '.')
                 continue;
-            g.setColour (ch == 'R' ? red : white);
+            juce::Colour c = lid;
+            switch (ch)
+            {
+                case 'R': c = rim; break;
+                case 'O': c = testing && ((x * 7 + y * 3 + phase) % 5 < 2) ? red : accent;   // the fire it reflects
+                          break;
+                case 'Q': c = testing ? pupil : accent; break;                                // the pupil dilates
+                case 'P': c = pupil; break;
+                case 'G': c = white; break;
+                default: break;
+            }
+            g.setColour (c);
             g.fillRect (p.x + x * s, p.y + y * s, s, s);
         }
+}
+
+void modSign (juce::Graphics& g, int m, juce::Point<int> c, int size, juce::Colour col)
+{
+    // drawn in square pixels (size: the sign's height, a multiple of 2)
+    g.setColour (col);
+    const int h = juce::jmax (4, size), r = h / 2;
+    switch (m)
+    {
+        case 0:   // triangle
+            for (int y = 0; y < h; y += 2)
+            {
+                const int w = 2 + (y * (h - 2)) / juce::jmax (1, h - 2);
+                g.fillRect (c.x - w / 2, c.y - r + y, w, 2);
+            }
+            break;
+        case 1:   // square
+            g.fillRect (c.x - r + 1, c.y - r + 1, h - 2, h - 2);
+            break;
+        case 2:   // hexagon
+            for (int y = 0; y < h; y += 2)
+            {
+                const int d = std::abs (y - (h - 2) / 2);
+                const int w = h - (d * 2) / 2;
+                g.fillRect (c.x - w / 2, c.y - r + y, w, 2);
+            }
+            break;
+        default:  // circle
+            for (int y = 0; y < h; y += 2)
+            {
+                const float yy = (float) (y + 1) - (float) r;
+                const int w = 2 * (int) std::round (std::sqrt (juce::jmax (0.0f, (float) (r * r) - yy * yy)));
+                g.fillRect (c.x - w / 2, c.y - r + y, w, 2);
+            }
+            break;
+    }
 }
 
 std::function<void (const juce::String&, int, int)> cutTextHook;
@@ -310,7 +370,7 @@ void Look::drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce:
 {
     auto r = b.getLocalBounds();
     const bool on = b.getToggleState() || (bool) b.getProperties()["primary"];
-    const auto accent = b.findColour (juce::TextButton::buttonOnColourId);
+    const auto fill = b.findColour (juce::TextButton::buttonOnColourId);
     if (! b.isEnabled())
     {
         g.setColour (cell);
@@ -319,7 +379,7 @@ void Look::drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce:
         frameRect (g, r, frame, 2);
         return;
     }
-    button (g, r.withTrimmedBottom (3), on, down, accent);
+    button (g, r.withTrimmedBottom (3), on, down, fill);
     if (highlighted && ! on && ! down)
         frameRect (g, r.withTrimmedBottom (3), grey, 2);
 }
@@ -467,7 +527,7 @@ void Look::drawPopupMenuItem (juce::Graphics& g, const juce::Rectangle<int>& are
         g.setColour (white);
         g.fillRect (r);
     }
-    auto ink = ! isActive ? faint : lit ? black : (textColour != nullptr ? *textColour : white);
+    auto textInk = ! isActive ? faint : lit ? black : (textColour != nullptr ? *textColour : white);
 
     auto in = r.reduced (10, 0);
     auto mark = in.removeFromLeft (16);
@@ -492,7 +552,7 @@ void Look::drawPopupMenuItem (juce::Graphics& g, const juce::Rectangle<int>& are
         drawText (g, shortcutKeyText, in.removeFromRight (w), juce::Justification::centredRight, f, lit ? black : dim);
         in.removeFromRight (12);
     }
-    drawText (g, itemText, in, juce::Justification::centredLeft, getPopupMenuFont(), ink);
+    drawText (g, itemText, in, juce::Justification::centredLeft, getPopupMenuFont(), textInk);
 }
 
 void Look::drawPopupMenuSectionHeader (juce::Graphics& g, const juce::Rectangle<int>& area, const juce::String& title)

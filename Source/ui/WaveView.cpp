@@ -98,7 +98,7 @@ void WaveView::paint (juce::Graphics& g)
         const int x = wave.getX() + (int) c * 2;
         const int y0 = wave.getCentreY() - juce::roundToInt (peaks[c].second / peak * half);
         const int y1 = wave.getCentreY() - juce::roundToInt (peaks[c].first / peak * half);
-        g.setColour (x < noteOffX ? px::white : px::grey);
+        g.setColour (x < noteOffX ? px::white : px::dim);
         g.fillRect (x, y0, 2, juce::jmax (2, y1 - y0));
     }
 
@@ -119,6 +119,22 @@ void WaveView::paint (juce::Graphics& g)
         marker (xOf (s.loop.start), px::yellow, "BOUCLE", true);
         marker (xOf (s.loop.end), px::yellow, "FIN", true);
     }
+    // the loop as the player moves it
+    if (movedStart >= 0 && movedEnd > movedStart)
+    {
+        const int x0 = xOf (movedStart), x1 = xOf (movedEnd);
+        g.setColour (px::violet);
+        g.fillRect (x0, wave.getBottom() - 6, juce::jmax (2, x1 - x0), 4);
+        g.fillRect (x0 - 1, wave.getY(), 2, wave.getHeight());
+        g.fillRect (x1 - 1, wave.getY(), 2, wave.getHeight());
+    }
+    // the grains (ELASTIQUE), the playhead
+    for (float gr : grains)
+        if (gr >= 0.0f && gr < (float) len)
+        {
+            g.setColour (px::accent);
+            g.fillRect (xOf (gr) - 1, wave.getY() + wave.getHeight() / 4, 2, wave.getHeight() / 2);
+        }
     if (playhead >= 0.0f && playhead < (float) len)
     {
         g.setColour (px::red);

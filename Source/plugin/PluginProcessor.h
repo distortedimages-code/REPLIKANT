@@ -45,7 +45,7 @@ public:
     const juce::String getName() const override              { return JucePlugin_Name; }
     bool acceptsMidi() const override                        { return true; }
     bool producesMidi() const override                       { return true; }
-    double getTailLengthSeconds() const override             { return 2.0; }
+    double getTailLengthSeconds() const override             { return 8.0; }   // (ESPACE rings on)
     int getNumPrograms() override                            { return 1; }
     int getCurrentProgram() override                         { return 0; }
     void setCurrentProgram (int) override                    {}
@@ -61,6 +61,9 @@ public:
 
     void settingsChanged();                         // session or options edited: estimate, state, maybe re-render
     void mappingChanged();                          // a setting of the current instrument's mapping or rendering
+    // the note a recording plays and its tuning, set by hand (for all the takes of the note sent with it): applied
+    // once it stops moving, the zones and the keys made again
+    void retuneSample (int sampleIndex, int root, double cents);
     bool startSampling (juce::String& whyNot);
     void stopSampling();
     bool isSampling() const                          { return worker.isSampling() || recorder.isRunning(); }
@@ -138,6 +141,7 @@ private:
     std::vector<std::shared_ptr<Instrument>> alive;
     bool mappingDirty = false;
     int mappingCountdown = 0;
+    struct Retune { int index = -1, root = 60; double cents = 0.0; int countdown = 0; } retune;
     juce::String savedSound;                       // the sound last written into the instrument's folder
     juce::String pendingSound;
     int soundCountdown = 0;

@@ -1,7 +1,9 @@
-// The retro pixel look: black, white, red (live), yellow-orange (locks), dithering,
-// two pixel fonts (Silkscreen for labels, VT323 for values and text), square
-// buttons with a bevel, and a small mascot. Also the LookAndFeel that gives the
-// other pages the same look.
+// The retro pixel look, REPLIKANT's own and sober: a warm near-black, neutral greys, off-white text, one accent (the
+// amber haze of Blade Runner 2049) used sparingly, red only for what is live (recording, playhead), a quiet lilac for
+// the scenes, and the four modulators in IMPAKT's colours (red, orange, yellow, green, with their signs) only on what
+// is theirs; dithering, two pixel fonts (Silkscreen for labels, VT323 for values and text), square buttons with a
+// bevel, and its emblem, an eye under the Voight-Kampff test. Also the LookAndFeel that gives the other pages the
+// same look.
 
 #pragma once
 
@@ -9,16 +11,24 @@
 
 namespace px
 {
-    const juce::Colour black (0xff000000);
-    const juce::Colour panel (0xff0a0a0a);
-    const juce::Colour cell (0xff121212);
-    const juce::Colour frame (0xff2a2a2a);
-    const juce::Colour faint (0xff3a3a3a);
-    const juce::Colour dim (0xff6f6f6f);
-    const juce::Colour grey (0xff9a9a9a);
-    const juce::Colour white (0xffffffff);
-    const juce::Colour red (0xffff3b2f);      // live: playhead, keyboard, play, mute
-    const juce::Colour yellow (0xffffb000);   // p-locks
+    const juce::Colour black (0xff0d0e10);    // the ground
+    const juce::Colour panel (0xff141619);    // cards, bars
+    const juce::Colour cell (0xff1b1e22);     // value boxes, keys, title strips
+    const juce::Colour frame (0xff282c32);
+    const juce::Colour faint (0xff3a3f46);
+    const juce::Colour dim (0xff6d737c);
+    const juce::Colour grey (0xffa4aab2);
+    const juce::Colour white (0xffeceae5);
+    const juce::Colour red (0xffff5a4e);      // live: playhead, recording, the keys sounding
+    const juce::Colour yellow (0xffe9c46a);   // warnings, the loops, what is held
+    const juce::Colour cyan (0xffff9a3c);     // THE accent (amber): the instrument, the player, what is on
+    const juce::Colour accent = cyan;
+    const juce::Colour violet (0xffa595ee);   // the scenes
+    const juce::Colour ink (0xff0d0e10);      // text on a lit fill
+
+    // the modulators: IMPAKT's colours and signs (triangle, square, hexagon, circle)
+    const juce::Colour mod[4] = { juce::Colour (0xffe9472b), juce::Colour (0xfff28a1e), juce::Colour (0xffe2b414), juce::Colour (0xff3fae6a) };
+    void modSign (juce::Graphics&, int mod, juce::Point<int> centre, int size, juce::Colour);
 
     juce::Font label (float height, bool bold = false);   // Silkscreen, capitals
     juce::Font text (float height);                       // VT323
@@ -35,21 +45,22 @@ namespace px
 
     // A pixel bar of `blocks` blocks, `filled` of them lit, an optional marker block.
     void bar (juce::Graphics&, juce::Rectangle<int>, int blocks, int filled, juce::Colour on,
-              int marker = -1, juce::Colour off = juce::Colour (0xff1c1c1c));
+              int marker = -1, juce::Colour off = juce::Colour (0xff23272c));
 
     // The same for an amount that goes both ways: lit from the middle to the value
     // (position 0..1, 0.5 = the middle, shown by a brighter notch).
     void barCentred (juce::Graphics&, juce::Rectangle<int>, int blocks, float position, juce::Colour on,
-                     int marker = -1, juce::Colour off = juce::Colour (0xff1c1c1c));
+                     int marker = -1, juce::Colour off = juce::Colour (0xff23272c));
 
     // A round knob drawn in square pixels, as on Elektron screens: a lit arc up to the
     // value, the knob's circle and a pointer. `marker` (0..1, < 0 = none) shows a
     // second position on the arc (the sound's own value under a lock).
     void knob (juce::Graphics&, juce::Rectangle<int> area, float position, juce::Colour on,
-               int pixel = 3, float marker = -1.0f, juce::Colour body = juce::Colour (0xff6f6f6f), bool centred = false);
+               int pixel = 3, float marker = -1.0f, juce::Colour body = juce::Colour (0xff6d737c), bool centred = false);
 
-    // The mascot, 10 x 8 pixels of `size`; `blink` closes its eyes.
-    void mascot (juce::Graphics&, juce::Point<int> topLeft, int size, bool blink);
+    // The emblem: an eye under the Voight-Kampff test, 20 x 9 pixels of `size`; `blink` closes it; `testing` (a
+    // session running) dilates its pupil and makes its iris flicker like the fire it reflects (`phase` moves it)
+    void mascot (juce::Graphics&, juce::Point<int> topLeft, int size, bool blink, bool testing = false, int phase = 0);
 
     // Text that is cut to fit, without the "..." of JUCE's drawFittedText.
     void drawText (juce::Graphics&, const juce::String&, juce::Rectangle<int>, juce::Justification,

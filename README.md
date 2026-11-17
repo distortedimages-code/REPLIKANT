@@ -1,10 +1,28 @@
 # REPLIKANT
 
-**REPLIKANT** : l'autosampleur de tes synthés. Plug-in AU / VST3 et appli pour Mac. Il joue chaque note au synthé (MIDI), l'enregistre (audio), trouve la boucle, mesure la justesse, et fait de l'ensemble un instrument jouable, exportable en dossier de WAV ou en `.multisample` Bitwig.
+**REPLIKANT** : l'autosampleur de tes synthés, et le player qui les malmène. Plug-in AU / VST3 et appli pour Mac. Il joue chaque note au synthé (MIDI), l'enregistre (audio), trouve la boucle, mesure la justesse (et recale la note vraiment jouée), et fait de l'ensemble un instrument jouable, exportable en dossier de WAV, en `.multisample` Bitwig ou en pack zip à partager. Le player le joue à travers des filtres analogiques modélisés, un drive, cinq effets, quatre mods façon IMPAKT et des scènes façon Octatrack, et sert aussi de multi-effet en insert.
 
 **Page de téléchargement** : https://distortedimages-code.github.io/REPLIKANT/
 
-## Ce que fait la version 0.1.0
+## La version 0.2.0 : le player
+
+- **SAMPLER / PLAYER** : deux modes ; le player a ses pages SON, LECTURE, FILTRE, SPECTRE, ESPACE, MODS, SCÈNES.
+- **Voix** : 8, mono ou stéréo, POLY / MONO / LEGATO, glisse, transposition (la touche rendue HQ de la note décalée), ADSR.
+- **Lecture** : SAMPLE ou ÉLASTIQUE (grains alignés par corrélation, WSOLA : vitesse et hauteur séparées) ; DÉPART, SENS, boucle déplacée et raccourcie (raccords lissés à puissance constante).
+- **Pitch extrême** : sinc de Kaiser à coupure qui suit la transposition ; copies de chaque enregistrement une, deux, trois octaves plus bas (demi-bande de 255 points, ~120 dB) lues dès que la voix monte d'une quinte et demie ; TRANSITOIRES GARDÉS (l'attaque, mesurée jusqu'à ce que l'enveloppe retombe de 9 dB, jouée à sa vitesse, le corps transposé ensuite) ; passe-haut de sécurité à 5 Hz sur les voix.
+- **ALIASING** (d'après l'échelle que décrit le manuel de l'Assimil8or, écrite à notre façon) : sinc qui suit la hauteur → sinc qui ne la suit plus → noyau court et doux → linéaire → drop-sample → au-delà, l'interpolation passe-haut (les images plus fortes que le son) ; BITS de 32 à 1, fractionnaires.
+- **Modulation de phase** : l'adresse de lecture poussée de ±INDICE échantillons (0 à 256) par un sinus sur la note × RAPPORT, par le sample (une deuxième tête à RAPPORT fois sa vitesse) ou par l'entrée.
+- **Filtres** (`Source/dsp/VAFilter`) : MOOG (échelle D'Angelo–Välimäki), MS-20 (Korg 35 en série, SÉPARATION), SEM (OTA), OSCAR (deux 12 dB écartés), WASP (CMOS), POLIVOKS (rails) ; ZDF, suréchantillonnés 1X / 2X / 4X (demi-bandes), réinjection FM, enveloppe, suivi du clavier, vélocité.
+- **Drive** : PRÉAMPLI, CONSOLE, BANDE (pré/désaccentuation exactes, bosse de tête, pleurage), suréchantillonné 4X.
+- **Effets**, dans cet ordre : SPECTRE (pics d'une FFT de 4096 points rendus par 1 à 33 oscillateurs), PITCH (deux voix Signalsmith, retards, réinjection, CRISTAUX : grains à l'envers), CHORUS / FLANGER / VIBRATO, CRUSH, ESPACE (FDN de 8 lignes de MIFM1, shimmer, gel).
+- **Mods** : 4, ONDE / PAS / HASARD / ENV / SUIVEUR, au tempo de l'hôte (sur sa grille) ou au leur, 8 routes chacun ; assignation façon IMPAKT / Torso.
+- **Scènes** : 16, deux sous le fader (A, B) ; un réglage tenu d'un seul côté part de sa propre valeur.
+- **Multi-effet** : ÉCOUTE PAR LES EFFETS, l'entrée (une piste en insert) passe dans le filtre et la chaîne.
+- **Horloge MIDI** : 24 tops par noire, Start / Stop ; vers un port du Mac (fil à haute priorité) ou la sortie du plug-in (à l'échantillon), interne ou suivant l'hôte.
+- **Pack** : `<Nom>.zip` = `<Nom>/<Nom>.replikant` (avec le son) + `<Nom>/Samples/*.wav` ; glisser hors de la fenêtre (PACK ZIP), glisser un pack sur la fenêtre pour l'importer.
+- **Poids estimé** de la session (disque, mémoire), WAV 24 bits ou 32 bits flottants.
+
+## Ce que fait l'autosampleur (depuis la 0.1.0)
 
 - **Session automatique** : les notes (tous les N demi-tons, N notes réparties, ou à la main en Alt-clic sur le clavier), 1 à 16 couches de vélocité (réparties, plus dans le doux ou plus dans le fort), 1 à 8 prises (round robin), une tenue, une relâche maximale, une pause. Changement de programme optionnel avant la session. MIDI envoyé directement au port choisi (ou par la sortie MIDI du plug-in).
 - **Découpe** : le bruit de fond est mesuré avant la première note ; chaque enregistrement commence à son attaque (détectée au-dessus du bruit, avec une marge) ou à une latence fixe mesurée (la plus courte vue : les attaques lentes gardent leur forme exacte) ; la queue s'arrête quand elle retombe dans le bruit ; DC retiré, fondus courts.
@@ -18,7 +36,7 @@
   - *Touches rendues HQ* (en avance, sur tous les cœurs) ou *en direct* (sinc à la volée).
 - **Carte et clavier** : ce qui va être enregistré (cadres), ce qui l'est (rempli, la note enregistrée en blanc), la note en cours (rouge), la zone qui joue ; clavier jouable (plus haut sur la touche = plus doux), poignées de la plage à enregistrer.
 - **Sample** : la forme d'onde, la partie tenue, le note-off, la boucle et son fondu, la tête de lecture, et le raccord tel qu'il s'entend (fin de boucle puis début).
-- **Jeu** : polyphonie 48 voix, couches et round robin, boucles, enveloppe, sensibilité à la vélocité dans une couche, pitch bend, pédale de sustain. *Clavier vers synthé* pour comparer avec l'original.
+- **Jeu** : couches et round robin, boucles, enveloppe, sensibilité à la vélocité dans une couche, pitch bend, pédale de sustain. *Clavier vers synthé* pour comparer avec l'original.
 - **Synthé test** intégré (deux dents de scie désaccordées, un sub, un filtre 24 dB, une dérive, un peu de bruit et de latence) pour tout essayer sans matériel.
 - **Instruments** dans `~/Music/REPLIKANT/<Nom>/` : `<Nom>.replikant` (JSON) et `Samples/*.wav` (24 bits, chunks `smpl` et `inst`). Le projet du DAW garde le chemin et le recharge.
 - **Exports** : dossier de WAV (note, justesse, boucle, zone dans chaque fichier) ou `.multisample` Bitwig, les samples enregistrés ou toutes les touches rendues.
@@ -26,7 +44,8 @@
 
 ## Comment ça se branche
 
-- **Appli** : *Carte son* en haut, Source = Entrée, Sortie MIDI = le port du synthé.
+- **Appli** : *Carte son* en haut, Source = Entrée, Sortie MIDI = le port du synthé. 96 kHz dans la carte son pour transposer très bas.
+- **En multi-effet** : REPLIKANT en insert sur n'importe quelle piste, PLAYER › SON › ÉCOUTE = PAR LES EFFETS.
 - **Logic** : REPLIKANT en effet audio sur une piste qui reçoit le synthé (type `aumf`, « effet contrôlé par MIDI ») ; pour jouer, dans le slot d'instrument (effets contrôlés par MIDI).
 - **Bitwig / Reaper / Cubase** : sur une piste qui reçoit l'audio du synthé ; les notes de la piste jouent l'instrument.
 - **Live** : l'enregistrement marche sur une piste audio ; Live n'envoyant pas de notes aux effets audio, on joue l'export (Sampler) ou l'appli.
@@ -49,7 +68,10 @@ ctest --test-dir build --output-on-failure
 ```
 
 - `Source/core/` : le DSP sans JUCE (sinc, formants, boucles, hauteur, découpe, plan, WAV) ; `Tests/CoreTests.cpp` le vérifie, transposition comprise (écart des harmoniques avec la vraie note).
-- `Source/engine/` : l'enregistreur (fil audio, sans allocation), le worker (découpe, assemblage, sauvegarde, rendu des touches en parallèle), l'instrument, le lecteur, le synthé test ; `Tests/EngineTests.cpp` fait une session entière sur le synthé test.
-- `Source/ui/` : l'interface rétro pixel (palette et polices de RackAttack Editor) ; la cible `Snapshot` (hors build par défaut) dessine la fenêtre en PNG.
+- `Source/dsp/` : le DSP du player, sans JUCE (suréchantillonnage, filtres, drives, modulateurs, effets) ; `Tests/DspTests.cpp`.
+- `Source/engine/` : l'enregistreur (fil audio, sans allocation), le worker (découpe, assemblage, sauvegarde, rendu des touches en parallèle), l'instrument, le player (`Sound.h` : la table de tous ses réglages), le synthé test ; `Tests/EngineTests.cpp` fait une session entière sur le synthé test (et un pack chez un pote) ; `Tests/PlayerTests.cpp` mesure le player (repliement, échelle d'aliasing, décalage de la PM, transitoires, scènes, horloge, CPU).
+- `Source/ui/` : l'interface rétro pixel (polices de RackAttack Editor, palette sobre à un accent) ; la cible `Snapshot` (hors build par défaut) dessine la fenêtre en PNG, chaque page.
 - `ThirdParty/` : Signalsmith Stretch et Signalsmith Linear (licence MIT, textes à côté).
+- `Source/dsp/Space.*` : la réverbération de MIFM1 (MPL-2.0).
+- REPLIKANT est sous licence **GPL-3** (`LICENSE`).
 - `Resources/fonts/` : Silkscreen et VT323, SIL Open Font License.

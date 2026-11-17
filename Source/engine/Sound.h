@@ -78,4 +78,6 @@ namespace snd
     float legal (int id, float value);
     // a value as the player shows it (the row's text)
     std::string text (int id, float value);
+    // its name with its section (what a host shows, the routes and the scenes list): "Espace Mix", "M2 Forme"
+    std::string longName (int id);
 }

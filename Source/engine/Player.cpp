@@ -1361,6 +1361,12 @@ void Player::render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi
         peak = juce::jmax (bus.getMagnitude (0, 0, n), bus.getMagnitude (1, 0, n));
     }
     outLevel = juce::jmax (peak, outLevel.load() * 0.9f);
+    {
+        int w = scopeWrite.load (std::memory_order_relaxed);
+        for (int i = 0; i < n; ++i)
+            scope[(size_t) (w++ & (scopeSize - 1))].store (0.5f * (L[i] + R[i]), std::memory_order_relaxed);
+        scopeWrite.store (w & (scopeSize - 1), std::memory_order_relaxed);
+    }
 
     // what the editor shows: the newest voice
     int count = 0;
@@ -1376,8 +1382,13 @@ void Player::render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi
     if (last != nullptr)
     {
         shownSample = last->index;
+        // from the frames it reads to the recording's: a rendered key is the recording at another speed (its loop
+        // tells by how much: it is cut after it)
         const int l = last->s->length();
-        const double scale = l > 0 ? (double) last->originalLength / (double) l : 0.0;
+        const auto& orig = ins->samples[(size_t) last->index];
+        double scale = l > 0 ? (double) last->originalLength / (double) l : 0.0;
+        if (last->s != &orig && last->s->loop.valid() && orig.loop.valid())
+            scale = (double) orig.loop.length() / (double) last->s->loop.length();
         const bool elastic = get (snd::playMode) > 0.5f;
         shownPosition = (float) ((elastic ? last->scan : last->pos) * scale);
         for (int g = 0; g < maxGrains; ++g)

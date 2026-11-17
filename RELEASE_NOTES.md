@@ -1,9 +1,24 @@
-**REPLIKANT 0.1.0** : la première version, un autosampleur complet pour tes synthés.
+**REPLIKANT 0.2.0** : le player devient un instrument à part entière, un mangler, et un multi-effet.
 
-- **Enregistrement automatique** des notes que tu choisis (tous les N demi-tons, N notes réparties, ou à la main), avec les couches de vélocité et les prises (round robin) que tu veux, le MIDI envoyé directement au synthé
-- **Découpe propre** : bruit de fond mesuré, attaque détectée (ou une latence fixe pour tous), la queue gardée jusqu'à ce qu'elle retombe dans le bruit
-- **Boucles automatiques** longues, qui suivent les modulations lentes (LFO, PWM), avec un fondu qui garde la puissance
-- **Accordage automatique** : la justesse de chaque note est mesurée et corrigée à la lecture
-- **Transposition HQ** : les touches entre deux notes enregistrées sont calculées avec un varispeed sans repliement puis l'enveloppe spectrale remise en place (le filtre du synthé ne bouge pas avec la note)
-- **Clavier et carte des zones** : ce qui va être enregistré, ce qui l'est, ce qui joue
-- **Exports** : dossier de WAV avec note, boucle et zone dans chaque fichier (Logic, Ableton, Kontakt...) et .multisample Bitwig, les samples enregistrés ou toutes les touches rendues
+- **SAMPLER et PLAYER** : deux modes en haut à gauche. Le player a ses pages SON, LECTURE, FILTRE, SPECTRE, ESPACE, MODS et SCÈNES. Nouvel habillage sobre, et un œil façon Voight-Kampff en emblème
+- **Accordage RECALER** : la note vraiment jouée est retrouvée, même quand l'oscillateur est faux de quelques demi-tons, puis remise sur sa touche et jouée juste. Sous le sample, NOTE et ACCORD se règlent à la main pour toutes les prises d'une note. L'ACCORD GLOBAL (page TRAITEMENT) réaccorde tout l'instrument
+- **8 voix, mono ou stéréo** : POLY, MONO (chaque note repart) ou LEGATO (la note glisse sans repartir), avec la glisse, la transposition et l'enveloppe ADSR
+- **Lecture ÉLASTIQUE** : en grains alignés sur le son (sans phasing), la vitesse séparée de la hauteur, de figée à l'envers. DÉPART modulé promène la lecture dans le sample
+- **Pitch extrême propre** : anti-repliement qui suit la transposition, copies de chaque enregistrement à l'octave (jusqu'à +4 octaves sans repliement, au même coût) et TRANSITOIRES GARDÉS (l'attaque à sa vitesse, le corps transposé : un kick descendu garde son clic). Un passe-haut de sécurité retire le DC et les infrasons
+- **Caractère, d'après le manuel de l'Assimil8or** : l'ALIASING passe en continu de la lecture HQ au filtre d'E-mu, puis au linéaire, au drop-sample (SP-1200), jusqu'aux alias plus forts que le son. S'y ajoutent les BITS (32 à 1), le SENS, et une boucle déplacée et raccourcie dont les raccords sont lissés
+- **Modulation de phase** : l'adresse de lecture est poussée de 0 à 256 échantillons par un sinus accordé sur la note, par le sample lui-même (une deuxième tête) ou par l'entrée audio
+- **Filtres** : MOOG, MS-20 (les deux filtres), SEM, OSCAR et WASP avec la séparation, POLIVOKS. Ils sont suréchantillonnés (1X, 2X, 4X), avec la réinjection FM, une enveloppe, le suivi du clavier et la vélocité
+- **Drive** : PRÉAMPLI (façon Neve), CONSOLE ou BANDE (façon Ampex : bosse de grave, pleurage), suréchantillonné
+- **Effets** :
+  - SPECTRE, façon Panharmonium : le son refait par 1 à 33 oscillateurs, avec gel, flou, octave et onde
+  - PITCH, façon PitchFactor : deux voix avec retard, réinjection et CRISTAUX
+  - CHORUS, FLANGER ou VIBRATO
+  - CRUSH : bits, fréquence et instabilité
+  - ESPACE : la réverbération de MIFM1, façon Erbe-Verb, avec son shimmer et le gel
+- **Mods façon IMPAKT** : quatre modulateurs, chacun ONDE, PAS (16 pas dessinés), HASARD (une boucle de tirages qui revient, avec VARIATION), ENV (lancée par chaque note) ou SUIVEUR (de l'entrée ou de l'instrument). Ils suivent le tempo de l'hôte ou le leur. On clique M1 à M4 en bas puis on tourne n'importe quel réglage : la distance tournée devient la profondeur, un clic inverse la route et un double-clic la retire
+- **Scènes façon Octatrack** : 16 scènes qui verrouillent les réglages qu'on veut. Le fader, automatisable et modulable, glisse de la scène A à la scène B
+- **Mode multi-effet** : ÉCOUTE PAR LES EFFETS. En insert, la piste passe dans le filtre, le drive, les effets et les mods
+- **Horloge MIDI** : vers un port du Mac (tes séquenceurs analogiques) ou la sortie du plug-in, au tempo choisi ou en suivant le DAW. Elle peut être lancée par une session de sampling
+- **Pack à partager** : PACK ZIP réunit l'instrument, ses samples et son son en un zip à glisser vers le Finder, AirDrop ou un mail. Chez un pote, il suffit de glisser le zip sur la fenêtre. Le son est aussi gardé avec chaque instrument
+- **Poids estimé en direct** : la place sur le disque et en mémoire, selon les réglages de la session. Les WAV peuvent être écrits en 24 bits ou en 32 bits flottants, et la fréquence d'enregistrement est affichée (96 kHz conseillé pour transposer très bas)
+- **Licence GPL-3**, comme IMPAKT
