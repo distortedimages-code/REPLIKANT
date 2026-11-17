@@ -199,9 +199,20 @@ static void testAliasingScale()
     p.setInstrument (mid.get());
     p.set (snd::alias, 1.0f);
     auto out = play (p, 0.3, { { 0.0, 67, 127 } });
-    const double f = 9000.0 * std::pow (2.0, 7.0 / 12.0);
-    const double tone = toneLevel (out, 4800, 8192, f), image = toneLevel (out, 4800, 8192, 48000.0 - f);
-    CHECK (image > tone, "at 100 %% the image (%.1f dB) is louder than the tone (%.1f dB)", db (image / 0.5), db (tone / 0.5));
+    // the source's first image (at its rate minus the tone) moves with the playback speed, then folds into the band
+    const double ratio = std::pow (2.0, 7.0 / 12.0), f = 9000.0 * ratio;
+    double imageHz = std::fmod ((48000.0 - 9000.0) * ratio, 48000.0);
+    if (imageHz > 24000.0)
+        imageHz = 48000.0 - imageHz;
+    const double tone = toneLevel (out, 4800, 8192, f), image = toneLevel (out, 4800, 8192, imageHz);
+    CHECK (image > tone * 1.4, "at 100 %% the image (%.1f dB, %.0f Hz) is louder than the tone (%.1f dB)", db (image / 0.5), imageHz, db (tone / 0.5));
+    std::printf ("  ALIASING 100 %%: the image at %.1f dB, the tone at %.1f dB\n", db (image / 0.5), db (tone / 0.5));
+    // and at 0 the same image is gone
+    Player q;
+    plain (q);
+    q.setInstrument (mid.get());
+    auto clean = play (q, 0.3, { { 0.0, 67, 127 } });
+    CHECK (db (toneLevel (clean, 4800, 8192, imageHz) / 0.5) < -60.0, "at 0 the image is gone (%.1f dB)", db (toneLevel (clean, 4800, 8192, imageHz) / 0.5));
 }
 
 static void testPhaseModulation()

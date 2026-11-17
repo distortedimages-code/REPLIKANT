@@ -558,7 +558,7 @@ void Player::prepareRead (Voice& v, const Chunk& c, Read& r) const
 //   25 .. 36 %    a gentler, shorter kernel (the slope of the classic samplers' chips)
 //   36 .. 51 %    towards linear interpolation
 //   51 .. 89 %    towards drop sample (Mirage, SP-1200)
-//   89 .. 100 %   past it: the interpolation turns high pass, the images louder than the sound
+//   89 .. 100 %   past it: the interpolation turns high pass (nearest minus linear), the images louder than the sound
 // Far up, it reads the recording's copy an octave (two, three) down, at half (a quarter...) the step.
 void Player::readFrame (const Read& r, double p, float& left, float& right) const
 {
@@ -648,14 +648,18 @@ void Player::readFrame (const Read& r, double p, float& left, float& right) cons
     }
     else
     {
-        // past drop sample: less of the smooth part (drop minus linear: what is left is the images), the level held
+        // past drop sample: towards a high pass, the nearest sample minus the linear interpolation (both centred, so
+        // the smooth part cancels and the images stay: at 100 % they are louder than the sound itself)
         const float t = (a - 0.89f) / 0.11f;
-        float l0, l1;
+        float l0, l1, n0, n1;
         drop (o0, o1);
         linear (l0, l1);
-        const float g = 1.0f / (1.0f - 0.85f * t);
-        o0 = (o0 - t * l0) * g;
-        o1 = (o1 - t * l1) * g;
+        const auto k = (int64_t) std::floor (pp + 0.5);
+        n0 = at (d0, k);
+        n1 = d1 != nullptr ? at (d1, k) : 0.0f;
+        constexpr float g = 3.0f;
+        o0 += t * ((n0 - l0) * g - o0);
+        o1 += t * ((n1 - l1) * g - o1);
     }
     left = o0;
     right = d1 != nullptr ? o1 : o0;
