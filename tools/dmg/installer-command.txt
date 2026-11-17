@@ -1,0 +1,1 @@
+sudo installer -pkg "/Volumes/REPLIKANT/Installer REPLIKANT.pkg" -target / && killall -9 AudioComponentRegistrar 2>/dev/null; echo "REPLIKANT est installé."

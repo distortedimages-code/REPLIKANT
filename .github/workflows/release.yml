@@ -1,0 +1,94 @@
+# Publishing a version, as for IMPAKT: raise VERSION in CMakeLists.txt, write RELEASE_NOTES.md, merge into main.
+# RELEASE_NOTES.md: first line "**REPLIKANT X.Y.Z** : what it brings.", then one "- **Short title** details"
+# per point. The editor's update window shows that line and the titles (Updater::summarise).
+# On that push, when there is no release v<VERSION> yet, this builds and tests on a Mac and publishes the release
+# v<VERSION> (GitHub creates the tag on that commit) with
+#   REPLIKANT-mac.dmg           for people (the site links to it): an installer (.pkg) and the bundles to drag,
+#                                       with the Terminal commands,
+#   REPLIKANT-mac.zip + .sha256 for the in-plugin updater: installed plug-ins then offer the update.
+# Any other push to main (same VERSION) stops at the check. Actions > release > Run workflow does the same by hand;
+# with "brouillon" ticked, the release stays a draft to look at before publishing it.
+name: release
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      brouillon:
+        description: "Brouillon (à publier à la main)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      new: ${{ steps.ver.outputs.new }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Is it a new version?
+        id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER=$(sed -n 's/^project(REPLIKANT VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          [ -n "$VER" ] || { echo "No VERSION in CMakeLists.txt"; exit 1; }
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          # published or draft: either way, v$VER is taken
+          if gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName' | grep -qx "v$VER"; then
+            echo "new=no" >> "$GITHUB_OUTPUT"; echo "v$VER exists already: nothing to publish."
+          else
+            echo "new=yes" >> "$GITHUB_OUTPUT"; echo "v$VER is new: building and publishing it."
+          fi
+
+  mac:
+    needs: check
+    if: needs.check.outputs.new == 'yes'
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release -j 4
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package
+        run: |
+          ART=build/REPLIKANT_artefacts/Release
+          mkdir -p pkg out
+          for b in "AU/REPLIKANT.component" "VST3/REPLIKANT.vst3" "Standalone/REPLIKANT.app"; do
+            codesign --force --deep --sign - "$ART/$b"
+            cp -R "$ART/$b" pkg/
+          done
+          # the three bundles at the top of the zip, as the in-plugin updater expects
+          ditto -c -k pkg out/REPLIKANT-mac.zip
+          (cd out && shasum -a 256 REPLIKANT-mac.zip > REPLIKANT-mac.zip.sha256)
+          # the disk image people download from the site
+          python3 -m pip install --quiet --break-system-packages dmgbuild==1.6.7 || python3 -m pip install --quiet dmgbuild==1.6.7
+          tools/dmg/make_dmg.sh pkg out/REPLIKANT-mac.dmg "$VERSION"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT: ${{ github.event_name == 'workflow_dispatch' && inputs.brouillon && '--draft' || '' }}
+        run: |
+          NOTES=RELEASE_NOTES.md
+          [ -f "$NOTES" ] || { echo "REPLIKANT $VERSION" > /tmp/notes.md; NOTES=/tmp/notes.md; }
+          gh release create "v$VERSION" out/REPLIKANT-mac.dmg out/REPLIKANT-mac.zip out/REPLIKANT-mac.zip.sha256 \
+            --target "$GITHUB_SHA" --title "REPLIKANT $VERSION" --notes-file "$NOTES" $DRAFT

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>REPLIKANT — l'autosampleur de tes synthés</title>
+<meta name="description" content="REPLIKANT enregistre tes synthés note par note, trouve les boucles, corrige l'accordage et calcule les touches manquantes avec une transposition HQ. Mac : Audio Unit, VST3 et appli. Gratuit.">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preload" href="fonts/Silkscreen-Bold.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/VT323-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="style.css">
+<style>
+  /* REPLIKANT's own bits */
+  .title { font: 700 64px var(--silk); letter-spacing: 8px; margin: 10px 0 0; }
+  .title i { color: var(--red); font-style: normal; }
+  .facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 0 20px; }
+  .facts > div { border: 2px solid var(--frame); background: var(--black); padding: 12px 14px; }
+  .facts h3 { margin: 0 0 6px; font: 700 13px var(--silk); letter-spacing: 1px; text-transform: uppercase; color: var(--yellow); }
+  .facts p { margin: 0; font-size: 22px; }
+  table.cmp { border-collapse: collapse; margin: 6px 20px 0; font-size: 22px; }
+  table.cmp th { font: 700 12px var(--silk); letter-spacing: 1px; text-transform: uppercase; text-align: right; padding: 6px 14px; color: var(--grey); border-bottom: 2px solid var(--frame); }
+  table.cmp td { text-align: right; padding: 4px 14px; border-bottom: 1px dotted var(--faint); }
+  table.cmp td:first-child, table.cmp th:first-child { text-align: left; }
+  table.cmp .good { color: var(--yellow); }
+  .shot { margin: 18px 20px 4px; border: 3px solid var(--white); }
+  .shot img { display: block; width: 100%; height: auto; }
+  .daw { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 0 20px; }
+  .daw > div { border: 2px solid var(--frame); padding: 12px 14px; background: var(--black); }
+  .daw h3 { margin: 0 0 8px; font: 700 14px var(--silk); letter-spacing: 1px; text-transform: uppercase; }
+  .daw ol { margin: 0; padding-left: 22px; font-size: 22px; }
+  .daw li { margin-bottom: 6px; }
+  @media (max-width: 760px) { .facts, .daw { grid-template-columns: 1fr; } .title { font-size: 40px; letter-spacing: 4px; } }
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <a class="logo" href="#haut" aria-label="REPLIKANT, haut de page">REPLIKANT<i>.</i></a>
+  <nav>
+    <a href="#installer">Installer</a>
+    <a href="#brancher">Brancher</a>
+    <a href="#sampler">Sampler</a>
+    <a href="#transposer">Transposer</a>
+    <a href="#exporter">Exporter</a>
+  </nav>
+  <a class="light" href="#telecharger"><b></b><span class="ver">v@VERSION@</span></a>
+</header>
+
+<main id="haut">
+
+<section class="hero" id="telecharger">
+  <h1 class="title">REPLIKANT<i>.</i></h1>
+  <p class="lead">L'autosampleur de tes synthés.<br>Il joue chaque note, l'enregistre, trouve la boucle, corrige la justesse,
+    et calcule les touches qui manquent <b>sans que le timbre bouge</b>.</p>
+  <div class="get">
+    <a class="dl" id="dl" href="https://github.com/distortedimages-code/REPLIKANT/releases/latest/download/REPLIKANT-mac.dmg">
+      <span class="dl-arrow" aria-hidden="true">▼</span> Télécharger
+      <small id="dl-file">REPLIKANT-mac.dmg</small>
+    </a>
+    <ul class="specs">
+      <li><span class="ver">v@VERSION@</span></li><li>macOS 11+</li><li>Apple Silicon &amp; Intel</li><li>AU · VST3 · appli</li><li>gratuit</li>
+    </ul>
+  </div>
+  <figure class="screen">
+    <img src="img/instrument-1360.webp" srcset="img/instrument-680.webp 680w, img/instrument-1360.webp 1360w"
+         sizes="(max-width: 1100px) 100vw, 1060px" width="1360" height="848"
+         alt="REPLIKANT : les réglages à gauche, la carte des zones et le clavier, le sample avec sa boucle et son raccord.">
+  </figure>
+</section>
+
+<section class="mod" id="quoi">
+  <h2><span>00 · Ce qu'il fait</span></h2>
+  <div class="facts">
+    <div><h3>Enregistre</h3><p>Les notes que tu veux (tous les N demi-tons, N notes réparties, ou à la main), jusqu'à 16 vélocités et 8 prises (round robin), le MIDI envoyé tout seul au synthé.</p></div>
+    <div><h3>Découpe</h3><p>Bruit de fond mesuré d'abord, attaque détectée (ou une latence fixe pour tous), la queue gardée jusqu'à ce qu'elle retombe dans le bruit.</p></div>
+    <div><h3>Boucle</h3><p>Des boucles longues qui suivent les modulations lentes (LFO, PWM), avec un fondu qui garde la puissance : ni creux, ni bosse.</p></div>
+    <div><h3>Accorde</h3><p>La justesse de chaque note est mesurée (même avec un sub ou des oscillateurs désaccordés) et corrigée en jouant.</p></div>
+    <div><h3>Transpose</h3><p>Les touches entre deux notes enregistrées : varispeed sans repliement, puis l'enveloppe spectrale remise en place.</p></div>
+    <div><h3>Exporte</h3><p>Dossier de WAV qui portent leur note, leur boucle et leur zone (Logic, Ableton, Kontakt…), ou .multisample Bitwig.</p></div>
+  </div>
+</section>
+
+<!-- 01 INSTALLER ============================================================ -->
+<section class="mod" id="installer">
+  <h2><span>01 · Installer</span></h2>
+  <div class="tabs" role="tablist">
+    <button role="tab" aria-selected="true" data-route="pkg">L'installeur</button>
+    <button role="tab" aria-selected="false" data-route="hand">À la main</button>
+  </div>
+
+  <div class="route" data-route="pkg">
+    <ol class="steps-list">
+      <li><kbd>1</kbd>Ouvre le DMG. Quitte ton DAW.</li>
+      <li><kbd>2</kbd>Double-clic sur <b>Installer REPLIKANT</b>. <small>« Personnaliser » = juste l'AU, le VST3 ou l'appli.</small></li>
+      <li><kbd>3</kbd>macOS refuse&nbsp;? <small>(Il n'aime pas ce qui n'est pas signé chez Apple.)</small> Ouvre le Terminal&nbsp;: <kbd class="k">⌘</kbd>+<kbd class="k">Espace</kbd>, tape <b>Terminal</b>, <kbd class="k">⏎</kbd>. Colle&nbsp;:
+        <div class="cmd"><code id="cmd-pkg">@INSTALLER_CMD@</code><button class="copy" data-copy="cmd-pkg">Copier</button></div>
+        <small>Puis ton mot de passe&nbsp;: rien ne s'affiche quand tu le tapes, c'est normal.</small></li>
+    </ol>
+  </div>
+
+  <div class="route" data-route="hand" hidden>
+    <ol class="steps-list">
+      <li><kbd>1</kbd>Ouvre le DMG. Quitte ton DAW.</li>
+      <li><kbd>2</kbd>Glisse chaque élément sur son dossier&nbsp;: <b>.component</b> → Components, <b>.vst3</b> → VST3, <b>.app</b> → Applications.</li>
+      <li><kbd>3</kbd>Ouvre le Terminal&nbsp;: <kbd class="k">⌘</kbd>+<kbd class="k">Espace</kbd>, tape <b>Terminal</b>, <kbd class="k">⏎</kbd>. Colle&nbsp;:
+        <div class="cmd"><code id="cmd-hand">@TERMINAL_CMD@</code><button class="copy" data-copy="cmd-hand">Copier</button></div>
+        <small>Mot de passe (invisible, c'est normal). Elle débloque l'AU et le VST3, puis fait valider l'AU.</small></li>
+    </ol>
+  </div>
+  <p class="done">Quand le Terminal dit <b class="y">REPLIKANT est prêt.</b>, rouvre ton DAW. <small>Live ne le voit pas&nbsp;? Réglages › Plug-ins › Réanalyser.</small><br>
+    Ensuite, les mises à jour se font depuis le plug-in&nbsp;: bouton <b>Mise à jour</b> en haut quand une version sort.</p>
+</section>
+
+<!-- 02 BRANCHER ============================================================= -->
+<section class="mod" id="brancher">
+  <h2><span>02 · Brancher</span></h2>
+  <p class="intro">Deux câbles&nbsp;: le <b>MIDI</b> de l'ordinateur vers le synthé, et la <b>sortie audio</b> du synthé dans ta carte son. REPLIKANT envoie les notes directement au port MIDI choisi, quel que soit le DAW.</p>
+  <div class="daw">
+    <div><h3>L'appli (le plus simple)</h3><ol>
+      <li><b>Carte son</b> (en haut)&nbsp;: ta carte, et les entrées où arrive le synthé.</li>
+      <li>Page <b>Enregistrement</b> › Source&nbsp;: Son = <b>Entrée</b>, Sortie MIDI = le port du synthé, son canal.</li>
+      <li><b>Test MIDI</b>&nbsp;: tu dois entendre un C3 et voir le niveau d'entrée bouger.</li></ol></div>
+    <div><h3>Logic</h3><ol>
+      <li>Une piste audio qui reçoit le synthé (monitoring d'entrée allumé), REPLIKANT en effet audio (<i>Audio Units › distortedimages</i>).</li>
+      <li>Sortie MIDI = le port du synthé, puis <b>Sampler</b>.</li>
+      <li>Pour jouer l'instrument&nbsp;: piste d'instrument, slot d'instrument › <i>Effets contrôlés par MIDI</i> › REPLIKANT, bouton <b>Ouvrir</b>.</li></ol></div>
+    <div><h3>Bitwig, Reaper, Cubase</h3><ol>
+      <li>REPLIKANT sur une piste qui reçoit l'audio du synthé&nbsp;: il enregistre son entrée et joue l'instrument avec les notes de la piste.</li>
+      <li>Sortie MIDI = le port du synthé (ou <b>Hôte</b> si tu routes la sortie MIDI du plug-in vers le synthé).</li></ol></div>
+    <div><h3>Ableton Live</h3><ol>
+      <li>REPLIKANT sur une piste audio (entrée = le synthé, Monitor <i>In</i>)&nbsp;: il enregistre très bien.</li>
+      <li>Live n'envoie pas de notes aux effets audio&nbsp;: pour jouer, <b>Exporter</b> en dossier de WAV et glisse-le dans Sampler (ou joue-le dans l'appli).</li></ol></div>
+  </div>
+  <p class="cap" style="margin:14px 20px 0">Pas de synthé sous la main&nbsp;? Source › <b>Synthé test</b>&nbsp;: un petit analogique intégré, pour tout essayer.</p>
+</section>
+
+<!-- 03 SAMPLER ============================================================== -->
+<section class="mod" id="sampler">
+  <h2><span>03 · Sampler</span></h2>
+  <ol class="steps-list">
+    <li><kbd>1</kbd><b>Notes</b>&nbsp;: tire les deux poignées jaunes sous le clavier (ou De / À), puis <i>Tous les</i> N demi-tons. <small>3 demi-tons, c'est le bon compromis&nbsp;: la transposition HQ s'occupe du reste. Mode <i>Perso</i>&nbsp;: Alt-clic sur les touches.</small></li>
+    <li><kbd>2</kbd><b>Vélocités</b>&nbsp;: le nombre de couches, et où les mettre (réparties, plus dans le doux, plus dans le fort). <b>Round robin</b>&nbsp;: plusieurs prises de chaque note, jouées à tour de rôle.</li>
+    <li><kbd>3</kbd><b>Durées</b>&nbsp;: <i>Tenue</i> = la note tenue (la boucle est cherchée dedans), <i>Relâche max</i> = la queue la plus longue. <i>One-shot</i> pour les percussions.</li>
+    <li><kbd>4</kbd>Donne un nom en haut, puis <b>Sampler</b>. <small>Laisse le synthé silencieux au début&nbsp;: REPLIKANT mesure le bruit de fond, puis joue les notes une à une. La carte se remplit, la note en cours clignote en rouge.</small></li>
+    <li><kbd>5</kbd>À la fin, l'instrument est enregistré dans <b>Musique › REPLIKANT</b> et ses touches sont rendues en HQ. Clique une zone de la carte pour voir son sample, sa boucle et son raccord&nbsp;; joue sur le clavier (plus haut sur la touche = plus doux).</li>
+  </ol>
+  <figure class="shot"><img src="img/session-1360.webp" srcset="img/session-680.webp 680w, img/session-1360.webp 1360w" sizes="(max-width: 1100px) 100vw, 1060px" width="1360" height="848" alt="Une session en cours : les zones enregistrées se remplissent, la note en cours en rouge."></figure>
+</section>
+
+<!-- 04 TRANSPOSER =========================================================== -->
+<section class="mod" id="transposer">
+  <h2><span>04 · Transposer</span></h2>
+  <p class="intro">Entre deux notes enregistrées, les touches sont calculées. Trois algorithmes, page <b>Transposition</b>&nbsp;:</p>
+  <ul class="steps-list">
+    <li><kbd>HQ</kbd><b>HQ formants</b> (par défaut)&nbsp;: varispeed avec un sinc de 128 points (pas de repliement, aigus intacts), puis l'enveloppe spectrale de chaque instant remise où elle était. Le filtre du synthé ne monte plus avec la note&nbsp;: c'est ce que fait le synthé lui-même. <i>Formants</i> à moins de 100&nbsp;% = le timbre suit un peu le clavier.</li>
+    <li><kbd>HD</kbd><b>Classique HD</b>&nbsp;: le varispeed seul, le son des samplers d'origine en propre.</li>
+    <li><kbd>T</kbd><b>Durée fixe</b>&nbsp;: les attaques et les decays gardent leur durée (pitch-shift spectral), avec la même correction de formants. Pour les sons qui évoluent lentement.</li>
+  </ul>
+  <p class="intro" style="margin-top:14px">Mesuré sur une dent de scie passée dans un filtre résonant fixe&nbsp;: l'écart moyen des harmoniques avec le vrai synthé jouant la note.</p>
+  <table class="cmp">
+    <tr><th>Transposition</th><th>Varispeed</th><th>HQ formants</th></tr>
+    <tr><td>−12 demi-tons</td><td>12,8 dB</td><td class="good">0,8 dB</td></tr>
+    <tr><td>−7 demi-tons</td><td>7,7 dB</td><td class="good">0,5 dB</td></tr>
+    <tr><td>−3 demi-tons</td><td>3,4 dB</td><td class="good">0,2 dB</td></tr>
+    <tr><td>+3 demi-tons</td><td>3,5 dB</td><td class="good">0,4 dB</td></tr>
+    <tr><td>+5 demi-tons</td><td>5,8 dB</td><td class="good">0,6 dB</td></tr>
+    <tr><td>+12 demi-tons</td><td>13,9 dB</td><td class="good">0,2 dB</td></tr>
+  </table>
+  <p class="cap" style="margin:12px 20px 0">Les boucles suivent&nbsp;: leur longueur reste un nombre entier d'échantillons (la vitesse est ajustée de moins d'un dixième de cent) et la zone bouclée est calculée comme une boucle sans fin, donc sans raccord audible. <b>Touches</b>&nbsp;: <i>rendues HQ</i> (calculées à l'avance, le meilleur son) ou <i>en direct</i> (varispeed à la volée, moins de mémoire). <b>Placement</b>&nbsp;: la note enregistrée au centre de sa zone, en bas ou en haut. <b>Accordage</b>&nbsp;: chaque note est jouée juste, d'après sa mesure.</p>
+  <figure class="shot"><img src="img/transposition-1360.webp" srcset="img/transposition-680.webp 680w, img/transposition-1360.webp 1360w" sizes="(max-width: 1100px) 100vw, 1060px" width="1360" height="848" alt="La page Transposition et les réglages de jeu."></figure>
+</section>
+
+<!-- 05 EXPORTER ============================================================= -->
+<section class="mod" id="exporter">
+  <h2><span>05 · Exporter</span></h2>
+  <ul class="steps-list">
+    <li><kbd>WAV</kbd><b>Dossier de WAV</b>&nbsp;: chaque fichier porte sa note, sa justesse, sa boucle (chunk <i>smpl</i>) et sa zone (chunk <i>inst</i>). Glisse le dossier dans le Sampler de Logic, Sampler/Simpler d'Ableton, Kontakt, un Elektron, une MPC…</li>
+    <li><kbd>BW</kbd><b>Bitwig .multisample</b>&nbsp;: l'instrument complet (zones, vélocités, round robin, boucles), à glisser dans Bitwig.</li>
+    <li><kbd>★</kbd>Chacun en deux versions&nbsp;: <b>les samples enregistrés</b> (le sampler cible transpose), ou <b>toutes les touches</b> rendues par REPLIKANT (chaque touche a son propre fichier&nbsp;: la qualité HQ partout).</li>
+  </ul>
+  <p class="cap" style="margin:12px 20px 0">L'instrument lui-même est un dossier dans <b>Musique › REPLIKANT</b>&nbsp;: un fichier <i>.replikant</i> et ses WAV. <b>Ouvrir</b> le recharge&nbsp;; le projet de ton DAW s'en souvient.</p>
+</section>
+
+</main>
+
+<footer>
+  <p class="links"><a href="https://github.com/distortedimages-code/REPLIKANT">Le code</a> · <a href="https://github.com/distortedimages-code/REPLIKANT/releases">Les versions</a></p>
+  <p>REPLIKANT v@VERSION@ · Pitch-shift spectral&nbsp;: Signalsmith Stretch (MIT) · Polices&nbsp;: Silkscreen et VT323 (SIL OFL)</p>
+</footer>
+
+<script>
+// installer tabs
+document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.tabs button').forEach(x => x.setAttribute('aria-selected', x === b));
+  document.querySelectorAll('.route').forEach(r => r.hidden = r.dataset.route !== b.dataset.route);
+}));
+// copy buttons
+document.querySelectorAll('.copy').forEach(b => b.addEventListener('click', async () => {
+  const t = document.getElementById(b.dataset.copy).textContent;
+  try { await navigator.clipboard.writeText(t); b.textContent = 'Copié !'; }
+  catch (e) { const r = document.createRange(); r.selectNodeContents(document.getElementById(b.dataset.copy)); getSelection().removeAllRanges(); getSelection().addRange(r); b.textContent = 'Cmd+C'; }
+  setTimeout(() => b.textContent = 'Copier', 1800);
+}));
+// the latest version, as GitHub has it
+fetch('https://api.github.com/repos/distortedimages-code/REPLIKANT/releases/latest').then(r => r.ok ? r.json() : null).then(j => {
+  if (!j || !j.tag_name) return;
+  document.querySelectorAll('.ver').forEach(e => e.textContent = j.tag_name);
+}).catch(() => {});
+// the title bands rush in when they come into view
+const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add('rush'); io.unobserve(e.target); } }), { threshold: .3 });
+document.querySelectorAll('.mod').forEach(m => io.observe(m));
+</script>
+</body>
+</html>

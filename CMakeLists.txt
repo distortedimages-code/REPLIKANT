@@ -1,0 +1,185 @@
+cmake_minimum_required(VERSION 3.22)
+
+if(APPLE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
+    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Universal binary")
+endif()
+
+project(REPLIKANT VERSION 0.1.0 LANGUAGES C CXX)
+
+# GitHub repository whose releases the plug-in checks for updates (public releases).
+set(RK_UPDATE_REPO "distortedimages-code/REPLIKANT" CACHE STRING "owner/repo checked for updates (empty = no update check)")
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release)
+endif()
+
+# JUCE: a local checkout with -DJUCE_DIR=/path/to/JUCE, otherwise JUCE 8.0.4 (same as OXIde and RackAttack Editor).
+if(DEFINED JUCE_DIR)
+    add_subdirectory(${JUCE_DIR} JUCE)
+else()
+    include(FetchContent)
+    FetchContent_Declare(JUCE
+        GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+        GIT_TAG 8.0.4
+        GIT_SHALLOW TRUE)
+    FetchContent_MakeAvailable(JUCE)
+endif()
+
+#==============================================================================
+# The DSP core, no JUCE inside: interpolation, formants, loops, pitch, captures, WAV chunks.
+add_library(rk_core STATIC
+    Source/core/RkCore.cpp
+    Source/core/Sinc.cpp
+    Source/core/Analysis.cpp
+    Source/core/LoopFinder.cpp
+    Source/core/Formant.cpp
+    Source/core/Transpose.cpp
+    Source/core/Plan.cpp
+    Source/core/Wav.cpp
+    Source/core/Capture.cpp)
+target_compile_features(rk_core PUBLIC cxx_std_17)
+# Signalsmith Stretch and Linear (MIT), vendored in ThirdParty
+target_include_directories(rk_core PUBLIC ThirdParty)
+set_target_properties(rk_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(APPLE)
+    target_compile_definitions(rk_core PUBLIC SIGNALSMITH_USE_ACCELERATE)
+    target_link_libraries(rk_core PUBLIC "-framework Accelerate")
+endif()
+if(NOT MSVC)
+    # the DSP is heavy: optimised even in debug builds
+    target_compile_options(rk_core PRIVATE -O3)
+endif()
+
+#==============================================================================
+# REPLIKANT: AU (music effect: audio in from the synth, MIDI in to play), VST3 and the app (standalone)
+juce_add_plugin(REPLIKANT
+    COMPANY_NAME "distortedimages"
+    PRODUCT_NAME "REPLIKANT"
+    BUNDLE_ID com.distortedimages.replikant
+    IS_SYNTH FALSE
+    NEEDS_MIDI_INPUT TRUE
+    NEEDS_MIDI_OUTPUT TRUE
+    IS_MIDI_EFFECT FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
+    COPY_PLUGIN_AFTER_BUILD FALSE
+    PLUGIN_MANUFACTURER_CODE Dimg
+    PLUGIN_CODE Rplk
+    MICROPHONE_PERMISSION_ENABLED TRUE
+    MICROPHONE_PERMISSION_TEXT "REPLIKANT enregistre ton synthé par l'entrée de ta carte son. Rien n'est envoyé nulle part."
+    AU_MAIN_TYPE kAudioUnitType_MusicEffect
+    VST3_CATEGORIES Fx Sampler Instrument
+    FORMATS AU VST3 Standalone)
+
+juce_generate_juce_header(REPLIKANT)
+
+set(RK_APP_SOURCES
+    Source/plugin/PluginProcessor.cpp
+    Source/plugin/Updater.cpp
+    Source/engine/Instrument.cpp
+    Source/engine/Recorder.cpp
+    Source/engine/Worker.cpp
+    Source/engine/Player.cpp
+    Source/engine/TestSynth.cpp
+    Source/ui/Pixel.cpp
+    Source/ui/UpdatePanel.cpp
+    Source/ui/KeyMap.cpp
+    Source/ui/WaveView.cpp
+    Source/ui/MainView.cpp)
+
+# Pixel fonts (SIL Open Font License, see Resources/fonts)
+juce_add_binary_data(RkFonts SOURCES
+    Resources/fonts/Silkscreen-Regular.ttf
+    Resources/fonts/Silkscreen-Bold.ttf
+    Resources/fonts/VT323-Regular.ttf)
+set_target_properties(RkFonts PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# This version's notes, for the window that tells what it brought the first time it opens
+juce_add_binary_data(RkNotes HEADER_NAME RkNotesData.h NAMESPACE RkNotesData SOURCES RELEASE_NOTES.md)
+set_target_properties(RkNotes PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+set(RK_DEFINITIONS
+    RK_VERSION="${PROJECT_VERSION}"
+    RK_UPDATE_REPO="${RK_UPDATE_REPO}")
+
+target_sources(REPLIKANT PRIVATE ${RK_APP_SOURCES})
+
+target_compile_definitions(REPLIKANT PUBLIC
+    ${RK_DEFINITIONS}
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_VST3_CAN_REPLACE_VST2=0
+    JUCE_DISPLAY_SPLASH_SCREEN=0)
+
+target_link_libraries(REPLIKANT
+    PRIVATE
+        rk_core
+        RkFonts
+        RkNotes
+        juce::juce_audio_utils
+        juce::juce_audio_devices
+        juce::juce_cryptography
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_lto_flags
+        juce::juce_recommended_warning_flags)
+
+#==============================================================================
+option(RK_BUILD_TESTS "Build the tests" ON)
+
+if(RK_BUILD_TESTS)
+    enable_testing()
+
+    # the DSP core on its own
+    add_executable(CoreTests Tests/CoreTests.cpp)
+    target_link_libraries(CoreTests PRIVATE rk_core)
+    add_test(NAME CoreTests COMMAND CoreTests)
+
+    # a whole session on the test synth: recorder, worker, instrument, player, saving, exports
+    juce_add_console_app(EngineTests PRODUCT_NAME "EngineTests")
+    juce_generate_juce_header(EngineTests)
+    target_sources(EngineTests PRIVATE Tests/EngineTests.cpp
+        Source/engine/Instrument.cpp Source/engine/Recorder.cpp Source/engine/Worker.cpp
+        Source/engine/Player.cpp Source/engine/TestSynth.cpp)
+    target_compile_definitions(EngineTests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    target_link_libraries(EngineTests PRIVATE
+        rk_core
+        juce::juce_audio_utils
+        juce::juce_audio_devices
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+    add_test(NAME EngineTests COMMAND EngineTests)
+    set_tests_properties(EngineTests PROPERTIES ENVIRONMENT "HOME=${CMAKE_CURRENT_BINARY_DIR}/test-home")
+
+    # Update checker: version compare, GitHub answer parsing, checksum, bundle replacement
+    juce_add_console_app(UpdaterTests PRODUCT_NAME "UpdaterTests")
+    juce_generate_juce_header(UpdaterTests)
+    target_sources(UpdaterTests PRIVATE Tests/UpdaterTests.cpp Source/plugin/Updater.cpp)
+    target_compile_definitions(UpdaterTests PRIVATE ${RK_DEFINITIONS} JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    target_link_libraries(UpdaterTests PRIVATE
+        juce::juce_core
+        juce::juce_events
+        juce::juce_data_structures
+        juce::juce_cryptography
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+    add_test(NAME UpdaterTests COMMAND UpdaterTests)
+
+    # Not a test: the window drawn to a PNG (to look at it without a Mac)
+    juce_add_console_app(Snapshot PRODUCT_NAME "Snapshot")
+    juce_generate_juce_header(Snapshot)
+    target_sources(Snapshot PRIVATE Tests/Snapshot.cpp ${RK_APP_SOURCES})
+    target_compile_definitions(Snapshot PRIVATE ${RK_DEFINITIONS} JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1
+        JucePlugin_Name="REPLIKANT" JucePlugin_Build_Standalone=0 RK_SNAPSHOT=1)
+    target_link_libraries(Snapshot PRIVATE
+        rk_core
+        RkFonts
+        RkNotes
+        juce::juce_audio_utils
+        juce::juce_audio_devices
+        juce::juce_cryptography
+        juce::juce_recommended_config_flags)
+    set_target_properties(Snapshot PROPERTIES EXCLUDE_FROM_ALL TRUE)
+endif()
