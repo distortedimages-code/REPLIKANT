@@ -112,6 +112,14 @@ int main (int argc, char** argv)
     set (snd::orAlgo, 0.0f);
     set (snd::orOn, 0.0f);
     view->showBank (0);
+    // SPECTRE at work: its partials and their trail
+    set (snd::spOn, 1.0f);
+    view->showPage (7);
+    view->showBank (1);
+    run (90);
+    shoot ("32-synthe-spectre.png");
+    set (snd::spOn, 0.0f);
+    view->showBank (0);
     // the filter's other banks and models: the drive on tape, the MS-20 high-pass
     view->showPage (5);
     set (snd::dModel, 3.0f);
@@ -221,6 +229,15 @@ int main (int argc, char** argv)
         run (60);
         shoot (samplerShots[pg]);
     }
+    // the SUB, OCTAVE, on the mixer's second bank
+    set (snd::subOn, 1.0f);
+    set (snd::subMode, 1.0f);
+    view->showPage (4);
+    view->showBank (1);
+    run (40);
+    shoot ("33-sampler-sub.png");
+    set (snd::subOn, 0.0f);
+    view->showBank (0);
     // a mod armed: the encoders show its routes
     proc.player.setRoute (1, snd::cutoff, -0.3f);
     proc.player.setSceneLock (0, snd::cutoff, 300.0f);

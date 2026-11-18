@@ -185,6 +185,14 @@ namespace
         { "mxSample",  "Sample",                      K::linear,  0, 1, 1, 1, nullptr, true, "%" },
         { "mxOrbite",  "Orbite",                      K::linear,  0, 1, 0.7f, 1, nullptr, true, "%" },
         { "tune",      "Tune",                        K::linear,  -96, 96, 0, 1, nullptr, true, "tun" },
+        { "subOn",     "Sub",                         K::toggle,  0, 1, 0, 1, nullptr, false, "" },
+        { "subMode",   "Source",                      K::choice,  0, 1, 0, 1, "SINE|OCTAVE", false, "" },
+        { "subOct",    "Octave",                      K::choice,  0, 1, 0, 1, "-1 OCT|-2 OCT", false, "" },
+        { "subXover",  "Crossover",                   K::log,     40, 250, 100, 1, nullptr, true, "Hz" },
+        { "subReplace","Replace",                     K::linear,  0, 1, 0.5f, 1, nullptr, true, "%" },
+        { "subDrive",  "Drive",                       K::linear,  0, 1, 0, 1, nullptr, true, "%" },
+        { "subFollow", "Follow",                      K::toggle,  0, 1, 1, 1, nullptr, false, "" },
+        { "mxSub",     "Sub",                         K::linear,  0, 1, 0.7f, 1, nullptr, true, "%" },
     };
 
     std::string fmt (const char* f, double v)
@@ -361,6 +369,8 @@ std::string longName (int id)
     if (in (s2Wave, s2Phase))      return "Orbite sat 2 " + name;
     if (in (mxSample, mxOrbite))   return "Mixer " + name;
     if (id == tune)                return "Sampler " + name;
+    if (in (subMode, subFollow))   return "Sub " + name;
+    if (id == mxSub)               return "Mixer Sub";
     return name;
 }
 }

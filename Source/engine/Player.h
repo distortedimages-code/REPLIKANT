@@ -25,6 +25,20 @@
 
 namespace dsp { class Polyphase; }
 
+// a biquad (transposed direct form II), its coefficients set from outside
+struct RkBiquad
+{
+    float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f, z1 = 0.0f, z2 = 0.0f;
+    inline float tick (float x)
+    {
+        const float y = b0 * x + z1;
+        z1 = b1 * x - a1 * y + z2;
+        z2 = b2 * x - a2 * y;
+        return y;
+    }
+    void clear()                   { z1 = z2 = 0.0f; }
+};
+
 #include <array>
 #include <atomic>
 
@@ -193,6 +207,33 @@ private:
         // ORBITE: its oscillators, and how far satellite 2's restart has circled (cycles, unwrapped)
         dsp::Orbite orb;
         double orbit = 0.0;
+        // SUB: the sine's phase, the follower, the crossover (the sample split, the sub kept low, the infra taken
+        // away), OCTAVE's two heads reading the sample slower
+        using Biquad = RkBiquad;
+        struct Sub
+        {
+            double phase = 0.0;
+            float env = 0.0f;
+            Biquad lo[2][2], hi[2][2];     // the sample's split (left, right), each a Linkwitz-Riley pair
+            Biquad band[2], infra[2];      // the sub: kept under the crossover, then over 22 Hz
+            struct Head { bool on = false; double pos = 0.0; float phase = 0.0f, inc = 0.0f; };
+            Head heads[3];                 // (two playing, the third free as the oldest ends)
+            float sinceHead = 1.0e9f;
+            float xoverNow = -1.0f;
+            void clear()
+            {
+                phase = 0.0;
+                env = 0.0f;
+                for (auto& c : lo) for (auto& b : c) b.clear();
+                for (auto& c : hi) for (auto& b : c) b.clear();
+                for (auto& b : band) b.clear();
+                for (auto& b : infra) b.clear();
+                for (auto& h : heads) h.on = false;
+                sinceHead = 1.0e9f;
+                xoverNow = -1.0f;
+            }
+        };
+        Sub sub;
         Env amp, flt;
         // elastic
         double scan = 0.0;

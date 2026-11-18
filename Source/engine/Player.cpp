@@ -74,6 +74,23 @@ namespace
         return p;
     }
 
+    // second-order Butterworth sections (a Linkwitz-Riley crossover is two of them in a row)
+    void butterworth (RkBiquad& q, double hz, double sr, bool high)
+    {
+        const double w = 2.0 * 3.14159265358979 * std::min (hz, sr * 0.45) / sr, c = std::cos (w), al = std::sin (w) / (2.0 * 0.70710678);
+        const double a0 = 1.0 + al;
+        if (high)
+        {
+            q.b0 = (float) ((1.0 + c) * 0.5 / a0); q.b1 = (float) (-(1.0 + c) / a0); q.b2 = q.b0;
+        }
+        else
+        {
+            q.b0 = (float) ((1.0 - c) * 0.5 / a0); q.b1 = (float) ((1.0 - c) / a0); q.b2 = q.b0;
+        }
+        q.a1 = (float) (-2.0 * c / a0);
+        q.a2 = (float) ((1.0 - al) / a0);
+    }
+
     constexpr int spliceLength = 144;     // 3 ms at 48 kHz: a splice smoothed
 }
 
@@ -440,6 +457,7 @@ void Player::startVoice (int note, int velocity, float fromPitch, const Chunk& c
     v.lastOut = 0.0f;
     v.orb.reset();
     v.orbit = 0.0;
+    v.sub.clear();
     v.attackLeft = 0;
     // TRANSITOIRES GARDÉS: the attack at its own speed, the pitched body taking over at its end
     if (c.v[snd::transients] > 0.5f && ! c.elastic && c.v[snd::reverse] < 0.5f && std::abs (v.baseShift) > 0.01)
@@ -921,6 +939,38 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
                            + (double) c.v[snd::tune];
     const OrbitePlan op = orbNeeded ? orbitePlan (c.v, playedNow, sr) : OrbitePlan {};
     float orbNow = 0.0f;
+    // the SUB: its frequency (the note one or two octaves down, back up an octave while under 25 Hz), the crossover
+    const bool subOn = c.v[snd::subOn] > 0.5f;
+    const bool subOctave = (int) c.v[snd::subMode] == 1;
+    const float subMix = c.v[snd::mxSub] * 0.6f, subKeep = 1.0f - c.v[snd::subReplace];
+    const float subDrive = 1.0f + 7.0f * c.v[snd::subDrive], subNorm = 1.0f / std::tanh (subDrive);
+    const bool subFollow = c.v[snd::subFollow] > 0.5f;
+    double subHz = rk::noteHz (playedNow) / ((int) c.v[snd::subOct] == 1 ? 4.0 : 2.0);
+    while (subHz < 25.0)
+        subHz *= 2.0;
+    const double subRatio = subHz / rk::noteHz (playedNow);            // the octave heads' speed, against the reading's
+    // the heads' grains: two and a half periods of the sub, 20 to 120 ms; their alignment: the material's period
+    const float headLen = (float) juce::jlimit (0.02 * sr, 0.12 * sr, 2.5 * sr / subHz);
+    const double periodSrc = sr / rk::noteHz (playedNow) * std::abs (r.step);
+    const float followUp = 1.0f - std::exp (-1.0f / (0.003f * (float) sr)), followDown = 1.0f - std::exp (-1.0f / (0.12f * (float) sr));
+    if (subOn)
+    {
+        const float xo = c.v[snd::subXover];
+        if (std::abs (xo - v.sub.xoverNow) > 0.01f)
+        {
+            v.sub.xoverNow = xo;
+            for (int ch = 0; ch < 2; ++ch)
+                for (int k = 0; k < 2; ++k)
+                {
+                    butterworth (v.sub.lo[ch][k], xo, sr, false);
+                    butterworth (v.sub.hi[ch][k], xo, sr, true);
+                }
+            butterworth (v.sub.band[0], xo, sr, false);
+            butterworth (v.sub.band[1], xo, sr, false);
+            butterworth (v.sub.infra[0], 22.0, sr, true);
+            butterworth (v.sub.infra[1], 22.0, sr, true);
+        }
+    }
     // CROSSFADE: the loop's end fades into what comes before its start, up to half the loop and no
     // further back than the sample's beginning
     const double xfLen = r.loop ? juce::jmin ((double) c.v[snd::loopXfade] * 0.5 * (double) (r.le - r.ls), (double) r.ls) : 0.0;
@@ -1107,8 +1157,76 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
         }
         xl = quantise (xl);
         xr = stereo ? quantise (xr) : xl;
-        xl = xl * mixS + orbNow * mixO;
-        xr = xr * mixS + orbNow * mixO;
+        float subOut = 0.0f;
+        if (subOn)
+        {
+            // the sample split at the crossover: its highs as they are, its lows kept as far as REPLACE leaves them
+            auto& S = v.sub;
+            const float inMono = 0.5f * (xl + xr);
+            const float lowL = S.lo[0][1].tick (S.lo[0][0].tick (xl)), highL = S.hi[0][1].tick (S.hi[0][0].tick (xl));
+            float lowR = lowL, highR = highL;
+            if (stereo)
+            {
+                lowR = S.lo[1][1].tick (S.lo[1][0].tick (xr));
+                highR = S.hi[1][1].tick (S.hi[1][0].tick (xr));
+            }
+            xl = highL + subKeep * lowL;
+            xr = highR + subKeep * lowR;
+            // the sub itself
+            float s = 0.0f;
+            if (! subOctave)
+            {
+                S.phase += subHz / sr;
+                S.phase -= std::floor (S.phase);
+                s = std::sin (twoPi * (float) S.phase);
+                const float a = std::abs (inMono);
+                S.env += (a - S.env) * (a > S.env ? followUp : followDown);
+                s *= subFollow ? juce::jmin (1.0f, S.env * 2.5f) : 0.5f;
+            }
+            else
+            {
+                // OCTAVE: the sample read slower by two heads (Hann grains, half overlapping), each new one starting where
+                // the reading is, on the material's period from the old one (no beating between them)
+                const double srcNow = c.elastic ? v.scan : v.pos;
+                S.sinceHead += 1.0f;
+                if (S.sinceHead >= headLen * 0.5f)
+                {
+                    S.sinceHead = 0.0f;
+                    const Voice::Sub::Head* old = nullptr;             // the youngest still playing
+                    for (auto& h : S.heads)
+                        if (h.on && (old == nullptr || h.phase < old->phase))
+                            old = &h;
+                    double start = srcNow;
+                    if (old != nullptr && periodSrc > 1.0)
+                        start = old->pos + periodSrc * std::round ((srcNow - old->pos) / periodSrc);
+                    for (auto& h : S.heads)
+                        if (! h.on)
+                        {
+                            h = { true, start, 0.0f, 1.0f / headLen };
+                            break;
+                        }
+                }
+                const double headStep = stepNow * subRatio;
+                for (auto& h : S.heads)
+                {
+                    if (! h.on)
+                        continue;
+                    float hl, hr;
+                    readFrame (r, h.pos, std::abs (headStep), hl, hr);
+                    s += 0.5f * (hl + hr) * (0.5f - 0.5f * std::cos (twoPi * h.phase));
+                    h.pos += headStep;
+                    h.phase += h.inc;
+                    if (h.phase >= 1.0f)
+                        h.on = false;
+                }
+            }
+            // warmed by DRIVE, then kept under the crossover (its harmonics too) and over the infra
+            s = std::tanh (s * subDrive) * subNorm;
+            s = S.band[1].tick (S.band[0].tick (s));
+            subOut = S.infra[1].tick (S.infra[0].tick (s)) * subMix;
+        }
+        xl = xl * mixS + orbNow * mixO + subOut;
+        xr = xr * mixS + orbNow * mixO + subOut;
         // RETOUR's next push: this sample, kept in bounds (a feedback that can't run away)
         v.lastOut = juce::jlimit (-1.5f, 1.5f, 0.5f * (xl + xr));
         const float fe = tick (v.flt, c.flt, false);

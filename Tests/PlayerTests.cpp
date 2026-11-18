@@ -1519,6 +1519,77 @@ static void testOrbite()
     }
 }
 
+//==============================================================================
+// SUB: a sine on the note (never under 25 Hz), the sample an octave down kept on its time, the crossover taking the
+// sample's own lows away
+static void testSub()
+{
+    auto sampler = [] (Player& p, Instrument* ins)
+    {
+        p.set (snd::engine, (float) snd::sampler);
+        plain (p);
+        p.setInstrument (ins);
+        p.set (snd::subOn, 1.0f);
+        p.set (snd::mxSub, 1.0f);
+    };
+    // SINE, an octave under the note played (C2 -> C1, 32.7 Hz)
+    {
+        auto ins = instrumentOf (sine (rk::noteHz (60), 3.0), 480, 480 + 183 * 2 * 100);
+        Player p;
+        sampler (p, ins.get());
+        p.set (snd::subReplace, 0.0f);
+        auto out = play (p, 1.0, { { 0.0, 48, 127 } });
+        const double sub = db (toneLevel (out, 9600, 32768, rk::noteHz (36)));
+        CHECK (sub > -26.0, "SUB SINE: C1 under a C2 at %.1f dB", sub);
+        std::printf ("  SUB SINE under a C2: C1 at %.1f dB\n", sub);
+    }
+    // never under 25 Hz: two octaves under C0 is 4 Hz; it comes back up to C1 (32.7 Hz) and above
+    {
+        auto ins = instrumentOf (sine (rk::noteHz (60), 3.0), 480, 480 + 183 * 2 * 100);
+        Player p;
+        sampler (p, ins.get());
+        p.set (snd::subOct, 1.0f);
+        auto out = play (p, 1.0, { { 0.0, 12, 127 } });
+        const double at = db (toneLevel (out, 9600, 32768, rk::noteHz (12) * 2.0)), under = db (toneLevel (out, 9600, 32768, rk::noteHz (12) / 4.0));
+        CHECK (at > under + 20.0, "SUB at C0 -2 oct: at 32.7 Hz %.1f dB, at 4 Hz %.1f dB", at, under);
+    }
+    // OCTAVE: the sample (on its root) read an octave down, in time; the two heads don't beat
+    {
+        auto ins = instrumentOf (sine (rk::noteHz (60), 3.0, 0.5f), 0, (int) std::lround (sr / rk::noteHz (60) * 560));
+        Player p;
+        sampler (p, ins.get());
+        p.set (snd::subMode, 1.0f);
+        p.set (snd::subXover, 250.0f);
+        p.set (snd::mxSample, 0.0f);
+        auto out = play (p, 1.2, { { 0.0, 60, 127 } });
+        const double f = rk::noteHz (48);
+        const double sub = db (toneLevel (out, 9600, 32768, f));
+        // its level steady (no beating between the grains): windows of ten periods
+        const size_t period = (size_t) std::lround (sr / f);
+        double lo = 1.0e9, hi = -1.0e9;
+        for (size_t w = 9600; w + 10 * period < 52000; w += period)
+        {
+            const double l = db (rms (out, w, w + 10 * period));
+            lo = std::min (lo, l);
+            hi = std::max (hi, l);
+        }
+        CHECK (sub > -20.0 && hi - lo < 0.5, "SUB OCTAVE: an octave under the sample at %.1f dB, steady within %.2f dB", sub, hi - lo);
+        std::printf ("  SUB OCTAVE: the sample an octave down at %.1f dB, steady within %.2f dB\n", sub, hi - lo);
+    }
+    // REPLACE: a 60 Hz sample, the crossover at 120, the sub silent: its lows gone
+    {
+        auto ins = instrumentOf (sine (60.0, 3.0, 0.5f), 0, 800 * 150);
+        Player p;
+        sampler (p, ins.get());
+        p.set (snd::mxSub, 0.0f);
+        p.set (snd::subXover, 120.0f);
+        p.set (snd::subReplace, 1.0f);
+        auto out = play (p, 1.0, { { 0.0, 60, 127 } });
+        const double kept = db (toneLevel (out, 9600, 32768, 60.0) / 0.5);
+        CHECK (kept < -18.0, "SUB REPLACE: a 60 Hz tone under a 120 Hz crossover at %.1f dB", kept);
+    }
+}
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI gui;
@@ -1557,6 +1628,7 @@ int main()
     testPhaseModulation();
     testReadingEngine();
     testOrbite();
+    testSub();
     testReverseElasticLoops();
     testFarPitch();
     testScenes();

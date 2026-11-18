@@ -153,6 +153,8 @@ public:
             paintMixer (g, in);
         else if (vizNow == "pitch" && m.mode == Machine::samplerMode)
             paintTuner (g, in);
+        else if (vizNow == "fx" && (m.bankOf[juce::String ("fx") + juce::String (m.mode)] == 1 || m.bankOf[juce::String ("fx") + juce::String (m.mode)] == 2))
+            paintSpectre (g, in);
         else if (m.mode == Machine::synthMode)
             paintSynth (g, in);
         else if (m.mode == Machine::samplerMode)
@@ -280,6 +282,96 @@ public:
         repaint();
     }
 
+    //------------------------------------------------------------------ SPECTRE: its partials, as they glide (a phosphor trail)
+    void paintSpectre (juce::Graphics& g, juce::Rectangle<float> r)
+    {
+        auto& p = proc();
+        const bool on = P (p, snd::spOn) > 0.5f;
+        const bool frozen = P (p, snd::spFreeze) > 0.5f;
+        // this frame's partials, kept with the last ones
+        auto& hz = histHz[(size_t) histPos];
+        auto& lv = histLv[(size_t) histPos];
+        float loudest = 1.0e-9f;
+        for (int i = 0; i < Player::maxPeaks; ++i)
+        {
+            hz[(size_t) i] = on ? p.player.peakHz[(size_t) i].load() : 0.0f;
+            lv[(size_t) i] = on ? p.player.peakLevel[(size_t) i].load() : 0.0f;
+            if (hz[(size_t) i] > 0.0f && lv[(size_t) i] > 0.0f)
+                loudest = juce::jmax (loudest, lv[(size_t) i]);
+        }
+        histLoud[(size_t) histPos] = loudest;
+        histPos = (histPos + 1) % (int) histHz.size();
+
+        // the readout
+        auto top = r.removeFromTop (60.0f);
+        text (g, "spectre", top.removeFromTop (40.0f), grotesk (32.0f, 300), on ? col::screenText : col::screenDim, juce::Justification::centredLeft);
+        const double centre = 40.0 * std::pow (250.0, (double) liveNorm (p, snd::spCentre)) ;
+        const double halfOct = 0.5 + 5.0 * (double) liveValue (p, snd::spWidth);
+        const double bandLo = centre / std::exp2 (halfOct), bandHi = centre * std::exp2 (halfOct);
+        juce::String sub;
+        if (! on)
+            sub = "off · switch it on in the chain";
+        else
+            sub << (int) P (p, snd::spVoices) << " voices · band " << juce::String::fromUTF8 (snd::text (snd::cutoff, (float) juce::jmax (20.0, bandLo)).c_str()).toLowerCase()
+                << " – " << juce::String::fromUTF8 (snd::text (snd::cutoff, (float) juce::jmin (20000.0, bandHi)).c_str()).toLowerCase() << (frozen ? " · frozen" : "");
+        text (g, sub, top, mono (11.0f), on ? col::screenDim : col::sYellow, juce::Justification::centredLeft);
+
+        // the frequency axis (30 Hz .. 16 kHz, log), its decades; the band analysed, shaded
+        auto plot = r.reduced (2.0f, 0.0f);
+        auto labels = plot.removeFromBottom (14.0f);
+        const double fLo = 30.0, fHi = 16000.0;
+        auto xOf = [&plot, fLo, fHi] (double f) { return plot.getX() + plot.getWidth() * (float) (std::log (juce::jlimit (fLo, fHi, f) / fLo) / std::log (fHi / fLo)); };
+        g.setColour (col::sBlue.withAlpha (on ? 0.07f : 0.03f));
+        g.fillRect (juce::Rectangle<float>::leftTopRightBottom (xOf (bandLo), plot.getY(), xOf (bandHi), plot.getBottom()));
+        for (double f : { 100.0, 1000.0, 10000.0 })
+        {
+            g.setColour (col::screenLine);
+            g.fillRect (xOf (f), plot.getY(), 1.0f, plot.getHeight());
+            text (g, f >= 1000.0 ? juce::String ((int) (f / 1000.0)) + "k" : juce::String ((int) f), { xOf (f) - 20.0f, labels.getY(), 40.0f, labels.getHeight() },
+                  mono (9.5f), col::screenDim, juce::Justification::centred);
+        }
+        g.setColour (col::screenLine);
+        g.fillRect (plot.getX(), plot.getBottom() - 1.0f, plot.getWidth(), 1.0f);
+        auto heightOf = [&plot] (float level, float loud)
+        {
+            const float d = 20.0f * std::log10 (juce::jmax (1.0e-6f, level / loud));          // 0 .. -48 dB
+            return plot.getHeight() * 0.92f * juce::jlimit (0.0f, 1.0f, 1.0f + d / 48.0f);
+        };
+        // the trail: the older frames thinner and fainter, the newest last
+        const int frames = (int) histHz.size();
+        for (int k = 1; k < frames; ++k)
+        {
+            const int f = (histPos + k - 1) % frames;                   // oldest first
+            const float age = (float) k / (float) frames;
+            for (int i = 0; i < Player::maxPeaks; ++i)
+            {
+                const float h = histHz[(size_t) f][(size_t) i], l = histLv[(size_t) f][(size_t) i];
+                if (h <= 0.0f || l <= 0.0f)
+                    continue;
+                const float x = xOf (h), y = plot.getBottom() - heightOf (l, histLoud[(size_t) f]);
+                g.setColour (col::sBlue.withAlpha (0.05f + 0.22f * age * age));
+                g.fillRect (x - 0.5f, y, 1.0f, plot.getBottom() - y);
+            }
+        }
+        // now: each partial a lit line, a glow round it, a bead on top
+        const auto& nowHz = histHz[(size_t) ((histPos + frames - 1) % frames)];
+        const auto& nowLv = histLv[(size_t) ((histPos + frames - 1) % frames)];
+        for (int i = 0; i < Player::maxPeaks; ++i)
+        {
+            const float h = nowHz[(size_t) i], l = nowLv[(size_t) i];
+            if (h <= 0.0f || l <= 0.0f)
+                continue;
+            const float x = xOf (h), y = plot.getBottom() - heightOf (l, loudest);
+            if (plot.getBottom() - y < 2.0f)
+                continue;                                               // (one fading out, under -48 dB)
+            g.setGradientFill (juce::ColourGradient (col::sBlue.withAlpha (0.35f), x, y, col::sBlue.withAlpha (0.0f), x, plot.getBottom(), false));
+            g.fillRect (x - 3.0f, y, 6.0f, plot.getBottom() - y);
+            g.setColour (frozen ? col::sViolet : col::screenText);
+            g.fillRect (x - 0.75f, y, 1.5f, plot.getBottom() - y);
+            g.fillEllipse (x - 2.5f, y - 2.5f, 5.0f, 5.0f);
+        }
+    }
+
     //------------------------------------------------------------------ SAMPLER: the tuning dial (-96..+96 semitones)
     void paintTuner (juce::Graphics& g, juce::Rectangle<float> r)
     {
@@ -385,6 +477,10 @@ private:
     bool fxShown = false;
     int dragPos = -1;
     float dragX = 0.0f;
+    // SPECTRE's last frames of partials (a trail of 24, a screen tick each)
+    std::array<std::array<float, Player::maxPeaks>, 24> histHz {}, histLv {};
+    std::array<float, 24> histLoud {};
+    int histPos = 0;
     // the tuning dial: where it was drawn, being turned (1 the band, 2 the fine band), from where
     bool tunerShown = false;
     juce::Rectangle<float> tunerBand, tunerFine;
@@ -697,7 +793,8 @@ private:
         struct Ch { const char* name; int id; juce::Colour c; bool live; };
         std::vector<Ch> chs;
         if (sampler)
-            chs = { { "sample", snd::mxSample, col::sBlue, true }, { "orbite", snd::mxOrbite, col::sOrange, orbOn } };
+            chs = { { "sample", snd::mxSample, col::sBlue, true }, { "orbite", snd::mxOrbite, col::sOrange, orbOn },
+                    { "sub", snd::mxSub, col::sGreen, P (p, snd::subOn) > 0.5f } };
         else
             chs = { { "osc a", snd::oaLevel, col::sBlue, true }, { "osc b", snd::obLevel, col::sGreen, true },
                     { "sub", snd::subLevel, col::sYellow, true }, { "noise", snd::noiseLevel, col::screenText, true },
@@ -2223,7 +2320,12 @@ void Machine::buildPages()
     {
         Page pg { "mixer", "mix", {} };
         if (sampler)
-            pg.banks.push_back ({ "mixer", { S (snd::mxSample), sep (S (snd::mxOrbite)), S (snd::orOn, "On") } });
+        {
+            pg.banks.push_back ({ "mixer", { S (snd::mxSample), sep (S (snd::mxOrbite)), S (snd::orOn, "On"), sep (S (snd::mxSub)), S (snd::subOn, "On") } });
+            pg.banks.push_back ({ "sub", { S (snd::subOn, "On"), S (snd::subMode), S (snd::subOct), sep (S (snd::subXover)), S (snd::subReplace),
+                                           sep (S (snd::subDrive)), S (snd::subFollow, nullptr, [this] { return (int) P (proc, snd::subMode) == 0; }),
+                                           sep (S (snd::mxSub, "Level")) } });
+        }
         else
             pg.banks.push_back ({ "mixer", { S (snd::oaLevel, "Osc A"), S (snd::obLevel, "Osc B"), S (snd::subLevel), S (snd::noiseLevel),
                                               sep (S (snd::mxOrbite)), S (snd::orOn, "On") } });
@@ -2385,6 +2487,12 @@ void Machine::buildPages()
         tip (*v, snd::s2Sync, "OUI : il repart avec chaque cycle du porteur, le son reste sur la note. NON : métallique, inharmonique."_fr);
         tip (*v, snd::s2Phase, "Où le satellite 2 repart dans son cycle : une autre couleur, sans changer la note."_fr);
         tip (*v, snd::mxSample, "Le niveau du sample, avant le filtre."_fr);
+        tip (*v, snd::subOn, "SUB : un grave propre sous le sample, même transposé très bas. Il ne descend jamais sous 25 Hz."_fr);
+        tip (*v, snd::subMode, "SINE : un sinus sur la note, une ou deux octaves en dessous. OCTAVE : le sample lui-même relu une ou deux octaves plus bas, en grains calés sur son temps."_fr);
+        tip (*v, snd::subXover, "La fréquence où le sample laisse la place au sub."_fr);
+        tip (*v, snd::subReplace, "Combien du grave du sample (étiré, souvent boueux une fois transposé) est retiré sous le crossover : à 100 %, seul le sub y reste."_fr);
+        tip (*v, snd::subDrive, "Réchauffe le sub (des harmoniques, gardées sous le crossover) : on l'entend aussi sur de petites enceintes."_fr);
+        tip (*v, snd::subFollow, "ON : le sinus suit le niveau du sample (il frappe et s'éteint avec lui). OFF : il tient, l'enveloppe ENV seule le façonne."_fr);
         tip (*v, snd::mxOrbite, "Le niveau d'ORBITE, avant le filtre (s'il est allumé)."_fr);
         tip (*v, snd::pmSource, "Ce qui pousse la tête de lecture : un sinus, le sample lui-même, l'entrée, RETOUR (la voix se module elle-même) ou ORBITE."_fr);
     }

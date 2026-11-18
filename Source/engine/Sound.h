@@ -64,6 +64,10 @@ namespace snd
         mxSample, mxOrbite,
         // SAMPLER: the tuning dial, -96..+96 semitones, continuous (the reading engine's speed: up to 256x either way)
         tune,
+        // (0.3.4) SAMPLER: the SUB, a clean low end under the sample: a sine on the note (SINE) or the sample itself
+        // read an octave or two down by the reading engine, in grains kept on its time (OCTAVE); a crossover that can
+        // take the sample's own (stretched) lows away; never under 25 Hz
+        subOn, subMode, subOct, subXover, subReplace, subDrive, subFollow, mxSub,
         count
     };
 
