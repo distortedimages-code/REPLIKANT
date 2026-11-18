@@ -5,7 +5,7 @@ if(APPLE)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Universal binary")
 endif()
 
-project(REPLIKANT VERSION 0.3.4 LANGUAGES C CXX)
+project(REPLIKANT VERSION 0.3.5 LANGUAGES C CXX)
 
 # GitHub repository whose releases the plug-in checks for updates (public releases).
 set(RK_UPDATE_REPO "distortedimages-code/REPLIKANT" CACHE STRING "owner/repo checked for updates (empty = no update check)")
@@ -51,7 +51,11 @@ add_library(rk_core STATIC
     Source/dsp/Effects.cpp
     Source/dsp/Cycles.cpp
     Source/dsp/Polyphase.cpp
-    Source/dsp/Orbite.cpp)
+    Source/dsp/Orbite.cpp
+    # RADIO: the receivers' feed and history, the listening, the takes and their pads; the decoder (minimp3, CC0)
+    Source/radio/RadioCore.cpp
+    Source/radio/RadioDec.cpp
+    Source/radio/RadioSlicer.cpp)
 target_compile_features(rk_core PUBLIC cxx_std_17)
 # Signalsmith Stretch and Linear (MIT), vendored in ThirdParty
 target_include_directories(rk_core PUBLIC ThirdParty)
@@ -96,10 +100,12 @@ set(RK_APP_SOURCES
     Source/engine/Worker.cpp
     Source/engine/Player.cpp
     Source/engine/TestSynth.cpp
+    Source/radio/RadioNet.cpp
     Source/ui/Look.cpp
     Source/ui/Pictos.cpp
     Source/ui/Controls.cpp
     Source/ui/UpdatePanel.cpp
+    Source/ui/RadioUi.cpp
     Source/ui/Machine.cpp)
 
 # Fonts (SIL Open Font License, see Resources/fonts)
@@ -155,6 +161,12 @@ if(RK_BUILD_TESTS)
     target_link_libraries(DspTests PRIVATE rk_core)
     add_test(NAME DspTests COMMAND DspTests)
 
+    # RADIO without the network: the decoder, the feed and its clock, the listening and its air, the takes, the slicer, the pads
+    add_executable(RadioTests Tests/RadioTests.cpp)
+    target_link_libraries(RadioTests PRIVATE rk_core)
+    target_compile_definitions(RadioTests PRIVATE RK_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Tests/radio")
+    add_test(NAME RadioTests COMMAND RadioTests)
+
     # a whole session on the test synth: recorder, worker, instrument, player, saving, exports
     juce_add_console_app(EngineTests PRODUCT_NAME "EngineTests")
     juce_generate_juce_header(EngineTests)
@@ -184,6 +196,21 @@ if(RK_BUILD_TESTS)
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
     add_test(NAME PlayerTests COMMAND PlayerTests)
+
+    # RADIO on the network: the receivers against local stand-ins (Tests/radio/radio_mock.py, python3)
+    juce_add_console_app(RadioNetTests PRODUCT_NAME "RadioNetTests")
+    juce_generate_juce_header(RadioNetTests)
+    target_sources(RadioNetTests PRIVATE Tests/RadioNetTests.cpp Source/radio/RadioNet.cpp)
+    target_compile_definitions(RadioNetTests PRIVATE ${RK_DEFINITIONS} JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0
+        RK_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Tests/radio")
+    target_link_libraries(RadioNetTests PRIVATE
+        rk_core
+        juce::juce_core
+        juce::juce_events
+        juce::juce_gui_basics
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+    add_test(NAME RadioNetTests COMMAND RadioNetTests)
 
     # the look: fonts and text layout (a tooltip with characters the pixel fonts lack must not recurse)
     juce_add_console_app(UiTests PRODUCT_NAME "UiTests")

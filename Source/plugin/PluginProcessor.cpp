@@ -1,4 +1,7 @@
 #include "PluginProcessor.h"
+#include "../radio/RadioNet.h"
+#include "../radio/RadioSlicer.h"
+#include "../core/Wav.h"
 #include "PluginEditor.h"
 #include "../ui/Text.h"
 
@@ -96,6 +99,8 @@ ReplikantProcessor::ReplikantProcessor()
 
     worker.onInstrument = [this] (std::shared_ptr<Instrument> ins) { publish (std::move (ins)); };
     worker.onStatus = [this] { sendChangeMessage(); };
+    radioPool = std::make_unique<juce::ThreadPool> (1);
+    radioEvents.reserve (512);
     startTimerHz (10);
 }
 
@@ -103,6 +108,8 @@ ReplikantProcessor::~ReplikantProcessor()
 {
     lifeline->store (false);
     stopTimer();
+    radioPool->removeAllJobs (true, 5000);
+    net.reset();
     worker.onInstrument = nullptr;
     worker.onStatus = nullptr;
     recorder.stop();
@@ -146,6 +153,8 @@ void ReplikantProcessor::prepareToPlay (double sr, int block)
         h.valid = false;
     playMidi.ensureSize (4096);
     synthMidi.ensureSize (2048);
+    radio.prepare (sr, block);
+    radioBuffer.setSize (2, juce::jmax (block, 4096) * 2, false, true, false);
     outMidi.ensureSize (4096);
 
    #if JucePlugin_Build_Standalone
@@ -297,7 +306,63 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     toPlayer.removeNextBlockOfMessages (playMidi, n);
     if (! thruAudio.load())
         playMidi.addEvents (midi, 0, n, 0);
-    if (! sampling)
+    // RADIO: the radio and its pads (the notes play them), then through the filter and the chain as the input would
+    // go in FX mode; only the receiver listened to stays connected
+    const bool radioOn = (int) player.get (snd::engine) == snd::radio;
+    radio.bank.use.store (radioOn && ! sampling ? 1 << juce::jlimit (0, radio::numRx - 1, (int) player.get (snd::rdRx)) : 0,
+                          std::memory_order_relaxed);
+    if (! sampling && radioOn && n <= radioBuffer.getNumSamples())
+    {
+        radioEvents.clear();
+        for (const auto meta : playMidi)
+        {
+            const auto m = meta.getMessage();
+            if (radioEvents.size() >= radioEvents.capacity())
+                break;
+            if (m.isNoteOn())
+                radioEvents.push_back ({ meta.samplePosition, m.getNoteNumber(), m.getVelocity() });
+            else if (m.isNoteOff())
+                radioEvents.push_back ({ meta.samplePosition, m.getNoteNumber(), 0 });
+        }
+        // (its settings as the mods and the scenes move them, a block late)
+        auto V = [this] (int id) { const float m = player.modulatedNorm (id); return m >= 0.0f ? snd::fromNorm (id, m) : player.get (id); };
+        radio::Settings rs;
+        rs.rx = (int) player.get (snd::rdRx);
+        rs.mode = (int) player.get (snd::rdMode);
+        rs.len = (int) player.get (snd::rdLen);
+        rs.squelch = V (snd::rdSquelch);
+        rs.grab = V (snd::rdGrab);
+        rs.depth = V (snd::rdDepth);
+        rs.tune = V (snd::rdTune);
+        rs.stat = V (snd::rdStatic);
+        rs.level = V (snd::rdLevel);
+        rs.band = V (snd::rdBand);
+        rs.centre = V (snd::rdCentre);
+        rs.fade = V (snd::rdFade);
+        rs.fadeRate = V (snd::rdRate);
+        rs.whistle = V (snd::rdWhistle);
+        rs.crackle = V (snd::rdCrackle);
+        rs.drive = V (snd::rdDrive);
+        rs.padTune = V (snd::rdPadTune);
+        rs.padDecay = V (snd::rdPadDecay);
+        rs.padLevel = V (snd::rdPadLevel);
+        rs.choke = player.get (snd::rdChoke) > 0.5f;
+        rs.bpm = transport.bpm;
+        rs.ppq = transport.ppq;
+        rs.playing = transport.playing;
+        auto* rl = radioBuffer.getWritePointer (0);
+        auto* rr = radioBuffer.getWritePointer (1);
+        radio.render (rl, rr, n, rs, radioEvents.data(), (int) radioEvents.size());
+        if (mon == 2 && kept[0] != nullptr)
+            for (int i = 0; i < n; ++i)
+            {
+                rl[i] += kept[0][i];
+                rr[i] += kept[juce::jmin (1, numIn - 1)][i];
+            }
+        const float* heard[2] = { rl, rr };
+        player.render (out, noMidi, transport, heard, 2, true);
+    }
+    else if (! sampling)
         player.render (out, playMidi, transport, kept[0] != nullptr ? kept : nullptr, numIn, mon == 2);
 
     rememberOutput (out, n);
@@ -377,6 +442,7 @@ void ReplikantProcessor::timerCallback()
 {
     collectOldInstruments();
     resampleTick();
+    radioTick();
     // the clock a session started stops with it
     if (clockStartedBySampling && ! isSampling())
     {
@@ -976,6 +1042,15 @@ void ReplikantProcessor::getStateInformation (juce::MemoryBlock& dest)
     xml.setAttribute ("routes", juce::JSON::toString (modsToVar(), true));
     xml.setAttribute ("scenes", juce::JSON::toString (scenesToVar(), true));
     xml.setAttribute ("fxOrder", juce::JSON::toString (fxOrderToVar(), true));
+    {
+        // RADIO: the four receivers' sources, the take (its sound kept as a WAV beside the instruments)
+        const juce::ScopedLock sl (radioLock);
+        auto* r = new juce::DynamicObject();
+        r->setProperty ("sources", net != nullptr ? net->toVar() : pendingSources);
+        if (takeFile.existsAsFile())
+            r->setProperty ("take", takeFile.getFullPathName());
+        xml.setAttribute ("radio", juce::JSON::toString (juce::var (r), true));
+    }
     copyXmlToBinary (xml, dest);
 }
 
@@ -1017,6 +1092,33 @@ void ReplikantProcessor::setStateInformation (const void* data, int size)
         modsFromVar (juce::JSON::parse (xml->getStringAttribute ("routes")));
     scenesFromVar (juce::JSON::parse (xml->getStringAttribute ("scenes")));
     fxOrderFromVar (juce::JSON::parse (xml->getStringAttribute ("fxOrder")));
+    // RADIO: the receivers tuned as they were (connected when the tab listens to one), the take read back
+    if (xml->hasAttribute ("radio"))
+    {
+        const auto r = juce::JSON::parse (xml->getStringAttribute ("radio"));
+        {
+            const juce::ScopedLock sl (radioLock);
+            if (net != nullptr)
+                net->fromVar (r.getProperty ("sources", {}));
+            else
+                pendingSources = r.getProperty ("sources", {});
+        }
+        const juce::File take (r.getProperty ("take", "").toString());
+        if (take.existsAsFile())
+            radioPool->addJob ([this, take]
+            {
+                rk::Channels ch;
+                double rate = 0.0;
+                rk::WavInfo info;
+                if (! rk::readWav (take.getFullPathName().toStdString(), ch, rate, info) || ch.empty() || rate <= 0.0)
+                    return;
+                auto a = std::make_shared<radio::Take::Audio>();
+                a->l = ch[0];
+                a->r = ch.size() > 1 ? ch[1] : ch[0];
+                a->sampleRate = rate;
+                later ([this, a, take] { takeFile = take; useTake (a, take.getFileNameWithoutExtension(), false); });
+            });
+    }
     settingsChanged();
     const auto f = instrumentio::movedFolder (juce::File (xml->getStringAttribute ("instrument")));
     if (xml->hasAttribute ("instrument"))
@@ -1220,4 +1322,251 @@ juce::AudioProcessorEditor* ReplikantProcessor::createEditor()
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new ReplikantProcessor();
+}
+
+//============================================================================== RADIO
+RadioNet& ReplikantProcessor::radioNet()
+{
+    if (net == nullptr)
+    {
+        const juce::ScopedLock sl (radioLock);
+        radio.allocate();
+        net = std::make_unique<RadioNet> (radio.bank);
+        if (! pendingSources.isVoid())
+            net->fromVar (pendingSources);
+        pendingSources = juce::var();
+    }
+    return *net;
+}
+
+juce::File ReplikantProcessor::radioFolder() const
+{
+    return instrumentsRoot().getChildFile ("Radio");
+}
+
+juce::String ReplikantProcessor::radioStationName (int rx) const
+{
+    if (net == nullptr)
+        return {};
+    const auto s = net->getSource (rx);
+    if (s.kind == 1)
+        return s.name.isNotEmpty() ? s.name : s.url;
+    if (s.kind == 2)
+        return juce::String (s.khz, s.khz < 10000.0 ? 2 : 1) + " kHz " + s.mode.toUpperCase();
+    return {};
+}
+
+// a take in hand: cut at its attacks (on the radio's own thread), kept as a WAV when it's new, then the pads play it
+void ReplikantProcessor::useTake (std::shared_ptr<const radio::Take::Audio> a, const juce::String& name, bool save)
+{
+    if (a == nullptr || a->l.empty())
+        return;
+    const int pads = 4 << juce::jlimit (0, 2, (int) player.get (snd::rdPads));
+    const float sens = player.get (snd::rdSens);
+    juce::File file = takeFile;
+    if (save)
+    {
+        auto clean = juce::File::createLegalFileName (name).trim();
+        file = radioFolder().getNonexistentChildFile (clean.isNotEmpty() ? clean : juce::String ("take"), ".wav", false);
+    }
+    ++slicing;
+    radioPool->addJob ([this, a, name, pads, sens, file, save]
+    {
+        auto t = std::make_shared<radio::Take>();
+        t->audio = a;
+        t->name = name.toStdString();
+        t->slices = radio::slice (a->l.data(), a->r.data(), (int) a->l.size(), a->sampleRate, pads, sens);
+        bool saved = ! save;
+        if (save && file.getParentDirectory().createDirectory().wasOk())
+            saved = rk::writeWav (file.getFullPathName().toStdString(), { a->l, a->r }, a->sampleRate, 24, {});
+        later ([this, t, pads, sens, file, saved]
+        {
+            --slicing;
+            takeNow = t;
+            {
+                const juce::ScopedLock sl (radioLock);
+                takeFile = saved ? file : juce::File();
+            }
+            slicedWith = sens;
+            slicedPads = pads;
+            takes.push_back ({ t, 0.0 });
+            radio.setTake (t.get());
+            sendChangeMessage();
+        });
+    });
+}
+
+bool ReplikantProcessor::radioGrab (juce::String& why)
+{
+    if (radio.recording())
+    {
+        why = "REC tourne : arrête-le d'abord."_fr;
+        return false;
+    }
+    auto a = std::make_shared<radio::Take::Audio>();
+    const double secs = radio::takeSeconds ((int) player.get (snd::rdTake));
+    float peak = 0.0f;
+    if (radio.grab (secs, *a))
+        for (size_t i = 0; i < a->l.size(); ++i)
+            peak = juce::jmax (peak, std::abs (a->l[i]), std::abs (a->r[i]));
+    if (peak < 1.0e-4f)
+    {
+        why = "Rien n'a été entendu : accorde un récepteur (page TUNE) et écoute-le dans l'onglet RADIO."_fr;
+        return false;
+    }
+    const auto station = radioStationName ((int) player.get (snd::rdRx));
+    useTake (a, (station.isNotEmpty() ? station : juce::String ("radio")) + " " + juce::Time::getCurrentTime().formatted ("%H-%M-%S"), true);
+    return true;
+}
+
+bool ReplikantProcessor::radioRec (juce::String& why)
+{
+    if (! radio.recording())
+    {
+        radio.recStart();
+        return true;
+    }
+    auto a = std::make_shared<radio::Take::Audio>();
+    if (! radio.recStop (*a))
+    {
+        why = "Trop court : rien n'a été gardé."_fr;
+        return false;
+    }
+    const auto station = radioStationName ((int) player.get (snd::rdRx));
+    useTake (a, (station.isNotEmpty() ? station : juce::String ("radio")) + " " + juce::Time::getCurrentTime().formatted ("%H-%M-%S"), true);
+    return true;
+}
+
+void ReplikantProcessor::radioReslice()
+{
+    if (takeNow != nullptr && takeNow->audio != nullptr)
+        useTake (takeNow->audio, juce::String (takeNow->name), false);
+}
+
+void ReplikantProcessor::radioClear()
+{
+    radio.recCancel();
+    radio.setTake (nullptr);
+    takeNow = nullptr;
+    const juce::ScopedLock sl (radioLock);
+    takeFile = juce::File();
+}
+
+bool ReplikantProcessor::radioToSampler (int pad, juce::String& why)
+{
+    const auto t = takeNow;
+    if (t == nullptr || t->audio == nullptr || t->audio->l.empty())
+    {
+        why = "Pas encore de prise : GRAB ou REC d'abord."_fr;
+        return false;
+    }
+    if (isSampling())
+    {
+        why = "Une capture tourne."_fr;
+        return false;
+    }
+    const auto& A = *t->audio;
+    int a = 0, b = (int) A.l.size();
+    if (pad >= 0)
+    {
+        if (pad >= (int) t->slices.size())
+        {
+            why = "Ce pad est vide."_fr;
+            return false;
+        }
+        a = juce::jlimit (0, b - 1, t->slices[(size_t) pad].start);
+        b = juce::jlimit (a + 1, b, t->slices[(size_t) pad].end);
+    }
+    if (b - a < 64)
+    {
+        why = "Trop court."_fr;
+        return false;
+    }
+    rk::Channels audio { std::vector<float> (A.l.begin() + a, A.l.begin() + b), std::vector<float> (A.r.begin() + a, A.r.begin() + b) };
+    // (a pad: its end faded in 3 ms, it was cut there)
+    const int fade = juce::jmin (b - a, (int) (0.003 * A.sampleRate));
+    for (int i = 0; i < fade; ++i)
+        for (auto& ch : audio)
+            ch[ch.size() - 1 - (size_t) i] *= (float) i / (float) fade;
+    rk::Loop loop;
+    if (pad < 0)
+    {
+        loop.start = 0;
+        loop.end = b - a;
+    }
+    const auto name = juce::String (t->name) + (pad >= 0 ? " pad " + juce::String (pad + 1) : juce::String());
+    auto ins = instrumentio::soundInstrument (std::move (audio), A.sampleRate, name, 60, 0.0f, false, loop);
+    setSoundParam (snd::engine, (float) snd::sampler);
+    setSoundParam (snd::playMode, 0.0f);
+    setSoundParam (snd::loops, pad < 0 ? 1.0f : 0.0f);
+    setSoundParam (snd::start, 0.0f);
+    setSoundParam (snd::speed, 1.0f);
+    setSoundParam (snd::reverse, 0.0f);
+    setSoundParam (snd::loopStart, 0.0f);
+    setSoundParam (snd::loopSize, 1.0f);
+    setSoundParam (snd::transpose, 0.0f);
+    setSoundParam (snd::fine, 0.0f);
+    setSoundParam (snd::tune, 0.0f);
+    instrumentName = name;
+    session.renderKeys = false;
+    settingsChanged();
+    const auto folder = Worker::uniqueFolder (instrumentsRoot(), name);
+    worker.post ("RADIO", [this, ins, folder]
+    {
+        const auto r = instrumentio::save (*ins, folder);
+        if (r.failed())
+            later ([this, r] { if (onMessage) onMessage (r.getErrorMessage()); });
+        worker.renderAndPublish (ins, true);
+    });
+    if (onMessage)
+        onMessage ((pad >= 0 ? "Pad "_fr + juce::String (pad + 1) : juce::String ("La prise"_fr)) + " dans le sampler : "_fr
+                   + juce::String ((double) (b - a) / A.sampleRate, 2) + " s sur C3"_fr + (pad < 0 ? juce::String (", bouclée"_fr) : juce::String()) + ".");
+    sendChangeMessage();
+    return true;
+}
+
+void ReplikantProcessor::radioTick()
+{
+    const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
+    const bool radioOn = (int) player.get (snd::engine) == snd::radio;
+    if (radioOn && net == nullptr)
+        radioNet();
+    // REC stops on its own at the longest take
+    if (radio.recording() && radio.recSeconds() >= radio::longestTake - 0.05)
+    {
+        juce::String why;
+        radioRec (why);
+        if (onMessage)
+            onMessage ("REC arrêté au bout de 30 s : la prise est découpée."_fr);
+    }
+    // the take cut again once SENSITIVITY or PADS stop moving
+    {
+        double& changedAt = sliceChangedAt;
+        const int pads = 4 << juce::jlimit (0, 2, (int) player.get (snd::rdPads));
+        const float sens = player.get (snd::rdSens);
+        if (takeNow != nullptr && slicing.load() == 0 && (std::abs (sens - slicedWith) > 1.0e-4f || pads != slicedPads))
+        {
+            if (changedAt == 0.0)
+                changedAt = now;
+            else if (now - changedAt > 0.3)
+            {
+                changedAt = 0.0;
+                slicedWith = sens;
+                slicedPads = pads;
+                radioReslice();
+            }
+        }
+        else
+            changedAt = 0.0;
+    }
+    // the takes the audio no longer plays, let go (two seconds after they were replaced)
+    for (auto& k : takes)
+        if (k.take != takeNow && k.retiredAt == 0.0)
+            k.retiredAt = now;
+    const auto* used = radio.takeInUse();
+    const auto* set = radio.takeSet();
+    takes.erase (std::remove_if (takes.begin(), takes.end(), [&] (const KeptTake& k)
+    {
+        return k.retiredAt > 0.0 && now - k.retiredAt > 2.0 && k.take.get() != used && k.take.get() != set;
+    }), takes.end());
 }

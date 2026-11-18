@@ -140,7 +140,7 @@ namespace
         { "sceneB",    "Scene B",                     K::integer, 1, 16, 2, 1, nullptr, false, "" },
         { "tempo",     "Tempo",                       K::linear,  40, 300, 120, 1, nullptr, false, "bpm" },
 
-        { "engine",    "Engine",                      K::choice,  0, 2, 0, 1, "SYNTH|DRUM|SAMPLER", false, "" },
+        { "engine",    "Engine",                      K::choice,  0, 3, 0, 1, "SYNTH|DRUM|SAMPLER|RADIO", false, "" },
         { "oaBank",    "Bank",                        K::choice,  0, 1, 0, 1, "BASIC|CAPTURED", false, "" },
         { "oaPos",     "Position",                    K::linear,  0, 1, 0.2857f, 1, nullptr, true, "%" },
         { "oaOct",     "Octave",                      K::integer, -3, 3, 0, 1, nullptr, false, "oct" },
@@ -193,6 +193,29 @@ namespace
         { "subDrive",  "Drive",                       K::linear,  0, 1, 0, 1, nullptr, true, "%" },
         { "subFollow", "Follow",                      K::toggle,  0, 1, 1, 1, nullptr, false, "" },
         { "mxSub",     "Sub",                         K::linear,  0, 1, 0.7f, 1, nullptr, true, "%" },
+        { "rdRx",      "Receiver",                    K::choice,  0, 3, 0, 1, "RX 1|RX 2|RX 3|RX 4", false, "" },
+        { "rdMode",    "Mode",                        K::choice,  0, 2, 0, 1, "LIVE|LOOP|DIG", false, "" },
+        { "rdLen",     "Length",                      K::choice,  0, 9, 7, 1, "1/16|1/8|3/16|1/4|3/8|1/2|3/4|1 BAR|1.5 BAR|2 BARS", false, "" },
+        { "rdSquelch", "Squelch",                     K::linear,  0, 1, 0, 1, nullptr, true, "rsq" },
+        { "rdGrab",    "Grab",                        K::linear,  0, 1, 0.25f, 1, nullptr, true, "rgb" },
+        { "rdDepth",   "Depth",                       K::log,     1, 20, 6, 1, nullptr, true, "s" },
+        { "rdTune",    "Tune",                        K::linear,  -24, 24, 0, 1, nullptr, true, "tun" },
+        { "rdStatic",  "Static",                      K::linear,  0, 1, 0.12f, 1, nullptr, true, "%" },
+        { "rdLevel",   "Level",                       K::linear,  0, 1, 0.8f, 1, nullptr, true, "%" },
+        { "rdBand",    "Band",                        K::linear,  0, 1, 0, 1, nullptr, true, "rbw" },
+        { "rdCentre",  "Centre",                      K::log,     300, 3000, 1000, 1, nullptr, true, "Hz" },
+        { "rdFade",    "Fading",                      K::linear,  0, 1, 0, 1, nullptr, true, "%" },
+        { "rdRate",    "Rate",                        K::log,     0.04f, 4, 0.3f, 1, nullptr, true, "Hz" },
+        { "rdWhistle", "Whistle",                     K::linear,  0, 1, 0, 1, nullptr, true, "%" },
+        { "rdCrackle", "Crackle",                     K::linear,  0, 1, 0, 1, nullptr, true, "%" },
+        { "rdDrive",   "Drive",                       K::linear,  0, 1, 0, 1, nullptr, true, "%" },
+        { "rdTake",    "Take",                        K::choice,  0, 5, 3, 1, "1 S|2 S|4 S|8 S|16 S|30 S", false, "" },
+        { "rdSens",    "Sensitivity",                 K::linear,  0, 1, 0.5f, 1, nullptr, false, "%" },
+        { "rdPads",    "Pads",                        K::choice,  0, 2, 2, 1, "4|8|16", false, "" },
+        { "rdPadTune", "Tune",                        K::linear,  -24, 24, 0, 1, nullptr, true, "tun" },
+        { "rdPadDecay","Decay",                       K::linear,  0, 1, 1, 1, nullptr, true, "rdc" },
+        { "rdChoke",   "Choke",                       K::toggle,  0, 1, 0, 1, nullptr, false, "" },
+        { "rdPadLevel","Level",                       K::linear,  0, 1, 0.8f, 1, nullptr, true, "%" },
     };
 
     std::string fmt (const char* f, double v)
@@ -337,6 +360,11 @@ std::string text (int id, float v)
     if (u == "orb") return v < 0.005f ? std::string ("STILL") : hzText (v);
     if (u == "deg") return fmt ("%.0f\xc2\xb0", v * 360.0f);
     if (u == "tun") return std::abs (v) < 0.005f ? std::string ("0.00 ST") : fmt ("%+.2f ST", v);
+    if (u == "rsq") return v < 0.005f ? std::string ("OFF") : fmt ("%.0f DB", -66.0 + 56.0 * v);
+    if (u == "rgb") return v < 0.005f ? std::string ("KEEP") : fmt ("%.0f %%", v * 100.0f);
+    if (u == "rbw") return v < 0.01f ? std::string ("FULL") : hzText (12000.0 * std::pow (250.0 / 12000.0, (double) v));
+    if (u == "rdc") return v >= 0.99f ? std::string ("HOLD") : msText (1000.0 * 0.02 * std::pow (400.0, (double) v));
+    if (u == "s")   return fmt (v < 10.0f ? "%.1f S" : "%.0f S", v);
     if (u == "%")   return fmt ("%.0f %%", v * 100.0f);
     return fmt (d.kind == Kind::integer ? "%.0f" : "%.2f", v);
 }
@@ -371,6 +399,9 @@ std::string longName (int id)
     if (id == tune)                return "Sampler " + name;
     if (in (subMode, subFollow))   return "Sub " + name;
     if (id == mxSub)               return "Mixer Sub";
+    if (in (rdRx, rdDrive))        return "Radio " + name;
+    if (in (rdTake, rdPads))       return "Radio " + name;
+    if (in (rdPadTune, rdPadLevel)) return "Radio Pads " + name;
     return name;
 }
 }

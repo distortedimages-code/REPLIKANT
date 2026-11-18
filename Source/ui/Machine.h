@@ -4,6 +4,7 @@
 //   SYNTHÉ    the oscillators of cycles, played at once
 //   DRUM      (0.4)
 //   SAMPLER   the instrument (captured, or a sound dropped on the window)
+//   RADIO     (0.3.5) the radio: a station or a shortwave receiver, its air, the takes cut into pads
 //   CAPTURE   over any mode: the synth sampled (notes), its cycles, or what comes out of the effects (resampling)
 //
 // Each page holds one or more banks of up to eight controls; pressing the page's key again goes to its next bank.
@@ -40,7 +41,8 @@ namespace te
         float getZoom() const                      { return zoom; }
         std::function<void (float)> onZoom;
 
-        enum Mode { synthMode = 0, drumMode = 1, samplerMode = 2 };
+        enum Mode { synthMode = 0, drumMode = 1, samplerMode = 2, radioMode = 3 };
+        static constexpr int numModes = 4;
         void showMode (int mode);                  // sets the engine (what plays) and shows its pages
         void showCapture (bool);
         enum CaptureKind { notesKind = 0, cyclesKind = 1, resampleKind = 2 };
@@ -97,8 +99,8 @@ namespace te
         Arming arm;
         int mode = synthMode;
         bool capture = false;
-        std::vector<Page> pages[3], capturePages, resamplePages, cyclePages;
-        int page[3] {}, capturePage = 0, resamplePage = 0, cyclePage = 0;
+        std::vector<Page> pages[numModes], capturePages, resamplePages, cyclePages;
+        int page[numModes] {}, capturePage = 0, resamplePage = 0, cyclePage = 0;
         void buildCyclePages();
         int captureKind = notesKind;
         juce::String shownResample;                // the last instrument RÉÉCHANTILLONNER made, as shown
@@ -118,7 +120,7 @@ namespace te
 
         // the header
         juce::Rectangle<int> header, logo, presetBox, bpmBox, meterBox;
-        Key modeKeys[3], captureKey, playKey, fileKey, packKey, updateKey;
+        Key modeKeys[numModes], captureKey, playKey, fileKey, packKey, updateKey;
         juce::TextEditor nameEditor;
         // the pack: made on a click, dragged out once ready
         juce::File packReady;
@@ -136,6 +138,9 @@ namespace te
         Key pageKeys[numPageKeys];
         std::unique_ptr<Encoder> encoders[8];
         std::unique_ptr<juce::Component> keyboard, modScenes, wtfPanel, captureStrip;
+        std::unique_ptr<juce::Component> radioStrip, radioTuner;   // (RADIO: the pads in the keyboard's place, the tuner over the screen)
+        bool tunerPage() const;
+        int radioPad() const;
         juce::Rectangle<int> screenArea, keysArea, encArea, bottomArea, deckArea, inMeter, outMeter;
 
         UpdatePanel updatePanel;

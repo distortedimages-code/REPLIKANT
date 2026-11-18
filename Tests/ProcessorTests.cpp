@@ -4,6 +4,7 @@
 
 #include <JuceHeader.h>
 #include "../Source/plugin/PluginProcessor.h"
+#include "../Source/radio/RadioNet.h"
 
 #include <tuple>
 
@@ -123,6 +124,130 @@ static void playAsALazyHost (double rate, int block, int lag = 1, float hostGain
     CHECK (tailRms < 1.0e-3, "lazy host: the notes end (%.5f rms left, %.0f Hz / %d)", tailRms, rate, block);
 }
 
+// RADIO: the tab heard (a receiver fed by hand, no network), its pads on the notes from C1, a take cut at its hits and
+// sent to the SAMPLER, the receivers and the take kept with the project
+static bool waitFor (std::function<bool()> done, double seconds)
+{
+    const auto until = juce::Time::getMillisecondCounterHiRes() + seconds * 1000.0;
+    while (! done())
+    {
+        if (juce::Time::getMillisecondCounterHiRes() > until)
+            return false;
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
+    }
+    return true;
+}
+
+static void radioAsAHost()
+{
+    const double rate = 48000.0;
+    const int block = 512;
+    auto proc = std::make_unique<ReplikantProcessor>();
+    proc->setRateAndBufferSizeDetails (rate, block);
+    proc->prepareToPlay (rate, block);
+    proc->setSoundParam (snd::engine, (float) snd::radio);
+    proc->radioNet();                                      // (as the tab does: the radio's memory, the network)
+    proc->setSoundParam (snd::rdStatic, 0.0f);
+    proc->setSoundParam (snd::rdTake, 1.0f);               // GRAB: 2 s
+    auto& bank = proc->radio.bank;
+    bank.setState (0, radio::live, radio::web);
+    const int chans = juce::jmax (proc->getTotalNumInputChannels(), proc->getTotalNumOutputChannels());
+    juce::AudioBuffer<float> buf (chans, block);
+    // the receiver's sound: four hits a second (a burst of noise, decaying) over a quiet tone
+    juce::Random rnd (5);
+    int64_t fed = 0;
+    std::vector<int16_t> chunk;
+    auto feed = [&] (int frames)
+    {
+        chunk.resize ((size_t) frames * 2);
+        for (int i = 0; i < frames; ++i, ++fed)
+        {
+            const int64_t inBeat = fed % (radio::rate / 4);
+            const double hit = inBeat < 6000 ? std::exp (-(double) inBeat / 1200.0) * (rnd.nextFloat() * 2.0 - 1.0) : 0.0;
+            const double v = 0.6 * hit + 0.03 * std::sin (6.283185307 * 330.0 * (double) fed / radio::rate);
+            chunk[(size_t) (2 * i)] = chunk[(size_t) (2 * i + 1)] = (int16_t) (v * 30000.0);
+        }
+        bank.push (0, chunk.data(), frames);
+    };
+    double energy = 0.0;
+    float peak = 0.0f;
+    bool finite = true;
+    auto play = [&] (double seconds, int note = -1)
+    {
+        energy = 0.0;
+        int frames = 0;
+        for (int pos = 0; pos < (int) (seconds * rate); pos += block)
+        {
+            feed (block);
+            buf.clear();
+            juce::MidiBuffer midi;
+            if (note >= 0 && pos == 0)
+                midi.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 127), 0);
+            proc->processBlock (buf, midi);
+            for (int i = 0; i < block; ++i)
+            {
+                const float v = buf.getSample (0, i);
+                finite = finite && std::isfinite (v);
+                peak = juce::jmax (peak, std::abs (v));
+                energy += (double) v * v;
+            }
+            frames += block;
+        }
+        return std::sqrt (energy / juce::jmax (1, frames));
+    };
+    const double heard = play (4.0);
+    std::printf ("  radio heard: %.3f rms, receiver bits %d\n", heard, bank.use.load());
+    CHECK (heard > 0.02 && finite && peak < 1.5f, "the radio heard: %.4f rms, peak %.2f", heard, peak);
+    CHECK (bank.use.load() == 1, "only RX 1 kept connected: %d", bank.use.load());
+    // GRAB: the last two seconds, cut at their hits (eight)
+    juce::String why;
+    CHECK (proc->radioGrab (why), "grab: %s", why.toRawUTF8());
+    CHECK (waitFor ([&] { return proc->radioTake() != nullptr; }, 10.0), "the take cut");
+    auto take = proc->radioTake();
+    if (take == nullptr)
+        return;
+    const int pads = (int) take->slices.size();
+    std::printf ("  take: %.2f s, %d pads\n", take->length() / rate, pads);
+    CHECK (std::abs (take->length() / rate - 2.0) < 0.02, "a 2 s take: %.3f", take->length() / rate);
+    CHECK (pads >= 7 && pads <= 9, "eight hits, eight pads: %d", pads);
+    // its pads on the keys: the radio silent (LEVEL 0), C1 + 2 plays the third pad
+    proc->setSoundParam (snd::rdLevel, 0.0f);
+    play (0.3);
+    const double quiet = play (0.2);
+    const double pad = play (0.2, radio::firstPadNote + 2);
+    std::printf ("  pads: %.4f rms quiet, %.4f with pad 3\n", quiet, pad);
+    CHECK (quiet < 1.0e-4 && pad > 0.01, "pad 3 on D1: %.5f -> %.4f", quiet, pad);
+    // the take into the SAMPLER: its instrument, the sampler playing it
+    CHECK (proc->radioToSampler (-1, why), "to sampler: %s", why.toRawUTF8());
+    CHECK ((int) proc->player.get (snd::engine) == snd::sampler, "the sampler shown");
+    CHECK (waitFor ([&] { auto ins = proc->getInstrument(); return ins != nullptr && ! ins->samples.empty() && ins->name.startsWith (juce::String (take->name)); }, 20.0),
+           "the take's instrument");
+    if (auto ins = proc->getInstrument(); ins != nullptr && ! ins->samples.empty())
+        CHECK (std::abs (ins->samples[0].length() - take->length()) < 4 && ins->samples[0].loop.valid(), "its sample: %d frames (take %d), looped",
+               ins->samples[0].length(), take->length());
+    // one pad
+    CHECK (proc->radioToSampler (3, why), "pad 4 to sampler: %s", why.toRawUTF8());
+    CHECK (waitFor ([&] { auto ins = proc->getInstrument(); return ins != nullptr && ins->name.endsWith ("pad 4"); }, 20.0), "pad 4's instrument");
+    // the project: a receiver tuned, the take; read back by another
+    RadioNet::Source s;
+    s.kind = 1;
+    s.name = "Test station";
+    s.url = "http://127.0.0.1:9/stream.mp3";
+    proc->radioNet().setSource (2, s);
+    juce::MemoryBlock state;
+    proc->getStateInformation (state);
+    const int takeLen = take->length();
+    proc.reset();
+    auto again = std::make_unique<ReplikantProcessor>();
+    again->setRateAndBufferSizeDetails (rate, block);
+    again->prepareToPlay (rate, block);
+    again->setStateInformation (state.getData(), (int) state.getSize());
+    CHECK (waitFor ([&] { return again->radioTake() != nullptr; }, 10.0), "the take read back");
+    if (auto t2 = again->radioTake())
+        CHECK (std::abs (t2->length() - takeLen) < 2 && ! t2->slices.empty(), "the take back: %d frames, %zu pads", t2->length(), t2->slices.size());
+    CHECK (again->radioNet().getSource (2).name == "Test station", "RX 3 tuned as it was");
+}
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI gui;
@@ -168,6 +293,7 @@ int main()
         std::printf ("  the input with the capture page %s: %.3f rms out\n", open ? "open" : "closed", rms);
         CHECK (open ? rms > 0.15 : rms < 1.0e-4, "the input heard only with the capture page open (%s: %.4f rms)", open ? "open" : "closed", rms);
     }
+    radioAsAHost();
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

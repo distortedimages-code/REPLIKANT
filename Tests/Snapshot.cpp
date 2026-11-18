@@ -6,6 +6,7 @@
 #include "../Source/plugin/PluginProcessor.h"
 #include "../Source/plugin/PluginEditor.h"
 #include "../Source/ui/Machine.h"
+#include "../Source/radio/RadioNet.h"
 
 static void pump (int ms)
 {
@@ -328,6 +329,87 @@ int main (int argc, char** argv)
         run (20);
         auto ins = proc.getInstrument();
         std::printf ("cycles: %d\n", ins != nullptr && ins->cycles != nullptr ? ins->cycles->count() : 0);
+    }
+
+    // RADIO, with the stand-ins of Tests/radio/radio_mock.py running at argv[2] (RADIO_MOCK_SHOWCASE=1), else left out
+    if (argc > 2)
+    {
+        const juce::String base (argv[2]);
+        auto& net = proc.radioNet();
+        net.dirOverride = base;
+        net.listOverride = base + "/public/";
+        RadioNet::Source s;
+        s.kind = 1;
+        s.name = "Radio Nowhere";
+        s.url = base + "/stream.mp3";
+        s.kbps = 128;
+        s.country = "FR";
+        net.setSource (0, s);
+        RadioNet::Source w;
+        w.kind = 2;
+        w.host = "127.0.0.1";
+        w.port = base.fromLastOccurrenceOf (":", false, false).getIntValue() + 1;
+        w.khz = 9420.0;
+        w.mode = "am";
+        w.rxName = "Night owl receiver, long wire";
+        net.setSource (1, w);
+        set (snd::rdRx, 0.0f);
+        set (snd::fModel, 0.0f);
+        set (snd::rvOn, 0.0f);
+        set (snd::chOn, 0.0f);
+        view->showMode (te::Machine::radioMode);
+        auto realtime = [&] (double secs)
+        {
+            const double t0 = juce::Time::getMillisecondCounterHiRes();
+            double done = 0.0;
+            while (juce::Time::getMillisecondCounterHiRes() - t0 < secs * 1000.0)
+            {
+                const double due = (juce::Time::getMillisecondCounterHiRes() - t0) * 48.0;
+                while (done + 256 <= due)
+                {
+                    buf.clear();
+                    midi.clear();
+                    proc.processBlock (buf, midi);
+                    done += 256;
+                }
+                pump (5);
+            }
+            view->refreshNow();
+            pump (60);
+        };
+        view->showPage (1);
+        set (snd::rdFade, 0.2f);
+        set (snd::rdCrackle, 0.12f);
+        set (snd::rdStatic, 0.08f);
+        realtime (11.0);
+        juce::String why;
+        if (! proc.radioGrab (why))
+            std::printf ("grab: %s\n", why.toRawUTF8());
+        for (int i = 0; i < 100 && proc.radioTake() == nullptr; ++i)
+            realtime (0.05);
+        std::printf ("radio take: %d pads\n", proc.radioTake() != nullptr ? (int) proc.radioTake()->slices.size() : -1);
+        realtime (1.0);
+        proc.audition (radio::firstPadNote + 2, 110, true);
+        proc.audition (radio::firstPadNote + 5, 90, true);
+        realtime (0.12);
+        shoot ("34-radio-ecoute.png");
+        proc.audition (radio::firstPadNote + 2, 0, false);
+        proc.audition (radio::firstPadNote + 5, 0, false);
+        view->showPage (3);
+        realtime (0.6);
+        shoot ("35-radio-prise.png");
+        view->showPage (2);
+        realtime (0.6);
+        shoot ("38-radio-air.png");
+        view->showPage (0);
+        realtime (2.5);
+        shoot ("36-radio-tune.png");
+        set (snd::rdRx, 1.0f);
+        realtime (5.0);
+        shoot ("37-radio-ondes-courtes.png");
+        set (snd::rdRx, 0.0f);
+        set (snd::rdFade, 0.0f);
+        set (snd::rdCrackle, 0.0f);
     }
 
     // the project keeps the sound: settings, routes, steps, scenes

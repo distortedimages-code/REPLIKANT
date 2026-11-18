@@ -92,7 +92,8 @@ namespace te
         spectrum, shift, chorus, crush, space,                  // the effects
         steps, random, follower,                                // the modulators (with sine and envelope)
         jack, keys, clock, onset, vuMeter, resample, record,    // the capture
-        orbit, mixer                                            // (0.3.2) ORBITE, the MIXEUR
+        orbit, mixer,                                           // (0.3.2) ORBITE, the MIXEUR
+        radio, antenna, air, slice, pads                        // (0.3.5) RADIO: the mode, its pages
     };
     // drawn in the square centred in the area, `thickness` in pixels
     void picto (juce::Graphics&, Picto, juce::Rectangle<float>, juce::Colour, float thickness = 1.5f);

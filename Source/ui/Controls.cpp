@@ -100,7 +100,19 @@ namespace
         else if (u == "bit")           { ends ("1", "", shortNumber (d.hi)); add (at (8.0), "8"); }
         else if (u == "bpm")           { add (0.0f, "40"); add (at (120.0), "120"); add (at (200.0), "200"); add (1.0f, "300"); c.ticks = 14; }
         else if (u == "orb")           decades ({ 0.0, 1.0, 4.0, 12.0 }, nullptr);
-        else if (u == "tun")           { add (0.0f, "-96"); add (0.25f, "-48"); add (0.5f, "0"); add (0.75f, "+48"); add (1.0f, "+96"); c.ticks = 17; }
+        else if (u == "tun")
+        {
+            // (the sampler's dial: +-96; the radio's tunes: +-24)
+            const int hi = (int) d.hi;
+            add (0.0f, "-" + juce::String (hi)); add (0.25f, "-" + juce::String (hi / 2)); add (0.5f, "0");
+            add (0.75f, "+" + juce::String (hi / 2)); add (1.0f, "+" + juce::String (hi));
+            c.ticks = hi > 24 ? 17 : 9;
+        }
+        else if (u == "rsq")           { add (0.0f, "OFF"); add (at (0.5), "-38"); add (1.0f, "-10"); c.ticks = 9; }
+        else if (u == "rgb")           { add (0.0f, "KEEP"); add (1.0f, "100"); c.ticks = 9; }
+        else if (u == "rbw")           { add (0.0f, "FULL"); add (1.0f, "250"); c.ticks = 9; }
+        else if (u == "rdc")           { add (0.0f, "20MS"); add (1.0f, "HOLD"); c.ticks = 9; }
+        else if (u == "s")             decades ({ 1.0, 5.0, 20.0 }, nullptr);
         else if (u == "shp")           { add (0.0f, "TRI"); add (0.5f, "SAW"); add (1.0f, "SQR"); c.ticks = 9; }
         else if (u == "deg")           { add (0.0f, "0"); add (0.5f, "180"); add (1.0f, "360"); c.ticks = 9; }
         else if (u == "ct" || u == "oct" || u == "sym" || (d.lo < 0.0f && d.hi > 0.0f))

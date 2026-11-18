@@ -1,4 +1,5 @@
 #include "Machine.h"
+#include "RadioUi.h"
 #include "../dsp/Modulators.h"
 #include "../dsp/VAFilter.h"
 
@@ -88,6 +89,12 @@ static Picto pagePicto (const Machine::Page& pg)
     if (n == "transpose") return Picto::shift;
     if (v == "resample")  return Picto::resample;
     if (v == "cycleplan") return Picto::cycles;
+    // RADIO's
+    if (v == "tune")      return Picto::antenna;
+    if (v == "listen")    return Picto::radio;
+    if (v == "air")       return Picto::air;
+    if (v == "take")      return Picto::slice;
+    if (v == "pads")      return Picto::pads;
     return Picto::none;
 }
 
@@ -147,6 +154,10 @@ public:
         const auto vizNow = m.pageIndex() >= 0 && m.pageIndex() < (int) shownPages.size() ? shownPages[(size_t) m.pageIndex()].viz : juce::String();
         if (m.capture)
             paintCapture (g, in);
+        else if (m.mode == Machine::radioMode && vizNow == "tune")
+            {}                                  // (the tuner over it)
+        else if (m.mode == Machine::radioMode && ! (vizNow == "fx" && (m.bankOf[juce::String ("fx") + juce::String (m.mode)] == 1 || m.bankOf[juce::String ("fx") + juce::String (m.mode)] == 2)))
+            radioScreen.paint (g, in, proc(), m.radioPad());
         else if (vizNow == "orbite")
             paintOrbite (g, in);
         else if (vizNow == "mix")
@@ -472,6 +483,7 @@ public:
 
 private:
     Machine& m;
+    RadioScreen radioScreen;
     int lastDriveModel = 1;
     juce::Rectangle<float> fxBoxes[Player::numStages], fxSwitches[Player::numStages], fxRow;
     bool fxShown = false;
@@ -533,6 +545,23 @@ private:
             else
                 sub = "aucun son : glisse un wav, ou capture ton synthé"_fr;
         }
+        else if (m.mode == Machine::radioMode)
+        {
+            tag = "radio";
+            const int rx = juce::jlimit (0, radio::numRx - 1, (int) P (proc(), snd::rdRx));
+            title = proc().radioStationName (rx);
+            if (title.isEmpty())
+                title = "rx " + juce::String (rx + 1);
+            if (proc().hasRadioNet())
+            {
+                const auto st = proc().radioNet().getStatus (rx);
+                sub = radioStateText (st.state);
+                if (st.title.isNotEmpty())
+                    sub << " · "_fr << st.title;
+                else if (st.msg.isNotEmpty())
+                    sub << " · "_fr << st.msg;
+            }
+        }
         else
         {
             tag = "drum";
@@ -542,10 +571,12 @@ private:
             sub = "input thru fx · "_fr + sub;
         auto f = mono (12.0f, 600);
         const Picto icon = m.capture ? (proc().isSampling() ? Picto::record : (m.captureKind == Machine::resampleKind ? Picto::resample : Picto::jack))
-                         : (m.mode == Machine::synthMode ? Picto::sine : (m.mode == Machine::samplerMode ? Picto::cassette : Picto::drum));
+                         : (m.mode == Machine::synthMode ? Picto::sine : (m.mode == Machine::samplerMode ? Picto::cassette
+                                                                         : (m.mode == Machine::radioMode ? Picto::radio : Picto::drum)));
         const float tw = (float) juce::GlyphArrangement::getStringWidthInt (f, themed (tag)) + 14.0f + 20.0f;
         auto t = r.removeFromLeft (tw).reduced (0.0f, 1.0f);
-        g.setColour (proc().isSampling() || proc().player.resampleState() == Player::Resample::recording ? col::sRed : col::sOrange);
+        g.setColour (proc().isSampling() || proc().player.resampleState() == Player::Resample::recording
+                     || (m.mode == Machine::radioMode && ! m.capture && proc().radio.recording()) ? col::sRed : col::sOrange);
         g.fillRoundedRectangle (t, 4.0f);
         auto ti = t.reduced (7.0f, 0.0f);
         picto (g, icon, ti.removeFromLeft (15.0f).withSizeKeepingCentre (15.0f, 15.0f), col::screen, 1.4f);
@@ -957,7 +988,7 @@ private:
             g.drawRoundedRectangle (cell, 8.0f, 1.5f);
         }
         text (g, "drum arrive en 0.4", r.removeFromTop (40.0f), grotesk (24.0f, 300), col::screenText, juce::Justification::centred);
-        text (g, "8 pads · tranches · séquenceur · voix générées depuis ton synthé · ram · radio"_fr, r.removeFromTop (20.0f), mono (12.0f),
+        text (g, "8 pads · tranches · séquenceur · voix générées depuis ton synthé · ram"_fr, r.removeFromTop (20.0f), mono (12.0f),
               col::screenDim, juce::Justification::centred);
     }
 
@@ -2116,21 +2147,22 @@ Machine::Machine (ReplikantProcessor& p) : proc (p), updatePanel (p.updater)
     zoom = (float) proc.settingsFile().getDoubleValue ("zoom", 1.0);
 
     // the header
-    const char* modeNames[3] = { "synth", "drum", "sampler" };
+    const char* modeNames[numModes] = { "synth", "drum", "sampler", "radio" };
     const juce::Colour none = juce::Colours::transparentBlack;
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < numModes; ++i)
     {
         auto& k = modeKeys[i];
         k.setButtonText (juce::String::fromUTF8 (modeNames[i]));
         k.look = [this, i] { return mode == i && ! capture ? KeyState::on : KeyState::normal; };
         k.onClick = [this, i] { showMode (i); };
-        k.icon = i == synthMode ? Picto::sine : (i == drumMode ? Picto::drum : Picto::cassette);
+        k.icon = i == synthMode ? Picto::sine : (i == drumMode ? Picto::drum : (i == samplerMode ? Picto::cassette : Picto::radio));
         addAndMakeVisible (k);
     }
     modeKeys[drumMode].setEnabled (false);
     modeKeys[drumMode].setTooltip ("DRUM arrive en 0.4 : 8 pads, tranches, séquenceur, voix générées depuis ton synthé."_fr);
     modeKeys[synthMode].setTooltip ("Deux oscillateurs qui lisent des cycles (les basiques, ou ceux de ton synthé), un sub, du bruit, l'unisson."_fr);
     modeKeys[samplerMode].setTooltip ("L'instrument : ton synthé capturé note par note, ou un son glissé sur la fenêtre."_fr);
+    modeKeys[radioMode].setTooltip ("La radio : une station sur internet ou un récepteur ondes courtes, son air, des prises découpées en pads ou envoyées au sampler."_fr);
     captureKey.setButtonText ("capture");
     captureKey.dot = col::red;
     captureKey.look = [this] { return capture ? KeyState::on : KeyState::normal; };
@@ -2200,10 +2232,15 @@ Machine::Machine (ReplikantProcessor& p) : proc (p), updatePanel (p.updater)
     modScenes = std::make_unique<ModScenes> (*this);
     wtfPanel = std::make_unique<WtfPanel> (*this);
     captureStrip = std::make_unique<CaptureStrip> (*this);
+    auto say = [this] (const juce::String& t, bool warning) { showMessage (t, warning); };
+    radioStrip = std::make_unique<RadioStrip> (proc, say);
+    radioTuner = std::make_unique<RadioTuner> (proc, say);
     addAndMakeVisible (*keyboard);
     addAndMakeVisible (*modScenes);
     addAndMakeVisible (*wtfPanel);
     addChildComponent (*captureStrip);
+    addChildComponent (*radioStrip);
+    addChildComponent (*radioTuner);
 
     addChildComponent (updatePanel);
     updatePanel.onClose = [this] { updatePanel.setVisible (false); };
@@ -2231,7 +2268,7 @@ Machine::Machine (ReplikantProcessor& p) : proc (p), updatePanel (p.updater)
             set.saveIfNeeded();
         }
     }
-    for (int m = 0; m < 3; ++m)
+    for (int m = 0; m < numModes; ++m)
         page[m] = juce::jlimit (0, juce::jmax (0, (int) pages[m].size() - 1), proc.settingsFile().getIntValue ("page" + juce::String (m), 0));
     captureKind = juce::jlimit ((int) notesKind, (int) resampleKind, proc.settingsFile().getIntValue ("captureKind", notesKind));
     shownResample = proc.lastResample;
@@ -2457,6 +2494,97 @@ void Machine::buildPages()
         v.push_back (modsPage());
         v.push_back (settingsPage());
     }
+    // RADIO
+    {
+        auto modeIs = [this] (int md) { return std::function<bool()> ([this, md] { return (int) P (proc, snd::rdMode) == md; }); };
+        auto loops = [this] { return (int) P (proc, snd::rdMode) != radio::modeLive; };
+        auto rxNow = [this] { return juce::jlimit (0, radio::numRx - 1, (int) P (proc, snd::rdRx)); };
+        auto shortwave = [this, rxNow] { return proc.hasRadioNet() && proc.radioNet().getSource (rxNow()).kind == 2; };
+        auto& v = pages[radioMode];
+        v.clear();
+        // TUNE: the receiver listened to (the tuner on the screen chooses its station, or its shortwave receiver), and a
+        // shortwave receiver's frequency and mode at hand
+        Bank tb { "tune", { S (snd::rdRx) } };
+        auto f = numberCtl ("Frequency", 10.0, 30000.0, 0.0,
+                            [this, rxNow] { return proc.hasRadioNet() ? proc.radioNet().getSource (rxNow()).khz : 9420.0; },
+                            [this, rxNow] (double khz)
+                            {
+                                auto s = proc.radioNet().getSource (rxNow());
+                                if (s.kind != 2)
+                                    return;
+                                s.khz = std::round (khz * 10.0) / 10.0;
+                                proc.radioNet().setSource (rxNow(), s);
+                            },
+                            [] (double khz) { return juce::String (khz, khz < 10000.0 ? 1 : 0) + " khz"; }, true);
+        f.shown = shortwave;
+        f.dragPixels = 4000.0f;
+        f.sepBefore = true;
+        f.tip = "La fréquence du récepteur ondes courtes (glisse lentement : 4000 pixels pour toute la bande ; le tuner a ses pas de 0,1 à 5 kHz)."_fr;
+        tb.ctls.push_back (f);
+        auto md = choiceCtl ("Demod", { "am", "usb", "lsb", "cw" },
+                             [this, rxNow]
+                             {
+                                 const auto m = proc.hasRadioNet() ? proc.radioNet().getSource (rxNow()).mode : juce::String ("am");
+                                 return juce::jmax (0, juce::StringArray { "am", "usb", "lsb", "cw" }.indexOf (m));
+                             },
+                             [this, rxNow] (int i)
+                             {
+                                 auto s = proc.radioNet().getSource (rxNow());
+                                 if (s.kind != 2)
+                                     return;
+                                 s.mode = juce::StringArray { "am", "usb", "lsb", "cw" }[juce::jlimit (0, 3, i)];
+                                 proc.radioNet().setSource (rxNow(), s);
+                             });
+        md.shown = shortwave;
+        md.tip = "AM : la radiodiffusion. USB, LSB : la bande latérale (les radioamateurs au-dessus et au-dessous de 10 MHz). CW : le morse."_fr;
+        tb.ctls.push_back (md);
+        tb.ctls.push_back (sep (S (snd::rdLevel)));
+        tb.ctls.push_back (S (snd::rdStatic));
+        v.push_back ({ "tune", "tune", { tb } });
+        v.push_back ({ "listen", "listen", { { "listen", { S (snd::rdMode), sep (S (snd::rdTune)), S (snd::rdLen, nullptr, loops),
+                                                              S (snd::rdSquelch, nullptr, modeIs (radio::modeLive)), S (snd::rdGrab, nullptr, modeIs (radio::modeLoop)),
+                                                              S (snd::rdDepth, nullptr, modeIs (radio::modeDig)), sep (S (snd::rdLevel)), S (snd::rdStatic) } } } });
+        v.push_back ({ "air", "air", { { "air", { S (snd::rdBand), S (snd::rdCentre), sep (S (snd::rdFade)), S (snd::rdRate), sep (S (snd::rdWhistle)),
+                                                    S (snd::rdCrackle), sep (S (snd::rdDrive)), S (snd::rdStatic) } } } });
+        v.push_back ({ "take", "take", { { "take", { S (snd::rdTake), sep (S (snd::rdSens)), S (snd::rdPads) } } } });
+        v.push_back ({ "pads", "pads", { { "pads", { S (snd::rdPadTune), S (snd::rdPadDecay), sep (S (snd::rdChoke)), sep (S (snd::rdPadLevel)) } } } });
+        v.push_back (filterPage());
+        v.push_back (fxPage());
+        v.push_back (modsPage());
+        v.push_back (settingsPage());
+        auto& rv = pages[radioMode];
+        auto rtip = [&rv] (int id, const juce::String& t)
+        {
+            for (auto& pg : rv)
+                for (auto& b : pg.banks)
+                    for (auto& c : b.ctls)
+                        if (c.param == id)
+                            c.tip = t;
+        };
+        rtip (snd::rdRx, "Le récepteur écouté : quatre, chacun accordé dans la page TUNE (une station, ou une fréquence sur un récepteur ondes courtes). Seul celui qu'on écoute reste connecté."_fr);
+        rtip (snd::rdMode, "LIVE : ce que joue le récepteur, maintenant. LOOP : sa dernière LENGTH rejouée en mesure, une nouvelle prise au hasard (GRAB). DIG : à chaque tour, LENGTH prise plus loin en arrière (DEPTH)."_fr);
+        rtip (snd::rdTune, "En LIVE : le son décalé vers le haut ou le bas comme par un récepteur accordé à côté (±600 Hz, la voix de canard d'une BLU mal calée). En LOOP et DIG : la transposition, comme une bande."_fr);
+        rtip (snd::rdLen, "La boucle, du seizième à deux mesures, au tempo."_fr);
+        rtip (snd::rdSquelch, "Seul ce qui est assez fort passe (de -66 à -10 dB) : sur une voix, il hache entre les mots."_fr);
+        rtip (snd::rdGrab, "La chance qu'un tour prenne une nouvelle boucle. KEEP : la première reste. À fond : une nouvelle à chaque tour."_fr);
+        rtip (snd::rdDepth, "Jusqu'où DIG va chercher en arrière : de 1 à 20 s."_fr);
+        rtip (snd::rdStatic, "Le souffle et les craquements de l'air : ce qu'on entend seul quand rien n'arrive."_fr);
+        rtip (snd::rdBand, "La largeur du récepteur, de FULL à 250 Hz (un filtre à quatre pôles)."_fr);
+        rtip (snd::rdCentre, "Où la bande se place quand elle se resserre, de 300 Hz à 3 kHz."_fr);
+        rtip (snd::rdFade, "Le signal qui s'en va et revient, une encoche qui le traverse : le fading des ondes courtes."_fr);
+        rtip (snd::rdRate, "La vitesse du fading."_fr);
+        rtip (snd::rdWhistle, "Le sifflement d'une porteuse voisine, qui erre lentement."_fr);
+        rtip (snd::rdCrackle, "Des craquements ; au-delà de 70 %, les fracas d'un orage lointain."_fr);
+        rtip (snd::rdDrive, "Le détecteur et le petit haut-parleur poussés."_fr);
+        rtip (snd::rdTake, "Jusqu'où GRAB remonte dans ce qui a été entendu (l'air compris) : de 1 à 30 s."_fr);
+        rtip (snd::rdSens, "La sensibilité aux attaques : plus haut, plus de coups trouvés (et des pads plus courts)."_fr);
+        rtip (snd::rdPads, "Combien de pads : les attaques les plus fortes, dans l'ordre de la prise, chacune jusqu'à la suivante."_fr);
+        rtip (snd::rdPadTune, "La hauteur des pads (±24 demi-tons)."_fr);
+        rtip (snd::rdPadDecay, "Leur décroissance. HOLD : chaque pad joue jusqu'au bout de sa tranche."_fr);
+        rtip (snd::rdChoke, "ON : un pad coupe celui qui joue (comme un charleston)."_fr);
+        rtip (snd::rdPadLevel, "Le niveau des pads."_fr);
+    }
+
     // the tips of the sound's settings
     auto tip = [] (std::vector<Page>& v, int id, const juce::String& t)
     {
@@ -2757,7 +2885,22 @@ void Machine::showMode (int m)
         setSound (proc, snd::engine, (float) m);
     mode = m;
     focus = nullptr;
+    if (mode == radioMode)
+        proc.radioNet();
     showPage (page[mode]);
+}
+
+bool Machine::tunerPage() const
+{
+    if (capture || mode != radioMode)
+        return false;
+    const auto& v = pages[radioMode];
+    return page[radioMode] >= 0 && page[radioMode] < (int) v.size() && v[(size_t) page[radioMode]].viz == "tune";
+}
+
+int Machine::radioPad() const
+{
+    return radioStrip != nullptr ? static_cast<RadioStrip&> (*radioStrip).selected : -1;
 }
 
 void Machine::showCapture (bool on)
@@ -2797,8 +2940,10 @@ void Machine::showPage (int p)
         k.dot = juce::Colours::transparentBlack;
         k.icon = pagePicto (pgs[(size_t) i]);
     }
-    keyboard->setVisible (! capture);
+    keyboard->setVisible (! capture && mode != radioMode);
     captureStrip->setVisible (capture);
+    radioStrip->setVisible (! capture && mode == radioMode);
+    radioTuner->setVisible (tunerPage());
     layoutEncoders();
     resized();
     repaint();
@@ -2945,13 +3090,13 @@ void Machine::resized()
     h.removeFromLeft (2);
     for (auto& k : modeKeys)
     {
-        k.setBounds (h.removeFromLeft (110));
+        k.setBounds (h.removeFromLeft (100));
         h.removeFromLeft (6);
     }
-    h.removeFromLeft (6);
-    captureKey.setBounds (h.removeFromLeft (108));
-    h.removeFromLeft (12);
-    presetBox = h.removeFromLeft (180);
+    h.removeFromLeft (4);
+    captureKey.setBounds (h.removeFromLeft (104));
+    h.removeFromLeft (10);
+    presetBox = h.removeFromLeft (150);
     nameEditor.setBounds (presetBox);
     packKey.setBounds (h.removeFromRight (104));
     h.removeFromRight (8);
@@ -2959,7 +3104,7 @@ void Machine::resized()
     h.removeFromRight (12);
     meterBox = h.removeFromRight (50).reduced (0, 4);
     h.removeFromRight (12);
-    bpmBox = h.removeFromRight (126);
+    bpmBox = h.removeFromRight (118);
     h.removeFromRight (8);
     playKey.setBounds (h.removeFromRight (40));
     h.removeFromRight (8);
@@ -2994,6 +3139,9 @@ void Machine::resized()
     b.removeFromRight (12);
     keyboard->setBounds (b);
     captureStrip->setBounds (b);
+    radioStrip->setBounds (b);
+    // the tuner: over the screen's left part (its title and the panel on the right stay)
+    radioTuner->setBounds (screenArea.getX() + 16, screenArea.getY() + 12 + 30, screenArea.getWidth() - 32 - 392 - 14, screenArea.getHeight() - 24 - 30);
     updatePanel.setBounds (getLocalBounds());
 }
 
@@ -3279,6 +3427,10 @@ void Machine::timerCallback()
         e->refreshIfChanged();
     screen->repaint();
     modScenes->repaint();
+    if (radioStrip->isVisible())
+        radioStrip->repaint();
+    if (radioTuner->isVisible() != tunerPage())
+        radioTuner->setVisible (tunerPage());
     static int tick = 0;
     if (++tick % 3 == 0)
     {

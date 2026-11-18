@@ -229,6 +229,55 @@ void picto (juce::Graphics& g, Picto kind, juce::Rectangle<float> area, juce::Co
             }
             break;
 
+        //------------------------------------------------------------------ RADIO
+        case Picto::radio:
+            // a transistor radio: its case, its speaker, its dial, its aerial
+            d.rect (0.06f, 0.36f, 0.94f, 0.88f, 0.07f);
+            d.circle (0.32f, 0.62f, 0.15f);
+            d.circle (0.32f, 0.62f, 0.05f, true);
+            d.line (0.58f, 0.52f, 0.84f, 0.52f, 0.7f);
+            d.line (0.58f, 0.64f, 0.84f, 0.64f, 0.7f);
+            d.line (0.58f, 0.76f, 0.84f, 0.76f, 0.7f);
+            d.line (0.28f, 0.36f, 0.78f, 0.06f);
+            break;
+
+        case Picto::antenna:
+            // a mast and its waves
+            d.line (0.5f, 0.42f, 0.5f, 0.94f);
+            d.lines ({ { 0.32f, 0.94f }, { 0.5f, 0.6f }, { 0.68f, 0.94f } }, 0.6f);
+            d.circle (0.5f, 0.38f, 0.05f, true);
+            d.stroke (d.arc (0.5f, 0.38f, 0.17f, 0.67f, 2.47f), 0.8f);
+            d.stroke (d.arc (0.5f, 0.38f, 0.17f, 3.81f, 5.61f), 0.8f);
+            d.stroke (d.arc (0.5f, 0.38f, 0.32f, 0.77f, 2.37f), 0.5f);
+            d.stroke (d.arc (0.5f, 0.38f, 0.32f, 3.91f, 5.51f), 0.5f);
+            break;
+
+        case Picto::air:
+            // the air: a wave that fades, and the hiss under it
+            d.stroke (d.wave (0.06f, 0.94f, 0.4f, 0.16f, 2.5f, [] (float ph, float u) { return std::sin (ph * twoPi) * (1.0f - 0.7f * u); }));
+            for (int i = 0; i < 9; ++i)
+            {
+                const float x = 0.1f + 0.1f * (float) i, h = 0.04f + 0.05f * (float) ((i * 7) % 4);
+                d.line (x, 0.76f - h, x, 0.76f + h, 0.55f);
+            }
+            break;
+
+        case Picto::slice:
+            // a waveform, cut at its attacks
+            d.stroke (d.wave (0.06f, 0.94f, 0.5f, 0.3f, 3.0f, [] (float ph, float) { const float f = ph - std::floor (ph); return std::sin (f * 11.0f) * std::exp (-f * 4.0f); }, 72), 0.75f);
+            d.line (0.06f, 0.12f, 0.06f, 0.88f);
+            d.line (0.36f, 0.12f, 0.36f, 0.88f);
+            d.line (0.65f, 0.12f, 0.65f, 0.88f);
+            break;
+
+        case Picto::pads:
+            for (int i = 0; i < 16; ++i)
+            {
+                const float x = 0.08f + 0.22f * (float) (i % 4), y = 0.08f + 0.22f * (float) (i / 4);
+                d.rect (x, y, x + 0.17f, y + 0.17f, 0.03f, i == 5 || i == 10, 0.9f);
+            }
+            break;
+
         case Picto::sliders:
             d.line (0.1f, 0.25f, 0.9f, 0.25f, 0.5f);
             d.line (0.1f, 0.5f, 0.9f, 0.5f, 0.5f);

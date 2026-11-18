@@ -21,6 +21,7 @@
     <a href="#capturer">Capturer</a>
     <a href="#synthe">Synthé</a>
     <a href="#sampler">Sampler</a>
+    <a href="#radio">Radio</a>
     <a href="#effets">Effets</a>
     <a href="#moduler">Moduler</a>
     <a href="#partager">Partager</a>
@@ -62,6 +63,7 @@
     <div><h3><svg class="p" viewBox="0 0 24 24"><path d="M2 12h3c1.2 0 1.6-7 3.2-7s2 14 3.6 14 2-10 3.4-10 1.6 3 2.8 3H22" /></svg>Moteur de lecture</h3><p>Des noyaux sinc de 128 points, une coupure qui suit la vitesse jusque dans la modulation de phase. Transposé, le son reste limpide.</p></div>
     <div><h3><svg class="p" viewBox="0 0 24 24"><rect x="1.5" y="5" width="21" height="14" rx="1"/><path d="M7.5 5v14M12 5v14M16.5 5v14" opacity=".6"/><rect class="f" x="6.2" y="5" width="2.6" height="8"/><rect class="f" x="10.7" y="5" width="2.6" height="8"/></svg>Capture des notes</h3><p>Ton synthé échantillonné tout seul&nbsp;: chaque note, chaque vélocité, bouclée et accordée. Toi, tu vas te faire un café.</p></div>
     <div><h3><svg class="p" viewBox="0 0 24 24"><path d="M5 10c1.6-5 4.8-5 6.4 0s4.8 5 6.4 0" opacity=".35"/><path d="M3.5 12.5c1.6-5 4.8-5 6.4 0s4.8 5 6.4 0" opacity=".65"/><path d="M2 15c1.6-5 4.8-5 6.4 0s4.8 5 6.4 0"/></svg>Capture des cycles</h3><p>Balaie un bouton de ton synthé&nbsp;: chaque position devient un cycle. Une banque d'ondes faite de ton propre son.</p></div>
+    <div><h3><svg class="p" viewBox="0 0 24 24"><rect x="1.5" y="9" width="21" height="12.5" rx="1.6"/><circle cx="7.5" cy="15.2" r="3.4"/><circle class="f" cx="7.5" cy="15.2" r="1.1"/><path d="M14 12.5h5.5M14 15.2h5.5M14 17.9h5.5" opacity=".6"/><path d="M6.5 9 18.5 2"/></svg>Radio</h3><p>Une station sur internet ou un récepteur ondes courtes, avec le fading et les craquements de l'air. Samples-la&nbsp;: la prise est découpée en pads.</p></div>
     <div><h3><svg class="p" viewBox="0 0 24 24"><path d="M14.6 4.6A8 8 0 1 1 6.3 6"/><path class="f" d="M5 3.2l4.4 1.4-3.2 3.4z"/><circle class="f" cx="12" cy="12" r="3"/></svg>Rééchantillonner</h3><p>Enregistre ce qui sort des effets et rejoue-le aussitôt, sans la moindre coupure. Puis repasse-le dans la machine.</p></div>
     <div><h3><svg class="p" viewBox="0 0 24 24"><rect x="2.5" y="2.5" width="19" height="19" rx="2"/><path d="M7 8c1.7-2.4 3.3 2.4 5 0s3.3 2.4 5 0M7 12c1.7-2.4 3.3 2.4 5 0s3.3 2.4 5 0M7 16c1.7-2.4 3.3 2.4 5 0s3.3 2.4 5 0"/><path d="M9.5 10.4l5-4.8"/></svg>Filtres</h3><p>Six filtres analogiques modélisés au plus près du circuit, suréchantillonnés, avec drive et réinjection FM.</p></div>
     <div><h3><svg class="p" viewBox="0 0 24 24"><rect x="1" y="8.5" width="6" height="7" rx="1.2"/><rect class="f" x="9" y="8.5" width="6" height="7" rx="1.2"/><rect x="17" y="8.5" width="6" height="7" rx="1.2"/><path d="M7 12h2M15 12h2"/></svg>Effets</h3><p>Drive, spectre, pitch, chorus, crush, espace. Glisse-les dans l'ordre que tu veux, coupe-les d'un interrupteur, en plein jeu, sans un clic.</p></div>
@@ -193,9 +195,24 @@
   <figure class="shot"><img src="img/sampler-1360.webp" srcset="img/sampler-680.webp 680w, img/sampler-1360.webp 1360w" sizes="(max-width: 1100px) 100vw, 1070px" width="1360" height="848" loading="lazy" alt="Le SAMPLER : la boucle, son fondu, le début."></figure>
 </section>
 
-<!-- 07 EFFETS =============================================================== -->
+<!-- 07 RADIO ================================================================ -->
+<section class="mod" id="radio">
+  <h2><span>07 · Radio</span><svg class="p" viewBox="0 0 24 24"><rect x="1.5" y="9" width="21" height="12.5" rx="1.6"/><circle cx="7.5" cy="15.2" r="3.4"/><circle class="f" cx="7.5" cy="15.2" r="1.1"/><path d="M14 12.5h5.5M14 15.2h5.5M14 17.9h5.5" opacity=".6"/><path d="M6.5 9 18.5 2"/></svg></h2>
+  <p class="intro">Un onglet à part&nbsp;: la radio comme un instrument. Accorde un récepteur, écoute, et dès qu'un truc passe, prends-le. Il est aussitôt découpé en pads, ou envoyé au sampler.</p>
+  <ul class="steps-list">
+    <li><kbd>TUNE</kbd><b>Quatre récepteurs</b>&nbsp;: chacun sur une station internet (l'annuaire libre des stations, par nom, genre ou pays) ou sur un récepteur ondes courtes partagé sur le réseau, à la fréquence que tu veux, en AM, USB, LSB ou CW. Le flux garde toujours une seconde d'avance, sans jamais dériver.</li>
+    <li><kbd>LIVE</kbd><b>Ce qui passe maintenant</b>, décalé comme par un récepteur accordé à côté, haché par le squelch entre les mots. <b>LOOP</b> rejoue sa dernière mesure au tempo, <b>DIG</b> va chercher plus loin en arrière, à chaque tour.</li>
+    <li><kbd>AIR</kbd><b>L'air entre les deux</b>&nbsp;: la bande étroite du récepteur, le fading des ondes courtes, une porteuse qui siffle, un orage au loin, le petit haut-parleur poussé, le souffle.</li>
+    <li><kbd>GRAB</kbd><b>Les dernières secondes entendues</b> (de 1 à 30), ou <b>REC</b> jusqu'à STOP. La prise est coupée à ses attaques en 4, 8 ou 16 pads, jouables sur ton clavier à partir de C1.</li>
+    <li><kbd>→</kbd><b>Vers le sampler</b>&nbsp;: la prise entière, bouclée, ou un seul pad, en un clic. Elle profite alors de tout&nbsp;: le moteur de lecture, le SUB, ORBITE, les filtres.</li>
+  </ul>
+  <figure class="shot"><img src="img/radio-1360.webp" srcset="img/radio-680.webp 680w, img/radio-1360.webp 1360w" sizes="(max-width: 1100px) 100vw, 1070px" width="1360" height="848" loading="lazy" alt="La RADIO : ce qui est entendu défile, la prise découpée en seize pads, jouables sur le clavier."></figure>
+  <figure class="shot"><img src="img/radio-tune-1360.webp" srcset="img/radio-tune-680.webp 680w, img/radio-tune-1360.webp 1360w" sizes="(max-width: 1100px) 100vw, 1070px" width="1360" height="848" loading="lazy" alt="La page TUNE : l'annuaire des stations, ou les récepteurs ondes courtes et leur fréquence."></figure>
+</section>
+
+<!-- 08 EFFETS =============================================================== -->
 <section class="mod" id="effets">
-  <h2><span>07 · Filtres et effets</span><svg class="p" viewBox="0 0 24 24"><rect x="2.5" y="2.5" width="19" height="19" rx="2"/><path d="M7 8c1.7-2.4 3.3 2.4 5 0s3.3 2.4 5 0M7 12c1.7-2.4 3.3 2.4 5 0s3.3 2.4 5 0M7 16c1.7-2.4 3.3 2.4 5 0s3.3 2.4 5 0"/><path d="M9.5 10.4l5-4.8"/></svg></h2>
+  <h2><span>08 · Filtres et effets</span><svg class="p" viewBox="0 0 24 24"><rect x="2.5" y="2.5" width="19" height="19" rx="2"/><path d="M7 8c1.7-2.4 3.3 2.4 5 0s3.3 2.4 5 0M7 12c1.7-2.4 3.3 2.4 5 0s3.3 2.4 5 0M7 16c1.7-2.4 3.3 2.4 5 0s3.3 2.4 5 0"/><path d="M9.5 10.4l5-4.8"/></svg></h2>
   <ul class="steps-list">
     <li><kbd>FLT</kbd><b>Six filtres analogiques</b> modélisés au plus près du circuit et suréchantillonnés&nbsp;: échelle à transistors, double filtre rugueux, variable d'état, double résonance, CMOS, ampli op saturé. L'écran dessine la courbe et le schéma de chacun.</li>
     <li><kbd>DRV</kbd><b>Drive</b>&nbsp;: lampe, console ou bande magnétique.</li>
@@ -207,7 +224,7 @@
 
 <!-- 08 MODULER ============================================================== -->
 <section class="mod" id="moduler">
-  <h2><span>08 · Moduler</span><svg class="p" viewBox="0 0 24 24"><circle cx="5" cy="6" r="2.8"/><circle cx="19" cy="6" r="2.8"/><circle class="f" cx="5" cy="6" r=".9"/><circle class="f" cx="19" cy="6" r=".9"/><path d="M5 8.8c0 15 14 15 14 0"/></svg></h2>
+  <h2><span>09 · Moduler</span><svg class="p" viewBox="0 0 24 24"><circle cx="5" cy="6" r="2.8"/><circle cx="19" cy="6" r="2.8"/><circle class="f" cx="5" cy="6" r=".9"/><circle class="f" cx="19" cy="6" r=".9"/><path d="M5 8.8c0 15 14 15 14 0"/></svg></h2>
   <ul class="steps-list">
     <li><kbd>M</kbd><b>Quatre modulateurs</b>&nbsp;: onde, pas dessinés à la souris, hasard qui revient en boucle, enveloppe, suiveur d'entrée. Tous calés sur le tempo.</li>
     <li><kbd>1</kbd><b>Assigner, c'est tourner</b>&nbsp;: clique M1, tourne n'importe quel potard, la distance devient la profondeur. Un double-clic pour défaire.</li>
@@ -220,7 +237,7 @@
 
 <!-- 09 PARTAGER ============================================================= -->
 <section class="mod" id="partager">
-  <h2><span>09 · Exporter, partager</span><svg class="p" viewBox="0 0 24 24"><rect x="4" y="9" width="16" height="12" rx="1.6"/><path d="M12 15V2M8 6l4-4 4 4"/></svg></h2>
+  <h2><span>10 · Exporter, partager</span><svg class="p" viewBox="0 0 24 24"><rect x="4" y="9" width="16" height="12" rx="1.6"/><path d="M12 15V2M8 6l4-4 4 4"/></svg></h2>
   <ul class="steps-list">
     <li><kbd>WAV</kbd><b>Dossier de WAV</b>&nbsp;: chaque fichier embarque sa note, sa justesse, sa boucle et sa zone, prêt pour n'importe quel sampler, logiciel ou matériel.</li>
     <li><kbd>BW</kbd><b>Multisample Bitwig</b>&nbsp;: l'instrument complet, zones, vélocités et boucles comprises.</li>

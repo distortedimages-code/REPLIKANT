@@ -43,7 +43,8 @@ namespace snd
         xfade, sceneA, sceneB,
         // the tempo of the modulators and the clock when the host doesn't give one
         tempo,
-        // (0.3) what the voices play: the SYNTHÉ's oscillators, the DRUM's pads, the SAMPLER's instrument
+        // (0.3) what the voices play: the SYNTHÉ's oscillators, the DRUM's pads, the SAMPLER's instrument (0.3.5: or
+        // the RADIO)
         engine,
         // SYNTHÉ: two oscillators reading banks of cycles (the position morphs through the bank), B moving A's
         // phase, a sub an octave under A, noise, up to four detuned voices spread across the stereo
@@ -68,11 +69,16 @@ namespace snd
         // read an octave or two down by the reading engine, in grains kept on its time (OCTAVE); a crossover that can
         // take the sample's own (stretched) lows away; never under 25 Hz
         subOn, subMode, subOct, subXover, subReplace, subDrive, subFollow, mxSub,
+        // (0.3.5) RADIO (radio/RadioCore.h): the receiver listened to and how (LIVE, LOOP, DIG), its air; the takes
+        // (how far back GRAB goes), how they are cut into pads, and the pads
+        rdRx, rdMode, rdLen, rdSquelch, rdGrab, rdDepth, rdTune, rdStatic, rdLevel,
+        rdBand, rdCentre, rdFade, rdRate, rdWhistle, rdCrackle, rdDrive,
+        rdTake, rdSens, rdPads, rdPadTune, rdPadDecay, rdChoke, rdPadLevel,
         count
     };
 
     constexpr int numMods = 4, routesPerMod = 8, maxSteps = 16, numScenes = 16;
-    enum Engine { synth = 0, drum = 1, sampler = 2 };
+    enum Engine { synth = 0, drum = 1, sampler = 2, radio = 3 };
     // what a scene can hold (everything but the scenes themselves and a few settings of the whole)
     bool sceneLockable (int id);
     enum ModSetting { mType, mShape, mSync, mDiv, mHz, mSmooth, mPolarity, mRetrig, mLen, mVari,

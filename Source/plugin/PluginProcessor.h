@@ -10,8 +10,11 @@
 #include "../engine/Worker.h"
 #include "../engine/Player.h"
 #include "../engine/TestSynth.h"
+#include "../radio/RadioCore.h"
 #include "Updater.h"
 #include "MidiClock.h"
+
+class RadioNet;
 
 class ReplikantProcessor : public juce::AudioProcessor,
                            public juce::ChangeBroadcaster,
@@ -118,6 +121,21 @@ public:
     void stopResample()                              { player.stopResample(); }
     juce::String lastResample;                       // the instrument it made last
 
+    // RADIO (radio/RadioCore.h): the receivers, the listening and its air, what was heard, the takes and their pads.
+    // The network (RadioNet) is made the first time it's needed (the tab opened, a project with receivers tuned).
+    radio::Engine radio;
+    RadioNet& radioNet();
+    bool hasRadioNet() const                         { return net != nullptr; }
+    // the pads' take (message thread): what GRAB or REC made, cut at its attacks
+    std::shared_ptr<const radio::Take> radioTake() const    { return takeNow; }
+    bool radioSlicing() const                        { return slicing.load() > 0; }
+    bool radioGrab (juce::String& why);              // the last TAKE seconds of what was heard
+    bool radioRec (juce::String& why);               // REC, then STOP: what was heard between them
+    void radioReslice();                             // the take cut again (SENSITIVITY, PADS changed)
+    bool radioToSampler (int pad, juce::String& why);      // the take (pad < 0) or one pad, played by the SAMPLER
+    void radioClear();
+    juce::String radioStationName (int rx) const;    // what a receiver is tuned to (its station, its frequency)
+
     // the MIDI clock
     MidiClock clock;
     bool clockWithSampling = false;               // a sampling session starts and stops it
@@ -211,6 +229,25 @@ private:
 
     double sampleRate = 48000.0;
     bool clockStartedBySampling = false;
+
+    // RADIO: the network, the takes kept alive while the audio may play them, the take now and where it's kept
+    std::unique_ptr<RadioNet> net;
+    juce::var pendingSources;                        // (a project's receivers, before the network is made)
+    struct KeptTake { std::shared_ptr<const radio::Take> take; double retiredAt = 0.0; };
+    std::vector<KeptTake> takes;
+    std::shared_ptr<const radio::Take> takeNow;
+    juce::File takeFile;
+    float slicedWith = -1.0f; int slicedPads = -1;
+    double sliceChangedAt = 0.0;
+    std::atomic<int> slicing { 0 };
+    std::unique_ptr<juce::ThreadPool> radioPool;
+    juce::AudioBuffer<float> radioBuffer;
+    std::vector<radio::Engine::Event> radioEvents;
+    juce::MidiBuffer noMidi;
+    juce::CriticalSection radioLock;
+    void useTake (std::shared_ptr<const radio::Take::Audio>, const juce::String& name, bool save);
+    void radioTick();
+    juce::File radioFolder() const;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ReplikantProcessor)
 };
