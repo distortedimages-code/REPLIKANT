@@ -63,6 +63,7 @@ namespace dsp
 
         float value() const                { return out; }
         double getPhase() const            { return phase; }
+        int64_t cycles() const             { return cycle; }
         int currentStep() const            { return stepIndex; }
         bool isUnipolar() const;
 

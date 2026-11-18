@@ -115,6 +115,7 @@ public:
     //========================================================================== for the editor
     std::array<std::atomic<float>, snd::numMods> modValue {};   // what each sends (after its depth)
     std::array<std::atomic<int>, snd::numMods> modStep {};
+    std::array<std::atomic<float>, snd::numMods> modPhase {};   // where each wave is, over two of its cycles (0..2: the screen draws two)
     std::atomic<int> shownSample { -1 };
     std::atomic<float> shownPosition { 0.0f };       // in the sample's frames
     std::atomic<int> activeVoices { 0 };

@@ -1377,26 +1377,37 @@ private:
             else
             {
                 const int shape = (int) M (snd::mShape);
+                // the shape at t (in cycles), as the screen draws it
+                auto shapeAt = [shape] (float t)
+                {
+                    const float ph = t - std::floor (t);
+                    switch (shape)
+                    {
+                        case 0:  return std::sin (ph * juce::MathConstants<float>::twoPi);
+                        case 1:  return ph < 0.5f ? 4.0f * ph - 1.0f : 3.0f - 4.0f * ph;
+                        case 2:  return 2.0f * ph - 1.0f;
+                        case 3:  return 1.0f - 2.0f * ph;
+                        case 4:  return ph < 0.5f ? 1.0f : -1.0f;
+                        default: return std::sin ((float) ((int) (t * 4.0f)) * 7.3f);
+                    }
+                };
                 juce::Path path;
                 for (int i = 0; i <= 200; ++i)
                 {
-                    const float t = (float) i / 100.0f, ph = t - std::floor (t);
-                    float y = 0.0f;
-                    switch (shape)
-                    {
-                        case 0: y = std::sin (ph * juce::MathConstants<float>::twoPi); break;
-                        case 1: y = ph < 0.5f ? 4.0f * ph - 1.0f : 3.0f - 4.0f * ph; break;
-                        case 2: y = 2.0f * ph - 1.0f; break;
-                        case 3: y = 1.0f - 2.0f * ph; break;
-                        case 4: y = ph < 0.5f ? 1.0f : -1.0f; break;
-                        default: y = std::sin ((float) ((int) (t * 4.0f)) * 7.3f); break;
-                    }
-                    const float x = r.getX() + r.getWidth() * (float) i / 200.0f, py = r.getCentreY() - y * r.getHeight() * 0.42f;
+                    const float t = (float) i / 100.0f;
+                    const float x = r.getX() + r.getWidth() * (float) i / 200.0f, py = r.getCentreY() - shapeAt (t) * r.getHeight() * 0.42f;
                     if (i == 0) path.startNewSubPath (x, py); else path.lineTo (x, py);
                 }
                 stroke (path, colour);
+                // where the wave is now: a dot riding the curve (over the two cycles drawn)
+                const float at = juce::jlimit (0.0f, 1.999f, p.player.modPhase[(size_t) mi].load());
+                const float x = r.getX() + r.getWidth() * at * 0.5f, y = r.getCentreY() - shapeAt (at) * r.getHeight() * 0.42f;
+                g.setColour (colour.withAlpha (0.35f));
+                g.fillEllipse (x - 8.0f, y - 8.0f, 16.0f, 16.0f);
+                g.setColour (col::screenText);
+                g.fillEllipse (x - 4.5f, y - 4.5f, 9.0f, 9.0f);
             }
-            // (what it sends now: on its key, under the screen; no dot running on the curve)
+            // (what it sends, after its depth: on its key, under the screen)
         }
         else if (viz == "scenes")
         {

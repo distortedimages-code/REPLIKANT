@@ -1417,6 +1417,7 @@ void Player::modulate (int offset, int n, const Transport& t, Chunk& c, bool atR
         mv[m] = value * P (snd::mAmt);
         modValue[(size_t) m].store (mv[m], std::memory_order_relaxed);
         modStep[(size_t) m].store (mod.currentStep(), std::memory_order_relaxed);
+        modPhase[(size_t) m].store ((float) ((double) (mod.cycles() & 1) + mod.getPhase()), std::memory_order_relaxed);
     }
 
     float off[snd::count] {};
