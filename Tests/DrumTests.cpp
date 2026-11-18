@@ -2,6 +2,7 @@
 // their curve, speeds and lengths, p-locks, a pattern change at the boundary, a chain), the keys, the choke, the
 // sources (a sample as it is, a take's slices chosen by step, the synth), and a storm of random settings.
 
+#include <tuple>
 #include "../Source/drum/DrumCore.h"
 #include "../Source/radio/RadioSlicer.h"
 
@@ -383,6 +384,56 @@ static void testSources()
     CHECK (std::abs (hz - 65.4) < 8.0, "the kick settles near 65 Hz: %.1f", hz);
 }
 
+
+// the filter's envelope: a bright noise through a low pass at 200 Hz, opened six octaves at the hit and closing in
+// tens of milliseconds (bright at first, dark after); the other way, an open filter closed at the hit (dark, then bright)
+static void testFilterEnvelope()
+{
+    auto run = [] (float cutoff, float amount, float fdec)
+    {
+        Engine e;
+        e.allocate();
+        e.prepare (sr, 512);
+        e.setBanks (dsp::CycleBank::basics().get(), nullptr);
+        auto& tk = e.pattern (0).tr[0];
+        tk.reset (0);
+        tk.p[pSweep] = 0.0f; tk.p[pClick] = 0.0f; tk.p[pBody] = 0.0f; tk.p[pDrive] = 0.0f;
+        tk.p[pNoise] = 1.0f; tk.p[pTone] = 1.0f; tk.p[pDecay] = 1.0f;
+        tk.p[pFilter] = 0; tk.p[pCutoff] = cutoff; tk.p[pReso] = 0.0f;
+        tk.p[pFEnv] = amount; tk.p[pFAttack] = 0.0f; tk.p[pFDecay] = fdec;
+        std::vector<float> l (512), r (512), out;
+        for (int b = 0; b < 40; ++b)
+        {
+            Engine::Event k { 0, firstNote, 127 };
+            e.render (l.data(), r.data(), 512, {}, 0.5f, &k, b == 0 ? 1 : 0);
+            out.insert (out.end(), l.begin(), l.end());
+        }
+        // the brightness of a stretch: its slope's level against its own
+        auto bright = [&out] (int from, int len)
+        {
+            double d = 0.0, a = 0.0;
+            for (int i = from; i < from + len; ++i)
+            {
+                const double x = out[(size_t) i], dx = x - out[(size_t) i - 1];
+                d += dx * dx;
+                a += x * x;
+            }
+            return std::sqrt (d / std::max (1.0e-12, a));
+        };
+        bool finite = true;
+        for (float x : out)
+            finite = finite && std::isfinite (x);
+        return std::make_tuple (bright (24, 480), bright (14400, 4800), finite);
+    };
+    const auto [upEarly, upLate, upOk] = run (200.0f, 1.0f, 0.3f);
+    const auto [stillEarly, stillLate, stillOk] = run (200.0f, 0.0f, 0.3f);
+    const auto [downEarly, downLate, downOk] = run (20000.0f, -1.0f, 0.3f);
+    std::printf ("  filter envelope: up %.3f -> %.3f (none %.3f -> %.3f), down %.3f -> %.3f\n", upEarly, upLate, stillEarly, stillLate, downEarly, downLate);
+    CHECK (upOk && stillOk && downOk, "numbers only");
+    CHECK (upEarly > 4.0 * stillEarly && upLate < 1.5 * stillLate, "opened at the hit, closed after: %.3f / %.3f, %.3f / %.3f", upEarly, stillEarly, upLate, stillLate);
+    CHECK (downEarly * 4.0 < downLate, "closed at the hit, opened after: %.3f -> %.3f", downEarly, downLate);
+}
+
 static void testStorm()
 {
     std::mt19937 rng (11);
@@ -459,6 +510,7 @@ static void testCpu()
         p.tr[t].p[pNoise] = 0.5f;
         p.tr[t].p[pFilter] = 0; p.tr[t].p[pCutoff] = 3000.0f; p.tr[t].p[pReso] = 0.4f; p.tr[t].p[pDrive] = 0.5f;
         p.tr[t].p[pDecay] = 0.7f;
+        p.tr[t].p[pFEnv] = 0.5f;
     }
     std::vector<float> l (512), r (512);
     double ppq = 0.0;
@@ -469,7 +521,7 @@ static void testCpu()
         ppq += 512.0 / sr * 140.0 / 60.0;
     }
     const double secs = std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count();
-    std::printf ("  cpu: eight synth tracks on every sixteenth, all their settings on: %.2f %% of real time\n", secs / 10.0 * 100.0);
+    std::printf ("  cpu: eight synth tracks on every sixteenth, all their settings on (filter envelopes too): %.2f %% of real time\n", secs / 10.0 * 100.0);
     CHECK (secs / 10.0 < 0.08, "%.3f", secs / 10.0);
 }
 
@@ -481,6 +533,7 @@ int main()
     testPatterns();
     testKeysAndChoke();
     testSources();
+    testFilterEnvelope();
     testStorm();
     testCpu();
     std::printf ("%d checks, %d failed\n", checks, failures);

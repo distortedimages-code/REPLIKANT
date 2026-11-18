@@ -45,7 +45,7 @@ namespace drum
         pSource, pNote, pTune, pBank, pPosition, pStart, pSlice, pReverse,
         pSweep, pSweepTime, pPmod, pRatio,
         pAttack, pDecay, pBody, pClick, pNoise, pTone,
-        pFilter, pCutoff, pReso, pDrive,
+        pFilter, pCutoff, pReso, pFEnv, pFAttack, pFDecay, pDrive,
         pLevel, pPan, pChoke,
         pVel, pProb, pMicro, pRetrig, pCount, pCurve, pRVel,
         numParams
@@ -165,6 +165,8 @@ namespace drum
             float env = 0.0f, att = 0.0f, attInc = 1.0f, decCoef = 1.0f, swEnv = 1.0f, swCoef = 1.0f;
             float clickEnv = 0.0f, noiseEnv = 0.0f, noiseCoef = 1.0f, nz = 0.0f;
             float vel = 1.0f, fade = 1.0f, fadeStep = 0.0f;
+            float fenv = 0.0f, fatt = 1.0f, fattInc = 1.0f, fdecCoef = 1.0f;   // the filter's envelope
+            bool fhold = false;
             float ic[2][2] {}, dz[2] {};
             bool hold = false;
         };

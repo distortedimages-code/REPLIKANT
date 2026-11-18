@@ -1347,22 +1347,39 @@ private:
         }
         else if (viz == "dtone")
         {
-            // the track's filter, its response at CUTOFF and RESO
+            // the track's filter, its response at CUTOFF and RESO; ghosted, where its envelope takes it at the hit
             const int type = (int) std::lround (v (drum::pFilter));
-            const float fc = v (drum::pCutoff), q = v (drum::pReso);
-            caption (juce::String::fromUTF8 (drum::text (drum::pFilter, (float) type).c_str()) + " · "_fr + juce::String::fromUTF8 (drum::text (drum::pCutoff, fc).c_str()));
-            juce::Path path;
-            for (int i = 0; i <= 160; ++i)
+            const float fc = v (drum::pCutoff), q = v (drum::pReso), amt = v (drum::pFEnv) * 6.0f;
+            juce::String cap = juce::String::fromUTF8 (drum::text (drum::pFilter, (float) type).c_str()) + " · "_fr + juce::String::fromUTF8 (drum::text (drum::pCutoff, fc).c_str());
+            if (std::abs (amt) > 0.03f)
+                cap << " · env "_fr << juce::String::fromUTF8 (drum::text (drum::pFEnv, v (drum::pFEnv)).c_str());
+            caption (cap);
+            auto response = [&] (float cutoff)
             {
-                const float f = 20.0f * std::pow (1000.0f, (float) i / 160.0f);
-                const float w = f / fc, k = 1.0f / (0.7f + 6.0f * q * q);
-                const float den = std::sqrt ((1.0f - w * w) * (1.0f - w * w) + (w * k) * (w * k));
-                const float mag = type == 0 ? 1.0f / den : (type == 1 ? w * w / den : w * k / den);
-                const float db = juce::jlimit (-36.0f, 18.0f, 20.0f * std::log10 (juce::jmax (1.0e-5f, mag)));
-                const float x = r.getX() + r.getWidth() * (float) i / 160.0f, y = r.getY() + (18.0f - db) / 54.0f * r.getHeight();
-                if (i == 0) path.startNewSubPath (x, y); else path.lineTo (x, y);
+                juce::Path path;
+                for (int i = 0; i <= 160; ++i)
+                {
+                    const float f = 20.0f * std::pow (1000.0f, (float) i / 160.0f);
+                    const float w = f / cutoff, k = 1.0f / (0.7f + 6.0f * q * q);
+                    const float den = std::sqrt ((1.0f - w * w) * (1.0f - w * w) + (w * k) * (w * k));
+                    const float mag = type == 0 ? 1.0f / den : (type == 1 ? w * w / den : w * k / den);
+                    const float db = juce::jlimit (-36.0f, 18.0f, 20.0f * std::log10 (juce::jmax (1.0e-5f, mag)));
+                    const float x = r.getX() + r.getWidth() * (float) i / 160.0f, y = r.getY() + (18.0f - db) / 54.0f * r.getHeight();
+                    if (i == 0) path.startNewSubPath (x, y); else path.lineTo (x, y);
+                }
+                return path;
+            };
+            if (std::abs (amt) > 0.03f)
+            {
+                const float peak = juce::jlimit (20.0f, 20000.0f, fc * std::exp2 (amt));
+                g.setColour (col::sOrange.withAlpha (0.35f));
+                g.strokePath (response (peak), juce::PathStrokeType (1.4f, juce::PathStrokeType::curved));
+                const float x0 = r.getX() + r.getWidth() * std::log (fc / 20.0f) / std::log (1000.0f);
+                const float x1 = r.getX() + r.getWidth() * std::log (peak / 20.0f) / std::log (1000.0f);
+                const float y = r.getY() + 10.0f;
+                g.drawArrow ({ x0, y, x1, y }, 1.4f, 7.0f, 7.0f);
             }
-            stroke (path, col::sOrange);
+            stroke (response (fc), col::sOrange);
         }
         else if (viz == "dseq")
         {
@@ -2672,7 +2689,10 @@ void Machine::buildPages()
                                                            sep (D (drum::pPmod, nullptr, srcIs ({ drum::synth }))), D (drum::pRatio, nullptr, srcIs ({ drum::synth })) } } } });
         v.push_back ({ "amp", "damp", { { "amp", { D (drum::pAttack), D (drum::pDecay), sep (D (drum::pBody)), D (drum::pClick), D (drum::pNoise),
                                                     sep (D (drum::pLevel)), D (drum::pPan) } } } });
-        v.push_back ({ "tone", "dtone", { { "tone", { D (drum::pFilter), D (drum::pCutoff), D (drum::pReso), sep (D (drum::pTone)), sep (D (drum::pDrive)) } } } });
+        auto fenvOn = [shownValue] { return std::abs (shownValue (drum::pFEnv)) > 0.005f; };
+        v.push_back ({ "tone", "dtone", { { "tone", { D (drum::pFilter), D (drum::pCutoff), D (drum::pReso), sep (D (drum::pFEnv)),
+                                                      D (drum::pFAttack, nullptr, fenvOn), D (drum::pFDecay, nullptr, fenvOn),
+                                                      sep (D (drum::pTone)), sep (D (drum::pDrive)) } } } });
         // SEQ: the track's length and speed, the pattern's length for a change, the swing
         {
             Bank b { "seq", {} };
@@ -2776,6 +2796,9 @@ void Machine::buildPages()
         dtip (drum::pFilter, "Le filtre de la piste : passe-bas, passe-haut, passe-bande."_fr);
         dtip (drum::pCutoff, "Sa fréquence. OPEN : ouvert."_fr);
         dtip (drum::pReso, "Sa résonance."_fr);
+        dtip (drum::pFEnv, "L'enveloppe du filtre : la coupure poussée vers le haut (+) ou vers le bas (-) au coup, jusqu'à six octaves, puis qui revient."_fr);
+        dtip (drum::pFAttack, "Le temps que met l'enveloppe du filtre pour monter, de 0 à 200 ms."_fr);
+        dtip (drum::pFDecay, "Le temps qu'elle met pour retomber. HOLD : elle reste en haut."_fr);
         dtip (drum::pTone, "La couleur du bruit : sombre à gauche, brillant à droite."_fr);
         dtip (drum::pDrive, "La piste saturée."_fr);
     }

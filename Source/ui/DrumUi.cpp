@@ -51,6 +51,7 @@ namespace
         else if (u == "atk")   { add (0.0f, "0"); add (at (0.5), "50"); add (1.0f, "200"); }
         else if (u == "dec")   { add (0.0f, "10MS"); add (at (0.5), "200"); add (1.0f, "HOLD"); }
         else if (u == "pan")   { add (0.0f, "L"); add (0.5f, "C"); add (1.0f, "R"); }
+        else if (u == "fenv")  { add (0.0f, "-6"); add (0.5f, "0"); add (1.0f, "+6"); c.ticks = 13; }
         else if (u == "micro") { add (0.0f, "-1/2"); add (0.5f, "0"); add (1.0f, "+1/2"); c.ticks = 9; }
         else if (u == "crv")   { add (0.0f, "-"); add (0.5f, "EVEN"); add (1.0f, "+"); c.ticks = 9; }
         else if (u == "hits")  { add (0.0f, "1"); add (at (4), "4"); add (at (8), "8"); add (1.0f, "16"); c.ticks = 16; }

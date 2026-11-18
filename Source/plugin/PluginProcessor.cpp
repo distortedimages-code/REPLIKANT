@@ -1699,6 +1699,7 @@ static void soundAsIs (drum::Track& tk)
     tk.p[drum::pDecay] = 1.0f;
     tk.p[drum::pCutoff] = 20000.0f;
     tk.p[drum::pReso] = 0.0f;
+    tk.p[drum::pFEnv] = 0.0f;
     tk.p[drum::pDrive] = 0.0f;
     tk.p[drum::pNote] = 60.0f;
 }

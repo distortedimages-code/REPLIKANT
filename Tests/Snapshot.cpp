@@ -468,6 +468,15 @@ int main (int argc, char** argv)
         run (90);
         shoot ("41-drum-plock.png");
         view->drumLift ({});
+        pat.tr[4].p[drum::pFilter] = 0;
+        pat.tr[4].p[drum::pCutoff] = 380.0f;
+        pat.tr[4].p[drum::pReso] = 0.55f;
+        pat.tr[4].p[drum::pFEnv] = 0.62f;
+        pat.tr[4].p[drum::pFDecay] = 0.3f;
+        proc.drumTrack = 4;
+        view->showPage (4);
+        run (90);
+        shoot ("44-drum-tone.png");
         d.setChain ({ 0, 1, 0, 2 });
         view->drumShowPatterns (true);
         view->showPage (5);

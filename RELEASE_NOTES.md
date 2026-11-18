@@ -1,3 +1,8 @@
+**REPLIK8 0.4.1** : une enveloppe pour le filtre de chaque piste du DRUM.
+
+- **F.ENV, F.ATTACK, F.DECAY** dans la page TONE : au coup, la coupure du filtre de la piste monte (ou descend) jusqu'à six octaves, puis revient en F.DECAY (HOLD : elle reste). De quoi faire claquer une caisse ou miauler une basse, et chaque pas peut avoir les siens
+- L'écran de la page TONE montre où l'enveloppe emmène le filtre au moment du coup
+
 **REPLIK8 0.4.0** : le DRUM, huit pistes et leur séquenceur.
 
 - **Huit pistes** : chacune joue une voix faite des cycles du synthé (les basiques ou ceux capturés de ton synthé), un son glissé sur la fenêtre, ou une prise de la radio et ses tranches. Elle se règle comme une batterie : NOTE et TUNE, SWEEP (la hauteur qui tombe, pour les grosses caisses et les toms) et son temps, PMOD et RATIO (le métal, les cloches), ATTACK et DECAY, BODY, CLICK, NOISE et sa couleur, un filtre par piste, DRIVE, LEVEL, PAN et quatre groupes de CHOKE

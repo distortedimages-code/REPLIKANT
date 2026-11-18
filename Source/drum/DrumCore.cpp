@@ -35,6 +35,9 @@ namespace
         { "filt",  "Filter",     K::choice,  0, 2, 0, "LP|HP|BP", "" },
         { "cut",   "Cutoff",     K::log,     20, 20000, 20000, nullptr, "Hz" },
         { "reso",  "Reso",       K::linear,  0, 1, 0, nullptr, "%" },
+        { "fenv",  "F.Env",      K::linear,  -1, 1, 0, nullptr, "fenv" },
+        { "fatk",  "F.Attack",   K::linear,  0, 1, 0, nullptr, "atk" },
+        { "fdec",  "F.Decay",    K::linear,  0, 1, 0.35f, nullptr, "dec" },
         { "drive", "Drive",      K::linear,  0, 1, 0, nullptr, "%" },
         { "lvl",   "Level",      K::linear,  0, 1, 0.8f, nullptr, "%" },
         { "pan",   "Pan",        K::linear,  -1, 1, 0, nullptr, "pan" },
@@ -143,6 +146,7 @@ std::string text (int p, float v)
                                                                                                          : fmt ("%.2f S", 0.01 * std::pow (400.0, (double) v)));
     if (u == "pan")   return std::abs (v) < 0.01f ? std::string ("C") : (v < 0.0f ? fmt ("L%.0f", -v * 100.0f) : fmt ("R%.0f", v * 100.0f));
     if (u == "micro") return std::abs (v) < 0.001f ? std::string ("0") : fmt ("%+.0f/48", v * 48.0f);
+    if (u == "fenv")  return std::abs (v) < 0.005f ? std::string ("0 OCT") : fmt ("%+.1f OCT", v * 6.0f);
     if (u == "crv")   return std::abs (v) < 0.005f ? std::string ("EVEN") : fmt ("%+.0f %%", v * 100.0f);
     if (u == "hits")  return fmt ("%.0f", v);
     if (u == "slice") return fmt ("%.0f", v + 1.0f);
@@ -534,6 +538,13 @@ void Engine::startVoice (int track, const float* p, float vel)
     v.clickEnv = clampf (p[pClick], 0.0f, 1.0f);
     v.noiseEnv = clampf (p[pNoise], 0.0f, 1.0f);
     v.noiseCoef = std::exp (-1.0f / ((v.hold ? 2.0f : decSec * 0.5f) * fsr));
+    // the filter's envelope: ATTACK up to 200 ms, then DECAY down (HOLD: it stays up)
+    const float fatk = clampf (p[pFAttack], 0.0f, 1.0f), fatkSec = 0.2f * fatk * fatk;
+    v.fatt = fatkSec < 0.0005f ? 1.0f : 0.0f;
+    v.fattInc = fatkSec < 0.0005f ? 1.0f : 1.0f / (fatkSec * fsr);
+    v.fenv = v.fatt;
+    v.fhold = p[pFDecay] >= 0.99f;
+    v.fdecCoef = v.fhold ? 1.0f : std::exp (-1.0f / (0.01f * std::pow (400.0f, clampf (p[pFDecay], 0.0f, 1.0f)) * fsr));
     v.vel = clampf (vel, 0.0f, 1.0f);
     v.fade = 1.0f;
     v.fadeStep = 0.0f;
@@ -564,10 +575,15 @@ void Engine::renderVoice (Voice& v, float* L, float* R, int n)
     // the track's filter (left open: nothing done), its drive
     const int ft = idx (v.p[pFilter], 3);
     const float cut = clampf (v.p[pCutoff], 20.0f, 20000.0f), reso = clampf (v.p[pReso], 0.0f, 1.0f);
-    const bool filter = ! (ft == 0 && cut >= 19900.0f && reso < 0.01f);
+    // (its envelope moves the cutoff up or down by as much as six octaves, the filter set again every 8 samples)
+    const float fAmt = clampf (v.p[pFEnv], -1.0f, 1.0f) * 6.0f;
+    const bool moving = std::abs (fAmt) > 0.006f;
+    const bool filter = ! (ft == 0 && cut >= 19900.0f && reso < 0.01f && (! moving || fAmt > 0.0f));
+    const float q = 0.5f + 11.5f * reso * reso;
+    const float top = std::min (20000.0f, 0.45f * fsr);
     radio::Svf svf;
-    if (filter)
-        svf.set (cut, 0.5f + 11.5f * reso * reso, fsr);
+    if (filter && ! moving)
+        svf.set (cut, q, fsr);
     const float drv = clampf (v.p[pDrive], 0.0f, 1.0f), dg = 1.0f + 8.0f * drv * drv, dn = 1.0f / std::tanh (dg);
     // the noise's colour: a one-pole low pass from 300 Hz (dark) to past 18 kHz, and a high pass above 2 kHz when bright
     const float tone = clampf (v.p[pTone], 0.0f, 1.0f);
@@ -653,6 +669,18 @@ void Engine::renderVoice (Voice& v, float* L, float* R, int n)
         else
             v.env *= v.decCoef;
         x = x * v.env + nz + ck;
+        if (moving)
+        {
+            if (v.fatt < 1.0f)
+            {
+                v.fatt = std::min (1.0f, v.fatt + v.fattInc);
+                v.fenv = v.fatt;
+            }
+            else
+                v.fenv *= v.fdecCoef;
+            if (filter && (i & 7) == 0)
+                svf.set (clampf (cut * std::exp2 (fAmt * v.fenv), 20.0f, top), q, fsr);
+        }
         if (filter)
         {
             float lp, bp, hp;
