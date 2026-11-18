@@ -253,7 +253,11 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         transport.bpm = player.get (snd::tempo);
 
     // the input, kept before the output is written over it (same buffer)
-    const int mon = sampling ? 1 : monitorAudio.load();
+    // ÉCOUTE : DIRECT lets the input through only while capturing or with the capture page open (to hear the synth
+    // being set up). Playing, never: some hosts hand back as the input the buffer just played, and passing it on
+    // would loop it for good (every note forever); with nothing let through, no host can close that loop
+    const int monWanted = monitorAudio.load();
+    const int mon = sampling ? 1 : (monWanted == 1 && ! captureOpen.load() ? 0 : monWanted);
     const float* kept[2] = { nullptr, nullptr };
     if (numIn > 0 && n <= inputCopy.getNumSamples())
     {

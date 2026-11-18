@@ -49,6 +49,7 @@ namespace te
         int ticks = 0;                                   // the knob's graduations, evenly spread (0: none)
         bool sepBefore = false;                          // a line before it on the desk (a new group)
         float quantum = 0.0f;                            // > 0: kept on whole multiples of it (in its own units)
+        float dragPixels = 240.0f;                       // the drag that sweeps its whole range
         std::function<void()> begin, end;                // the gesture (a host records automation between them)
         std::function<void()> changed;                   // after it was set
         juce::String tip;

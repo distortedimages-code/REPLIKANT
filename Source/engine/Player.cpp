@@ -609,15 +609,25 @@ void Player::prepareRead (Voice& v, const Chunk& c, Read& r) const
                        + (double) ((int) c.v[snd::transpose] - v.transposeAtOn)
                        + (double) c.v[snd::fine] * 0.01 + (double) c.bendSemis + (double) c.v[snd::tune];
     r.step = rk::ratioOf (semis) * v.rateScale * (c.v[snd::reverse] > 0.5f ? -1.0 : 1.0);
-    // far up: the nearest octave copy (a recording's), the kernel kept short and the result as clean
+    // far up: the recording's copy an octave (two... eight) down, read at half (a quarter...) the speed. A copy
+    // takes over at twice its speed, where what it keeps (flat to 0.45 of the recording's band) is what the kernel
+    // would keep of the copy above; and just before, the two are crossfaded: a pitch swept up never steps
     r.octaves = nullptr;
     r.level = 0;
+    r.mixNext = 0.0f;
     if (ins != nullptr && v.index >= 0 && (size_t) v.index < ins->octaves.size() && v.s == &ins->samples[(size_t) v.index])
     {
         r.octaves = &ins->octaves[(size_t) v.index];
         const double astep = std::abs (r.step);
         if (astep > 1.5)
-            r.level = juce::jlimit (0, Instrument::octaveCopies, (int) std::ceil (std::log2 (astep / 1.5)));
+        {
+            const double x = std::log2 (astep / 2.0);               // the copies take over at whole x
+            r.level = juce::jlimit (0, Instrument::octaveCopies, x <= 0.0 ? 0 : (int) std::ceil (x));
+            constexpr double zone = 0.1047;                           // the crossfade: from 1.86x to 2x
+            const double toNext = (double) r.level - x;
+            if (r.level < Instrument::octaveCopies && toNext < zone)
+                r.mixNext = (float) juce::jlimit (0.0, 1.0, 1.0 - toNext / zone);
+        }
     }
     r.alias = c.v[snd::alias];
     const float bits = c.v[snd::bits];
@@ -642,6 +652,19 @@ void Player::prepareRead (Voice& v, const Chunk& c, Read& r) const
 // Far up, it reads the recording's copy an octave (two, three) down, at half (a quarter...) the step.
 void Player::readFrame (const Read& r, double p, double speed, float& left, float& right) const
 {
+    if (r.mixNext > 0.0f && r.octaves != nullptr && r.level < Instrument::octaveCopies)
+    {
+        // between two octave copies: both, crossfaded
+        Read a = r, b = r;
+        a.mixNext = b.mixNext = 0.0f;
+        b.level = r.level + 1;
+        float l0, r0, l1, r1;
+        readFrame (a, p, speed, l0, r0);
+        readFrame (b, p, speed, l1, r1);
+        left = l0 + r.mixNext * (l1 - l0);
+        right = r0 + r.mixNext * (r1 - r0);
+        return;
+    }
     const auto& s = *r.s;
     const rk::Channels& data = r.level > 0 ? (*r.octaves)[(size_t) (r.level - 1)] : s.audio;
     const double scale = r.level > 0 ? 1.0 / (double) (1 << r.level) : 1.0;

@@ -48,7 +48,7 @@
   <figure class="screen">
     <img src="img/synthe-1360.webp" srcset="img/synthe-680.webp 680w, img/synthe-1360.webp 1360w"
          sizes="(max-width: 1100px) 100vw, 1084px" width="1360" height="848"
-         alt="REPLIK8 en mode SYNTHÉ : l'écran noir avec la pile de cycles et la courbe du filtre, les pages, les potards, le clavier, les mods et les scènes.">
+         alt="REPLIK8 en mode SYNTH : l'écran noir avec la pile de cycles et la courbe du filtre, les pages, les potards, le clavier, les mods et les scènes.">
   </figure>
 </section>
 
@@ -57,6 +57,9 @@
   <div class="facts">
     <div><h3><svg class="p" viewBox="0 0 24 24"><path d="M2 12c2.5-8 7.5-8 10 0s7.5 8 10 0"/></svg>Synthé</h3><p>Deux oscillateurs à cycles, nets jusqu'en haut du clavier. Sub, bruit, unisson, modulation de phase. Tu l'ouvres, il joue.</p></div>
     <div><h3><svg class="p" viewBox="0 0 24 24"><rect x="1.5" y="5" width="21" height="14" rx="1.6"/><rect x="5.5" y="8" width="13" height="5.5" rx="2.7" opacity=".6"/><circle cx="9" cy="10.8" r="1.4"/><circle cx="15" cy="10.8" r="1.4"/><path d="M7 19l1.3-3h7.4L17 19"/></svg>Sampler</h3><p>Glisse un son sur la fenêtre&nbsp;: il est jouable sur tout le clavier. Étire-le, fige-le, boucle-le, abîme-le.</p></div>
+    <div><h3><svg class="p" viewBox="0 0 24 24"><circle class="f" cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8.5" opacity=".6"/><circle class="f" cx="19.4" cy="7.8" r="1.9"/><circle class="f" cx="4.6" cy="16.2" r="1.9"/></svg>Orbite</h3><p>Un porteur et deux satellites qui le modulent en anneau. Fais tourner le satellite 2&nbsp;: le timbre bouge, la note reste juste.</p></div>
+    <div><h3><svg class="p" viewBox="0 0 24 24"><rect x="1.5" y="7" width="21" height="10" rx="2"/><path d="M5 17v-3M8 17v-2M11 17v-3M14 17v-2M17 17v-3M20 17v-2" opacity=".6"/><path class="f" d="M12.6 5.5h-1.2v13h1.2z"/></svg>Cadran</h3><p>Un cadran de syntonisation sur l'écran&nbsp;: ±96 demi-tons, au cent près. Huit octaves de chaque côté, sans repliement.</p></div>
+    <div><h3><svg class="p" viewBox="0 0 24 24"><path d="M2 12h3c1.2 0 1.6-7 3.2-7s2 14 3.6 14 2-10 3.4-10 1.6 3 2.8 3H22" /></svg>Moteur de lecture</h3><p>Des noyaux sinc de 128 points, une coupure qui suit la vitesse jusque dans la modulation de phase. Transposé, le son reste limpide.</p></div>
     <div><h3><svg class="p" viewBox="0 0 24 24"><rect x="1.5" y="5" width="21" height="14" rx="1"/><path d="M7.5 5v14M12 5v14M16.5 5v14" opacity=".6"/><rect class="f" x="6.2" y="5" width="2.6" height="8"/><rect class="f" x="10.7" y="5" width="2.6" height="8"/></svg>Capture des notes</h3><p>Ton synthé échantillonné tout seul&nbsp;: chaque note, chaque vélocité, bouclée et accordée. Toi, tu vas te faire un café.</p></div>
     <div><h3><svg class="p" viewBox="0 0 24 24"><path d="M5 10c1.6-5 4.8-5 6.4 0s4.8 5 6.4 0" opacity=".35"/><path d="M3.5 12.5c1.6-5 4.8-5 6.4 0s4.8 5 6.4 0" opacity=".65"/><path d="M2 15c1.6-5 4.8-5 6.4 0s4.8 5 6.4 0"/></svg>Capture des cycles</h3><p>Balaie un bouton de ton synthé&nbsp;: chaque position devient un cycle. Une banque d'ondes faite de ton propre son.</p></div>
     <div><h3><svg class="p" viewBox="0 0 24 24"><path d="M14.6 4.6A8 8 0 1 1 6.3 6"/><path class="f" d="M5 3.2l4.4 1.4-3.2 3.4z"/><circle class="f" cx="12" cy="12" r="3"/></svg>Rééchantillonner</h3><p>Enregistre ce qui sort des effets et rejoue-le aussitôt, sans la moindre coupure. Puis repasse-le dans la machine.</p></div>
@@ -163,10 +166,14 @@
   <p class="intro">Le mode par défaut&nbsp;: tu ouvres REPLIK8, tu joues.</p>
   <ul class="steps-list">
     <li><kbd>OSC</kbd><b>Deux oscillateurs à cycles.</b> 64 formes de base (sinus, dents de scie, carrés, impulsions, sync, formants) ou tes propres cycles capturés, à parcourir en continu. Aucun repliement, même tout en haut du clavier.</li>
-    <li><kbd>VOIX</kbd><b>De quoi l'épaissir.</b> Modulation de phase de B vers A, sub à l'octave, bruit, unisson jusqu'à 4 voix étalées en stéréo. Poly, mono ou legato, avec glisse.</li>
+    <li><kbd>VOICES</kbd><b>De quoi l'épaissir.</b> Modulation de phase de B vers A, sub à l'octave, bruit, unisson jusqu'à 4 voix étalées en stéréo. Poly, mono ou legato, avec glide.</li>
+    <li><kbd>ORBITE</kbd><b>Un troisième oscillateur, à part.</b> Un porteur triangle, scie ou carré, et deux satellites synchronisés qui le multiplient&nbsp;: un anneau qui reste harmonique. Quatre câblages (PARALLEL, CASCADE, FM, LOOP), et la rotation du satellite 2 qui fait tourner le timbre sans bouger la note.</li>
+    <li><kbd>MIXER</kbd><b>Tout se retrouve avant le filtre</b>&nbsp;: osc A, osc B, sub, bruit et ORBITE, chacun son fader.</li>
     <li><kbd>FLT</kbd><b>Le même étage de sortie que le sampler</b>&nbsp;: filtres, enveloppes, drive et effets.</li>
   </ul>
-  <figure class="shot"><img src="img/cycles-1360.webp" srcset="img/cycles-680.webp 680w, img/cycles-1360.webp 1360w" sizes="(max-width: 1100px) 100vw, 1070px" width="1360" height="848" loading="lazy" alt="Le SYNTHÉ sur huit cycles capturés."></figure>
+  <figure class="shot"><img src="img/orbite-1360.webp" srcset="img/orbite-680.webp 680w, img/orbite-1360.webp 1360w" sizes="(max-width: 1100px) 100vw, 1070px" width="1360" height="848" loading="lazy" alt="ORBITE : son onde sur deux cycles, le porteur et ses deux satellites en orbite, et les commandes du porteur."></figure>
+  <p class="cap">ORBITE : son onde sur deux cycles, le porteur et ses satellites, le câblage choisi.</p>
+  <figure class="shot"><img src="img/cycles-1360.webp" srcset="img/cycles-680.webp 680w, img/cycles-1360.webp 1360w" sizes="(max-width: 1100px) 100vw, 1070px" width="1360" height="848" loading="lazy" alt="Le SYNTH sur huit cycles capturés."></figure>
   <p class="cap">Huit cycles capturés sur le synthé test, du plus sombre au plus brillant.</p>
 </section>
 
@@ -177,8 +184,11 @@
   <ul class="steps-list">
     <li><kbd>LEC</kbd><b>Lecture élastique</b>&nbsp;: la vitesse indépendante de la hauteur. Fige, ralentis, inverse, sans perdre le punch des attaques.</li>
     <li><kbd>BCL</kbd><b>Boucles</b> déplaçables, avec un fondu de 0 à 100&nbsp;% pour des raccords invisibles.</li>
-    <li><kbd>GRN</kbd><b>Du grain</b>&nbsp;: de la lecture cristalline au repliement assumé, des bits de 32 à 1, la modulation de phase par le son lui-même ou par l'entrée.</li>
+    <li><kbd>TUNE</kbd><b>Le cadran de syntonisation</b>&nbsp;: ±96 demi-tons sur l'écran de la page PITCH, glissé à la souris, au cent près dans sa bande fine. Huit octaves en haut comme en bas, sans un pli.</li>
+    <li><kbd>GRN</kbd><b>Du grain</b>&nbsp;: de la lecture cristalline au repliement assumé, des bits de 32 à 1, la modulation de phase par le son lui-même, sa propre sortie (FEEDBACK), l'entrée ou ORBITE.</li>
+    <li><kbd>MIX</kbd><b>ORBITE sous le sample</b>&nbsp;: allume-le, dose-le dans le MIXER, ou fais-lui pousser la tête de lecture.</li>
   </ul>
+  <figure class="shot"><img src="img/cadran-1360.webp" srcset="img/cadran-680.webp 680w, img/cadran-1360.webp 1360w" sizes="(max-width: 1100px) 100vw, 1070px" width="1360" height="848" loading="lazy" alt="Le cadran de syntonisation : ±96 demi-tons, une graduation par demi-ton, la bande fine au cent près."></figure>
   <figure class="shot"><img src="img/sampler-1360.webp" srcset="img/sampler-680.webp 680w, img/sampler-1360.webp 1360w" sizes="(max-width: 1100px) 100vw, 1070px" width="1360" height="848" loading="lazy" alt="Le SAMPLER : la boucle, son fondu, le début."></figure>
 </section>
 

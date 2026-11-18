@@ -177,6 +177,9 @@ Ctl soundCtl (ReplikantProcessor& p, int id, const char* label, std::function<bo
             param->setValueNotifyingHost (snd::toNorm (id, v));
         };
     }
+    // the tuning: 192 semitones, so a long drag (a tenth of a semitone a pixel; shift: a cent and a half)
+    if (id == snd::tune)
+        c.dragPixels = 1900.0f;
     scaleOf (c, id);
     dress (c);
     return c;
@@ -661,7 +664,7 @@ void Encoder::mouseDrag (const juce::MouseEvent& e)
         return;
     }
     const float range = armedMod() >= 0 ? 2.0f : 1.0f;      // a route: -100 % .. +100 %
-    setFrom (dragStart + dy / 240.0f * range * (fine ? 0.15f : 1.0f));
+    setFrom (dragStart + dy / ctl->dragPixels * range * (fine ? 0.15f : 1.0f));
 }
 
 void Encoder::mouseUp (const juce::MouseEvent& e)

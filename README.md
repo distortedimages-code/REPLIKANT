@@ -6,8 +6,8 @@
 
 ## La version 0.3.0 : synthé, sampler, capture des cycles, rééchantillonnage
 
-- **Modes** : SYNTHÉ (par défaut, il joue dès l'ouverture), SAMPLER, DRUM (en 0.4) ; CAPTURE par-dessus : notes, cycles ou rééchantillonner.
-- **SYNTHÉ** (`Source/dsp/Cycles`) : deux oscillateurs de cycles de 2048 points, chaque cycle gardé en 20 copies limitées en bande (une par demi-octave) et lu en Hermite, POSITION qui fond deux cycles voisins ; 64 basiques ou les cycles capturés ; PM de B vers A, sub, bruit, unisson jusqu'à 4 (±30 cents, étalés à puissance constante).
+- **Modes** : SYNTH (par défaut, il joue dès l'ouverture), SAMPLER, DRUM (en 0.4) ; CAPTURE par-dessus : notes, cycles ou rééchantillonner.
+- **SYNTH** (`Source/dsp/Cycles`) : deux oscillateurs de cycles de 2048 points, chaque cycle gardé en 20 copies limitées en bande (une par demi-octave) et lu en Hermite, POSITION qui fond deux cycles voisins ; 64 basiques ou les cycles capturés ; PM de B vers A, sub, bruit, unisson jusqu'à 4 (±30 cents, étalés à puissance constante).
 - **SAMPLER** : un son glissé (wav, aiff, flac, mp3 sur Mac) devient un instrument d'un sample sur tout le clavier, en varispeed ; sa note vient du chunk `smpl`, de son nom (« Basse A2.wav ») ou de sa hauteur (McLeod puis YIN). Boucle : fondu en cosinus surélevé de 0 à 100 % de sa moitié.
 - **CAPTURE CYCLES** : N prises d'une note grave, un CC envoyé avant chacune (ou la vélocité, ou rien : à la main) ; dans chaque prise, la période trouvée par autocorrélation près de la note (ou du double, quand un sub est là), le cycle pris sur un passage par zéro et rééchantillonné en Lanczos. Banque gardée dans `<Nom>/Cycles/<Nom> - cycles 2048.wav` (32 bits flottants, lu par Serum, Vital, Bitwig).
 - **RÉÉCHANTILLONNER** (`Player::resampleChunk`) : la sortie de la chaîne, avant le volume, enregistrée sur 1 à 8 mesures (départ sur la mesure de l'hôte) ou en libre ; la passation se fait en 20 ms à puissance constante. Ensuite, la chaîne rendue neutre (filtre, drive, effets, WTF?! coupés et vidés, voix arrêtées), l'enregistrement y repasse en boucle comme une entrée, identique à l'échantillon près. Sa fin est fondue dans son début avec les 10 ms enregistrées après elle. Injecté dans le SAMPLER, les réglages remis à zéro, puis la chaîne relâchée.
@@ -29,7 +29,7 @@
 - **Effets**, dans cet ordre : SPECTRE (pics d'une FFT de 4096 points rendus par 1 à 33 oscillateurs), PITCH (deux voix Signalsmith, retards, réinjection, CRISTAUX : grains à l'envers), CHORUS / FLANGER / VIBRATO, CRUSH, ESPACE (FDN de 8 lignes de MIFM1, shimmer, gel).
 - **Mods** : 4, ONDE / PAS / HASARD / ENV / SUIVEUR, au tempo de l'hôte (sur sa grille) ou au leur, 8 routes chacun ; assignation en tournant le potard.
 - **Scènes** : 16, deux sous le fader (A, B) ; un réglage tenu d'un seul côté part de sa propre valeur.
-- **Multi-effet** : ÉCOUTE PAR LES EFFETS, l'entrée (une piste en insert) passe dans le filtre et la chaîne.
+- **Multi-effet** : MONITOR THRU FX, l'entrée (une piste en insert) passe dans le filtre et la chaîne.
 - **Horloge MIDI** : 24 tops par noire, Start / Stop ; vers un port du Mac (fil à haute priorité) ou la sortie du plug-in (à l'échantillon), interne ou suivant l'hôte.
 - **Pack** : `<Nom>.zip` = `<Nom>/<Nom>.replikant` (avec le son) + `<Nom>/Samples/*.wav` ; glisser hors de la fenêtre (PACK ZIP), glisser un pack sur la fenêtre pour l'importer.
 - **Poids estimé** de la session (disque, mémoire), WAV 24 bits ou 32 bits flottants.
@@ -57,7 +57,7 @@
 ## Comment ça se branche
 
 - **Appli** : FICHIER › Réglages audio et MIDI, puis CAPTURE › SOURCE : Son = entrée, Sortie MIDI = le port du synthé. 96 kHz dans la carte son pour transposer très bas.
-- **En multi-effet** : REPLIK8 en insert sur n'importe quelle piste, RÉGLAGES › ÉCOUTE = PAR LES EFFETS (ou, dans CAPTURE › RÉÉCHANTILLONNER, ENTRÉE : PAR LES EFFETS).
+- **En multi-effet** : REPLIK8 en insert sur n'importe quelle piste, SETTINGS › MONITOR = THRU FX (ou, dans CAPTURE › RÉÉCHANTILLONNER, ENTRÉE : PAR LES EFFETS).
 - **Logic** : REPLIK8 en effet audio sur une piste qui reçoit le synthé (type `aumf`, « effet contrôlé par MIDI ») ; pour jouer, dans le slot d'instrument (effets contrôlés par MIDI).
 - **Bitwig / Reaper / Cubase** : sur une piste qui reçoit l'audio du synthé ; les notes de la piste jouent l'instrument.
 - **Live** : l'enregistrement marche sur une piste audio ; Live n'envoyant pas de notes aux effets audio, on joue l'export (Sampler) ou l'appli.

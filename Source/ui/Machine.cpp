@@ -2141,6 +2141,7 @@ Machine::Machine (ReplikantProcessor& p) : proc (p), updatePanel (p.updater)
 Machine::~Machine()
 {
     stopTimer();
+    proc.captureOpen = false;
     proc.onMessage = nullptr;
     proc.removeChangeListener (this);
     proc.updater.changes.removeChangeListener (this);
@@ -2285,7 +2286,7 @@ void Machine::buildPages()
         }));
         auto monitor = choiceCtl ("Monitor", { "off", "direct", "thru fx" }, [&o] { return o.monitor; }, [this, &o] (int v) { o.monitor = v; proc.settingsChanged(); });
         monitor.sepBefore = true;
-        monitor.tip = "L'audio qui arrive (le synthé, ou la piste où REPLIK8 est en insert) : coupé, tel quel, ou passé dans le filtre et les effets (multi-effet, avec les mods)."_fr;
+        monitor.tip = "L'audio qui arrive (le synthé, ou la piste où REPLIK8 est en insert). OFF : coupé. DIRECT : tel quel, pendant la capture (page CAPTURE ouverte). THRU FX : passé dans le filtre et les effets (multi-effet, avec les mods)."_fr;
         b.ctls.push_back (monitor);
         b.ctls.push_back (choiceCtl ("Keys to", { "replik8", "synth" }, [&o] { return o.thru ? 1 : 0; }, [this, &o] (int v) { o.thru = v == 1; proc.settingsChanged(); }));
         pg.banks.push_back (std::move (b));
@@ -3089,6 +3090,7 @@ void Machine::showFileMenu()
 //==============================================================================
 void Machine::timerCallback()
 {
+    proc.captureOpen = capture;            // (the input heard as it is only with the capture page open)
     status = proc.status();
     const bool sampling = proc.isSampling();
     // a capture over and its instrument made: the sampler plays it

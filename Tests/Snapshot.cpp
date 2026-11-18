@@ -216,6 +216,7 @@ int main (int argc, char** argv)
     for (int pg = 0; pg < 6; ++pg)
     {
         set (snd::orOn, pg == 4 ? 1.0f : 0.0f);
+        set (snd::tune, pg == 2 ? 7.35f : 0.0f);                // the dial turned a little, on its page
         view->showPage (pg);
         run (60);
         shoot (samplerShots[pg]);

@@ -72,7 +72,7 @@ static void playAsAHost (double rate, int block)
 // A host that hands the plug-in the same buffer each time without clearing it (in place, nothing on the input):
 // what comes in is what went out the block before. Notes must still end: the sound back to silence after the
 // release, never piling up.
-static void playAsALazyHost (double rate, int block, int lag = 1)
+static void playAsALazyHost (double rate, int block, int lag = 1, float hostGain = 1.0f)
 {
     ReplikantProcessor proc;
     proc.setRateAndBufferSizeDetails (rate, block);
@@ -100,6 +100,8 @@ static void playAsALazyHost (double rate, int block, int lag = 1)
         auto& buf = bufs[(size_t) turn];
         turn = (turn + 1) % lag;
         proc.processBlock (buf, midi);          // (not cleared: an earlier block's output is this block's input)
+        if (hostGain != 1.0f)
+            buf.applyGain (hostGain);           // (a host that touches it on the way: not the same numbers any more)
         for (int ch = 0; ch < juce::jmin (2, proc.getTotalNumOutputChannels()); ++ch)
             for (int i = 0; i < block; ++i)
             {
@@ -138,6 +140,34 @@ int main()
             playAsALazyHost (rate, block);
         }
     playAsALazyHost (48000.0, 512, 2);
+    playAsALazyHost (48000.0, 1024, 1, 0.9999f);
+    playAsALazyHost (44100.0, 256, 3, 1.0001f);
+
+    // the capture page open, a real input: ÉCOUTE DIRECT lets it through (and closed, it doesn't)
+    for (bool open : { true, false })
+    {
+        ReplikantProcessor proc;
+        proc.setRateAndBufferSizeDetails (48000.0, 512);
+        proc.prepareToPlay (48000.0, 512);
+        proc.captureOpen = open;
+        juce::AudioBuffer<float> buf (juce::jmax (proc.getTotalNumInputChannels(), proc.getTotalNumOutputChannels()), 512);
+        double phase = 0.0, energy = 0.0;
+        for (int b = 0; b < 40; ++b)
+        {
+            buf.clear();
+            for (int i = 0; i < 512; ++i, phase += 440.0 / 48000.0)
+                for (int ch = 0; ch < juce::jmin (2, proc.getTotalNumInputChannels()); ++ch)
+                    buf.setSample (ch, i, 0.3f * (float) std::sin (6.283185307 * phase));
+            juce::MidiBuffer midi;
+            proc.processBlock (buf, midi);
+            if (b >= 20)
+                for (int i = 0; i < 512; ++i)
+                    energy += (double) buf.getSample (0, i) * buf.getSample (0, i);
+        }
+        const double rms = std::sqrt (energy / (20.0 * 512.0));
+        std::printf ("  the input with the capture page %s: %.3f rms out\n", open ? "open" : "closed", rms);
+        CHECK (open ? rms > 0.15 : rms < 1.0e-4, "the input heard only with the capture page open (%s: %.4f rms)", open ? "open" : "closed", rms);
+    }
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

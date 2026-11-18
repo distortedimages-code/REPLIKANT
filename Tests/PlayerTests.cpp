@@ -1294,6 +1294,41 @@ static void testReadingEngine()
         CHECK (std::abs (level) < 0.5 && off < -60.0, "tune %+.1f: %.0f Hz at %.2f dB (a third off: %.1f dB)", tune, want, level, off);
         std::printf ("  tuning dial %+.1f st: %.0f Hz -> %.0f Hz at %.2f dB\n", tune, hz, want, level);
     }
+    // the dial swept slowly from -24 to +44 (through the octave copies' handovers at +12, +24, +36): a 3 kHz tone
+    // keeps its level, without a step
+    {
+        auto ins = instrumentOf (sine (3000.0, 2.0), 16, 16 * 5000);
+        Player p;
+        p.set (snd::engine, (float) snd::sampler);
+        plain (p);
+        p.setInstrument (ins.get());
+        std::vector<float> out;
+        juce::AudioBuffer<float> buf (2, 64);
+        const int total = (int) (3.0 * sr);
+        for (int pos = 0; pos < total; pos += 64)
+        {
+            const float t = juce::jlimit (0.0f, 1.0f, (float) ((double) pos / sr - 0.2) / 2.6f);
+            p.set (snd::tune, -24.0f + 68.0f * t);
+            buf.clear();
+            juce::MidiBuffer midi;
+            if (pos == 0)
+                midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 127), 0);
+            p.render (buf, midi, {}, nullptr, 0, false);
+            for (int i = 0; i < 64; ++i)
+                out.push_back (buf.getSample (0, i));
+        }
+        // (windows of 0.1 s, 30 periods and more: their own ripple stays far under what a step would make)
+        double worst = 0.0, worstAt = 0.0;
+        for (size_t w = (size_t) (0.3 * sr); w + 9600 < (size_t) (2.75 * sr); w += 1200)
+        {
+            const double d = std::abs (db (rms (out, w, w + 4800)) - db (rms (out, w + 1200, w + 6000)));
+            if (d > worst) { worst = d; worstAt = (double) w / sr; }
+        }
+        if (worst >= 0.05)
+            std::printf ("  (worst at %.2f s, tune %.1f)\n", worstAt, -24.0 + 68.0 * juce::jlimit (0.0, 1.0, (worstAt - 0.2) / 2.6));
+        CHECK (worst < 0.05, "the dial swept -24 to +44 st: the level moves at most %.3f dB from one window to the next", worst);
+        std::printf ("  dial swept -24 to +44 st (octave copies handing over): level steps under %.4f dB\n", worst);
+    }
     // RETOUR at its deepest: chaos if it likes, but bounded and finite
     {
         auto ins = instrumentOf (sine (220.0, 2.0, 0.8f), 0, 96000 - 218);

@@ -159,6 +159,7 @@ private:
         const rk::Sample* s = nullptr;
         const std::array<rk::Channels, Instrument::octaveCopies>* octaves = nullptr;   // the recording's octave copies (none for a rendered key)
         int level = 0;                                        // 0: the sample itself; 1..8: its copy that many octaves down
+        float mixNext = 0.0f;                                 // how much of the next copy down (the crossfade between two)
         int len = 0;
         bool stereo = false, loop = false, moved = false;    // moved: the loop isn't the one found (splices smoothed)
         int ls = 0, le = 0;

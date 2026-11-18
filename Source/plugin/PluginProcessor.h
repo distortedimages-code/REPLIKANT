@@ -190,6 +190,11 @@ private:
     std::atomic<bool> hostMidiOut { false };
     std::atomic<int> sourceAudio { 0 };      // Source, for the audio thread
     std::atomic<int> monitorAudio { 1 };
+public:
+    // the capture page open in the editor (it says so at each tick): only then, or while capturing, is the input
+    // heard as it is (ÉCOUTE : DIRECT). Playing, the output is REPLIK8 alone (see processBlock)
+    std::atomic<bool> captureOpen { false };
+private:
     std::atomic<bool> thruAudio { false };
     juce::MidiMessageCollector toSynth, toPlayer;   // from the editor
     juce::MidiBuffer playMidi, outMidi, synthMidi;
