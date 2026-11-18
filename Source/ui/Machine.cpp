@@ -1,5 +1,6 @@
 #include "Machine.h"
 #include "RadioUi.h"
+#include "DrumUi.h"
 #include "../dsp/Modulators.h"
 #include "../dsp/VAFilter.h"
 
@@ -95,6 +96,13 @@ static Picto pagePicto (const Machine::Page& pg)
     if (v == "air")       return Picto::air;
     if (v == "take")      return Picto::slice;
     if (v == "pads")      return Picto::pads;
+    // DRUM's
+    if (v == "dtrig")     return Picto::steps;
+    if (v == "dsrc")      return Picto::slice;
+    if (v == "dpitch")    return Picto::fork;
+    if (v == "damp")      return Picto::envelope;
+    if (v == "dtone")     return Picto::tube;
+    if (v == "dseq")      return Picto::clock;
     return Picto::none;
 }
 
@@ -150,6 +158,7 @@ public:
         auto panel = in.removeFromRight (392.0f);
         in.removeFromRight (14.0f);
         tunerShown = false;
+        drumScreen.grid = {};
         const auto& shownPages = m.pagesShown();
         const auto vizNow = m.pageIndex() >= 0 && m.pageIndex() < (int) shownPages.size() ? shownPages[(size_t) m.pageIndex()].viz : juce::String();
         if (m.capture)
@@ -187,6 +196,12 @@ public:
     {
         dragPos = -1;
         tuning = 0;
+        if (m.mode == Machine::drumMode && ! m.capture && drumScreen.click (e.position, proc(), *m.drumEdit))
+        {
+            m.drumStrip->repaint();
+            repaint();
+            return;
+        }
         if (tunerShown && (tunerBand.contains (e.position) || tunerFine.contains (e.position)))
         {
             // the dial: dragged sideways (the fine band, or shift: by the cent; alt: whole semitones)
@@ -484,6 +499,7 @@ public:
 private:
     Machine& m;
     RadioScreen radioScreen;
+    DrumScreen drumScreen;
     int lastDriveModel = 1;
     juce::Rectangle<float> fxBoxes[Player::numStages], fxSwitches[Player::numStages], fxRow;
     bool fxShown = false;
@@ -565,7 +581,18 @@ private:
         else
         {
             tag = "drum";
-            sub = "en 0.4";
+            auto& d = proc().drum;
+            const int t = juce::jlimit (0, drum::numTracks - 1, proc().drumTrack.load());
+            title = d.allocated() ? patternName (d.playingPattern()) + " · track "_fr + juce::String (t + 1) : juce::String ("drum");
+            if (d.allocated())
+            {
+                const auto& tk = d.pattern (d.playingPattern()).tr[t];
+                sub << tk.len << " steps · " << juce::String::fromUTF8 (drum::choicesOf (drum::pSource)[(size_t) juce::jlimit (0, 2, (int) std::lround (tk.p[drum::pSource]))].c_str())
+                    << " · " << speedName (tk.speed);
+                if (! m.drumEdit->lifted.empty())
+                    sub << " · p-lock " << (int) m.drumEdit->lifted.size() << " steps";
+                sub = juce::String::fromUTF8 (sub.toRawUTF8());
+            }
         }
         if (proc().options.monitor == 2)
             sub = "input thru fx · "_fr + sub;
@@ -979,17 +1006,7 @@ private:
 
     void paintDrum (juce::Graphics& g, juce::Rectangle<float> r)
     {
-        auto grid = r.withSizeKeepingCentre (r.getWidth() * 0.6f, r.getHeight() * 0.55f).translated (0.0f, 18.0f);
-        for (int i = 0; i < 8; ++i)
-        {
-            auto cell = juce::Rectangle<float> (grid.getX() + (float) (i % 4) * grid.getWidth() / 4.0f, grid.getY() + (float) (i / 4) * grid.getHeight() / 2.0f,
-                                                grid.getWidth() / 4.0f, grid.getHeight() / 2.0f).reduced (6.0f);
-            g.setColour (col::screenLine);
-            g.drawRoundedRectangle (cell, 8.0f, 1.5f);
-        }
-        text (g, "drum arrive en 0.4", r.removeFromTop (40.0f), grotesk (24.0f, 300), col::screenText, juce::Justification::centred);
-        text (g, "8 pads · tranches · séquenceur · voix générées depuis ton synthé · ram"_fr, r.removeFromTop (20.0f), mono (12.0f),
-              col::screenDim, juce::Justification::centred);
+        drumScreen.paint (g, r, proc(), *m.drumEdit);
     }
 
     //------------------------------------------------------------------ CAPTURE: the plan, or the session going
@@ -1233,9 +1250,142 @@ private:
         {
             // the filter's page: its envelope's bank, the drive's, have their own pictures
             const int bank = m.bankOf[pg.name + juce::String (m.mode)];
-            viz = bank == 1 ? "fenv" : (bank == 2 ? "drive" : "filter");
+            viz = bank == 1 ? (m.mode == Machine::drumMode ? "drive" : "fenv") : (bank == 2 ? "drive" : "filter");
         }
-        paintViz (g, viz, in);
+        if (viz == "dtrig" || viz == "dsrc" || viz == "dpitch" || viz == "damp" || viz == "dtone" || viz == "dseq")
+            paintDrumViz (g, viz, in);
+        else
+            paintViz (g, viz, in);
+    }
+
+    // DRUM's pages: the track shown (its value on the first step lifted, if any)
+    void paintDrumViz (juce::Graphics& g, const juce::String& viz, juce::Rectangle<float> r)
+    {
+        auto& d = proc().drum;
+        if (! d.allocated())
+            return;
+        const auto& pat = d.pattern (d.playingPattern());
+        const int sel = juce::jlimit (0, drum::numTracks - 1, proc().drumTrack.load());
+        const auto& tk = pat.tr[sel];
+        const auto& lifted = m.drumEdit->lifted;
+        auto v = [&] (int param) { return lifted.empty() ? tk.p[param] : tk.at (lifted.front(), param); };
+        auto stroke = [&] (const juce::Path& path, juce::Colour c, float t = 2.5f) { g.setColour (c); g.strokePath (path, juce::PathStrokeType (t, juce::PathStrokeType::curved)); };
+        auto caption = [&] (const juce::String& t) { text (g, t, r.removeFromBottom (14.0f), mono (10.0f), col::screenDim, juce::Justification::centredLeft, true); };
+        auto decaySeconds = [] (float dec) { return dec >= 0.99f ? 4.0f : 0.01f * std::pow (400.0f, dec); };
+        if (viz == "dtrig")
+        {
+            // the hits of a step: one, its ratchet's, or the retrig's roll (its gaps bent by CURVE, its velocities by VEL CURVE)
+            const int rt = (int) std::lround (v (drum::pRetrig));
+            const int extra = rt > 0 ? juce::jmax (1, (int) std::lround (v (drum::pCount))) : 0;
+            const int cnt = 1 + extra;
+            const float crv = v (drum::pCurve), rvel = v (drum::pRVel), vel = v (drum::pVel), prob = v (drum::pProb);
+            std::vector<float> at ((size_t) cnt, 0.0f), vm ((size_t) cnt, 1.0f);
+            if (extra > 0)
+            {
+                const float q = extra > 1 && std::abs (crv) > 0.01f ? std::exp2 (-4.0f * crv / (float) (extra - 1)) : 1.0f;
+                float gap = 1.0f, x = 0.0f;
+                for (int k = 1; k < cnt; ++k) { x += gap; at[(size_t) k] = x; gap *= q; }
+                for (auto& a : at)
+                    a /= x;
+                vm[0] = rvel < 0.0f ? 1.0f + rvel : 1.0f;
+                for (int i = 1; i < cnt; ++i)
+                    vm[(size_t) i] = juce::jmax (0.0f, rvel > 0.0f ? 1.0f - rvel * (float) i / (float) extra : 1.0f + rvel * (1.0f - (float) i / (float) extra));
+            }
+            caption (rt > 0 ? juce::String (cnt) + " hits · "_fr + juce::String::fromUTF8 (drum::text (drum::pRetrig, (float) rt).c_str()) + " · prob "_fr
+                              + juce::String (juce::roundToInt (prob * 100.0f)) + "%"
+                            : "1 hit · vel "_fr + juce::String (juce::roundToInt (vel * 100.0f)) + "% · prob "_fr + juce::String (juce::roundToInt (prob * 100.0f)) + "%");
+            auto area = r.reduced (4.0f, 6.0f);
+            g.setColour (col::screenLine);
+            g.drawHorizontalLine ((int) area.getBottom(), area.getX(), area.getRight());
+            for (int k = 0; k < cnt; ++k)
+            {
+                const float h = juce::jlimit (0.03f, 1.0f, vel * vm[(size_t) k]);
+                const float x = area.getX() + at[(size_t) k] * (area.getWidth() - 8.0f);
+                g.setColour (col::sOrange.withAlpha (0.35f + 0.65f * prob));
+                g.fillRoundedRectangle (x, area.getBottom() - h * area.getHeight(), 6.0f, h * area.getHeight(), 2.0f);
+            }
+        }
+        else if (viz == "dpitch")
+        {
+            // the pitch, falling from SWEEP back to the note in SWEEP TIME
+            const float sweep = v (drum::pSweep), swt = juce::jmax (0.002f, v (drum::pSweepTime));
+            const float span = juce::jlimit (0.03f, 2.0f, swt * 5.0f);
+            caption ("+" + juce::String (sweep, 1) + " st → 0 in "_fr + juce::String (juce::roundToInt (swt * 1000.0f)) + " ms");
+            juce::Path path;
+            for (int i = 0; i <= 120; ++i)
+            {
+                const float t = span * (float) i / 120.0f;
+                const float st = sweep * std::exp (-t / swt);
+                const float x = r.getX() + r.getWidth() * (float) i / 120.0f, y = r.getCentreY() - st / 48.0f * r.getHeight() * 0.45f;
+                if (i == 0) path.startNewSubPath (x, y); else path.lineTo (x, y);
+            }
+            g.setColour (col::screenLine);
+            g.drawHorizontalLine ((int) r.getCentreY(), r.getX(), r.getRight());
+            stroke (path, col::sPink);
+        }
+        else if (viz == "damp")
+        {
+            // ATTACK, then the fall of DECAY (HOLD: flat), the noise's and the click's share
+            const float atk = 0.2f * v (drum::pAttack) * v (drum::pAttack), dec = decaySeconds (v (drum::pDecay));
+            const float span = juce::jlimit (0.05f, 3.0f, atk + dec * 3.0f);
+            caption (v (drum::pDecay) >= 0.99f ? juce::String ("hold") : juce::String (juce::roundToInt ((atk + dec * 3.0f) * 1000.0f)) + " ms");
+            juce::Path path;
+            for (int i = 0; i <= 160; ++i)
+            {
+                const float t = span * (float) i / 160.0f;
+                const float a = t < atk ? t / juce::jmax (1.0e-4f, atk) : (v (drum::pDecay) >= 0.99f ? 1.0f : std::exp (-(t - atk) / dec));
+                const float x = r.getX() + r.getWidth() * (float) i / 160.0f, y = r.getBottom() - a * (r.getHeight() - 4.0f);
+                if (i == 0) path.startNewSubPath (x, y); else path.lineTo (x, y);
+            }
+            auto fill = path;
+            fill.lineTo (r.getRight(), r.getBottom());
+            fill.lineTo (r.getX(), r.getBottom());
+            fill.closeSubPath();
+            g.setColour (col::sGreen.withAlpha (0.18f));
+            g.fillPath (fill);
+            stroke (path, col::sGreen);
+        }
+        else if (viz == "dtone")
+        {
+            // the track's filter, its response at CUTOFF and RESO
+            const int type = (int) std::lround (v (drum::pFilter));
+            const float fc = v (drum::pCutoff), q = v (drum::pReso);
+            caption (juce::String::fromUTF8 (drum::text (drum::pFilter, (float) type).c_str()) + " · "_fr + juce::String::fromUTF8 (drum::text (drum::pCutoff, fc).c_str()));
+            juce::Path path;
+            for (int i = 0; i <= 160; ++i)
+            {
+                const float f = 20.0f * std::pow (1000.0f, (float) i / 160.0f);
+                const float w = f / fc, k = 1.0f / (0.7f + 6.0f * q * q);
+                const float den = std::sqrt ((1.0f - w * w) * (1.0f - w * w) + (w * k) * (w * k));
+                const float mag = type == 0 ? 1.0f / den : (type == 1 ? w * w / den : w * k / den);
+                const float db = juce::jlimit (-36.0f, 18.0f, 20.0f * std::log10 (juce::jmax (1.0e-5f, mag)));
+                const float x = r.getX() + r.getWidth() * (float) i / 160.0f, y = r.getY() + (18.0f - db) / 54.0f * r.getHeight();
+                if (i == 0) path.startNewSubPath (x, y); else path.lineTo (x, y);
+            }
+            stroke (path, col::sOrange);
+        }
+        else if (viz == "dseq")
+        {
+            // the eight tracks' lengths against each other (their speed beside)
+            const float rowH = r.getHeight() / 8.0f;
+            for (int t = 0; t < drum::numTracks; ++t)
+            {
+                const auto& k = pat.tr[t];
+                auto row = juce::Rectangle<float> (r.getX(), r.getY() + (float) t * rowH, r.getWidth(), rowH).reduced (0.0f, 2.0f);
+                text (g, juce::String (t + 1), row.removeFromLeft (14.0f), mono (10.0f, t == sel ? 600 : 400), t == sel ? col::sOrange : col::screenDim);
+                auto sp = row.removeFromRight (40.0f);
+                text (g, speedName (k.speed), sp, mono (10.0f), col::screenDim, juce::Justification::centredRight);
+                const float w = row.getWidth() * (float) k.len / (float) drum::numSteps;
+                g.setColour ((t == sel ? col::sOrange : col::screenText).withAlpha (t == sel ? 0.9f : 0.45f));
+                g.fillRoundedRectangle (row.withWidth (w).reduced (0.0f, 1.0f), 2.0f);
+            }
+        }
+        else if (viz == "dsrc")
+        {
+            const int src = juce::jlimit (0, 2, (int) std::lround (v (drum::pSource)));
+            const Picto pic = src == drum::synth ? Picto::cycles : (src == drum::sample ? Picto::cassette : Picto::slice);
+            picto (g, pic, r.withSizeKeepingCentre (70.0f, 70.0f), col::sOrange, 1.8f);
+        }
     }
 
     void paintViz (juce::Graphics& g, const juce::String& viz, juce::Rectangle<float> r)
@@ -2158,11 +2308,10 @@ Machine::Machine (ReplikantProcessor& p) : proc (p), updatePanel (p.updater)
         k.icon = i == synthMode ? Picto::sine : (i == drumMode ? Picto::drum : (i == samplerMode ? Picto::cassette : Picto::radio));
         addAndMakeVisible (k);
     }
-    modeKeys[drumMode].setEnabled (false);
-    modeKeys[drumMode].setTooltip ("DRUM arrive en 0.4 : 8 pads, tranches, séquenceur, voix générées depuis ton synthé."_fr);
+    modeKeys[drumMode].setTooltip ("Huit pistes et leur séquenceur : une voix faite des cycles du synthé, un son glissé, ou une prise de la radio et ses tranches."_fr);
     modeKeys[synthMode].setTooltip ("Deux oscillateurs qui lisent des cycles (les basiques, ou ceux de ton synthé), un sub, du bruit, l'unisson."_fr);
     modeKeys[samplerMode].setTooltip ("L'instrument : ton synthé capturé note par note, ou un son glissé sur la fenêtre."_fr);
-    modeKeys[radioMode].setTooltip ("La radio : une station sur internet ou un récepteur ondes courtes, son air, des prises découpées en pads ou envoyées au sampler."_fr);
+    modeKeys[radioMode].setTooltip ("La radio : une station sur internet ou un récepteur ondes courtes, son air, des prises découpées en pads, envoyées au sampler ou au drum."_fr);
     captureKey.setButtonText ("capture");
     captureKey.dot = col::red;
     captureKey.look = [this] { return capture ? KeyState::on : KeyState::normal; };
@@ -2170,9 +2319,13 @@ Machine::Machine (ReplikantProcessor& p) : proc (p), updatePanel (p.updater)
     captureKey.setTooltip ("Sampler ton synthé : ses notes (pour le sampler) ; bientôt ses cycles (pour le synthé) et ce qui sort des effets."_fr);
     addAndMakeVisible (captureKey);
     playKey.setButtonText (juce::String::fromUTF8 ("\xe2\x96\xb6"));
-    playKey.look = [this] { return proc.clock.isRunning() ? KeyState::accent : KeyState::normal; };
-    playKey.onClick = [this] { proc.setClockRunning (! proc.clock.isRunning()); };
-    playKey.setTooltip ("L'horloge MIDI interne : lance ou arrête (au tempo, vers la sortie choisie dans RÉGLAGES)."_fr);
+    playKey.look = [this]
+    {
+        const bool on = proc.clock.isRunning() || (proc.clock.getMode() == MidiClock::Mode::internal && proc.clock.isWanted());
+        return on ? KeyState::accent : KeyState::normal;
+    };
+    playKey.onClick = [this] { proc.setClockRunning (! (proc.clock.isRunning() || proc.clock.isWanted())); };
+    playKey.setTooltip ("L'horloge interne : lance ou arrête le séquenceur du DRUM et l'horloge MIDI (au tempo, vers la sortie choisie dans SETTINGS)."_fr);
     addAndMakeVisible (playKey);
     fileKey.setButtonText ("file");
     fileKey.onClick = [this] { showFileMenu(); };
@@ -2235,12 +2388,20 @@ Machine::Machine (ReplikantProcessor& p) : proc (p), updatePanel (p.updater)
     auto say = [this] (const juce::String& t, bool warning) { showMessage (t, warning); };
     radioStrip = std::make_unique<RadioStrip> (proc, say);
     radioTuner = std::make_unique<RadioTuner> (proc, say);
+    drumEdit = std::make_unique<DrumEdit>();
+    drumStrip = std::make_unique<DrumStrip> (proc, *drumEdit, say, [this]
+    {
+        for (auto& e : encoders)
+            e->refreshIfChanged();
+        screen->repaint();
+    });
     addAndMakeVisible (*keyboard);
     addAndMakeVisible (*modScenes);
     addAndMakeVisible (*wtfPanel);
     addChildComponent (*captureStrip);
     addChildComponent (*radioStrip);
     addChildComponent (*radioTuner);
+    addChildComponent (*drumStrip);
 
     addChildComponent (updatePanel);
     updatePanel.onClose = [this] { updatePanel.setVisible (false); };
@@ -2273,7 +2434,9 @@ Machine::Machine (ReplikantProcessor& p) : proc (p), updatePanel (p.updater)
     captureKind = juce::jlimit ((int) notesKind, (int) resampleKind, proc.settingsFile().getIntValue ("captureKind", notesKind));
     shownResample = proc.lastResample;
     const int engine = (int) P (proc, snd::engine);
-    mode = engine == snd::drum ? samplerMode : engine;
+    mode = juce::jlimit (0, numModes - 1, engine);
+    if (mode == drumMode)
+        proc.drumReady();
     showPage (page[mode]);
     refreshUpdate();
     proc.updater.checkIfDue();
@@ -2469,11 +2632,152 @@ void Machine::buildPages()
         v.push_back (modsPage());
         v.push_back (settingsPage());
     }
-    // DRUM (0.4): the shared pages for now
+    // DRUM: a track's settings (or its p-locks on the steps lifted), its sequence; then the shared pages (the filter and
+    // the effects take all eight tracks)
     {
+        auto D = [this] (int param, const char* label = nullptr, std::function<bool()> shown = nullptr)
+        {
+            return drumCtl (proc, *drumEdit, param, label, std::move (shown));
+        };
+        auto shownValue = [this] (int param)
+        {
+            auto& d = proc.drum;
+            if (! d.allocated())
+                return drum::def (param).def;
+            const auto& tk = d.pattern (d.playingPattern()).tr[juce::jlimit (0, drum::numTracks - 1, proc.drumTrack.load())];
+            return drumEdit->lifted.empty() ? tk.p[param] : tk.at (drumEdit->lifted.front(), param);
+        };
+        auto srcIs = [shownValue] (std::initializer_list<int> ks)
+        {
+            std::vector<int> v (ks);
+            return std::function<bool()> ([shownValue, v] { const int s = (int) std::lround (shownValue (drum::pSource)); return std::find (v.begin(), v.end(), s) != v.end(); });
+        };
+        auto retrigOn = [shownValue] { return shownValue (drum::pRetrig) > 0.5f; };
+        auto trackNow = [this]() -> drum::Track*
+        {
+            auto& d = proc.drum;
+            if (! d.allocated())
+                return nullptr;
+            return &d.pattern (d.playingPattern()).tr[juce::jlimit (0, drum::numTracks - 1, proc.drumTrack.load())];
+        };
         auto& v = pages[drumMode];
         v.clear();
-        v.push_back (filterPage());
+        v.push_back ({ "trig", "dtrig", { { "trig", { D (drum::pVel), D (drum::pProb), D (drum::pMicro), sep (D (drum::pRetrig)), D (drum::pCount, nullptr, retrigOn),
+                                                       D (drum::pCurve, nullptr, retrigOn), D (drum::pRVel, nullptr, retrigOn) } } } });
+        v.push_back ({ "source", "dsrc", { { "source", { D (drum::pSource), sep (D (drum::pBank, nullptr, srcIs ({ drum::synth }))),
+                                                           D (drum::pPosition, nullptr, srcIs ({ drum::synth })), D (drum::pSlice, nullptr, srcIs ({ drum::slices })),
+                                                           D (drum::pStart, nullptr, srcIs ({ drum::sample, drum::slices })),
+                                                           D (drum::pReverse, nullptr, srcIs ({ drum::sample, drum::slices })), sep (D (drum::pChoke)) } } } });
+        v.push_back ({ "pitch", "dpitch", { { "pitch", { D (drum::pNote), D (drum::pTune), sep (D (drum::pSweep)), D (drum::pSweepTime),
+                                                           sep (D (drum::pPmod, nullptr, srcIs ({ drum::synth }))), D (drum::pRatio, nullptr, srcIs ({ drum::synth })) } } } });
+        v.push_back ({ "amp", "damp", { { "amp", { D (drum::pAttack), D (drum::pDecay), sep (D (drum::pBody)), D (drum::pClick), D (drum::pNoise),
+                                                    sep (D (drum::pLevel)), D (drum::pPan) } } } });
+        v.push_back ({ "tone", "dtone", { { "tone", { D (drum::pFilter), D (drum::pCutoff), D (drum::pReso), sep (D (drum::pTone)), sep (D (drum::pDrive)) } } } });
+        // SEQ: the track's length and speed, the pattern's length for a change, the swing
+        {
+            Bank b { "seq", {} };
+            auto len = numberCtl ("Length", 1.0, (double) drum::numSteps, 1.0,
+                                  [trackNow] { auto* t = trackNow(); return t != nullptr ? (double) t->len : 16.0; },
+                                  [this, trackNow] (double x)
+                                  {
+                                      if (auto* t = trackNow())
+                                      {
+                                          t->len = (uint8_t) juce::jlimit (1, drum::numSteps, (int) std::lround (x));
+                                          proc.drum.pattern (proc.drum.playingPattern()).used = 1;
+                                      }
+                                  },
+                                  [] (double x) { return juce::String ((int) std::lround (x)) + " steps"; });
+            len.marks = { { 0.0f, "1" }, { 15.0f / 63.0f, "16" }, { 31.0f / 63.0f, "32" }, { 1.0f, "64" } };
+            len.ticks = 9;
+            len.tip = "La longueur de la piste, de 1 à 64 pas : des longueurs différentes tournent les unes contre les autres (polymétrie)."_fr;
+            b.ctls.push_back (len);
+            juce::StringArray speeds;
+            for (int i = 0; i < drum::numSpeeds; ++i)
+                speeds.add (speedName (i));
+            auto sp = choiceCtl ("Speed", speeds, [trackNow] { auto* t = trackNow(); return t != nullptr ? (int) t->speed : 4; },
+                                 [this, trackNow] (int i)
+                                 {
+                                     if (auto* t = trackNow())
+                                     {
+                                         t->speed = (uint8_t) juce::jlimit (0, drum::numSpeeds - 1, i);
+                                         proc.drum.pattern (proc.drum.playingPattern()).used = 1;
+                                     }
+                                 });
+            sp.tip = "La vitesse de la piste : 1X, un pas par double croche ; 3/4X et 3/2X pour des ternaires contre le reste."_fr;
+            b.ctls.push_back (sp);
+            static const int chgs[6] = { 0, 16, 32, 48, 64, 128 };
+            auto chg = choiceCtl ("Change", { "auto", "1 bar", "2 bars", "3 bars", "4 bars", "8 bars" },
+                                  [this]
+                                  {
+                                      if (! proc.drum.allocated())
+                                          return 0;
+                                      const int c = proc.drum.pattern (proc.drum.playingPattern()).chg;
+                                      for (int i = 0; i < 6; ++i)
+                                          if (chgs[i] == c)
+                                              return i;
+                                      return 0;
+                                  },
+                                  [this] (int i)
+                                  {
+                                      if (! proc.drum.allocated())
+                                          return;
+                                      auto& pt = proc.drum.pattern (proc.drum.playingPattern());
+                                      pt.chg = (uint8_t) chgs[juce::jlimit (0, 5, i)];
+                                      pt.used = 1;
+                                  });
+            chg.sepBefore = true;
+            chg.tip = "Quand le pattern suivant part : AUTO, à la fin de la plus longue piste ; sinon au bout de 1 à 8 mesures."_fr;
+            b.ctls.push_back (chg);
+            b.ctls.push_back (sep (S (snd::drSwing)));
+            v.push_back ({ "seq", "dseq", { b } });
+        }
+        auto fp = filterPage();
+        fp.banks.erase (fp.banks.begin() + 1);          // (no notes: no filter envelope)
+        v.push_back (fp);
+        v.push_back (fxPage());
+        v.push_back (modsPage());
+        v.push_back (settingsPage());
+        auto dtip = [&v] (int param, const juce::String& t)
+        {
+            const auto name = juce::String::fromUTF8 (drum::def (param).name);
+            for (auto& pg : v)
+                for (auto& b : pg.banks)
+                    for (auto& c : b.ctls)
+                        if (c.param < 0 && c.name == name)
+                            c.tip = t;
+        };
+        dtip (drum::pVel, "La vélocité des trigs de la piste (une note jouée garde la sienne)."_fr);
+        dtip (drum::pProb, "La chance qu'un trig joue, tirée à chaque passage."_fr);
+        dtip (drum::pMicro, "Le trig avancé ou retardé, jusqu'à un demi-pas (en 48es de pas)."_fr);
+        dtip (drum::pRetrig, "Le trig répété à cette division jusqu'à COUNT coups : les roulements."_fr);
+        dtip (drum::pCount, "Combien de coups suivent le trig dans le retrig."_fr);
+        dtip (drum::pCurve, "Les coups du retrig qui se resserrent (+) ou s'écartent (-), le dernier tombant au même endroit."_fr);
+        dtip (drum::pRVel, "Les coups du retrig qui s'éteignent (+) ou montent (-)."_fr);
+        dtip (drum::pSource, "SYNTH : une voix faite des cycles de l'oscillateur (basiques ou capturés). SAMPLE : un son. SLICES : une prise de la radio et ses tranches."_fr);
+        dtip (drum::pBank, "Les cycles lus : les basiques, ou ceux capturés de ton synthé."_fr);
+        dtip (drum::pPosition, "Où lire dans la banque de cycles."_fr);
+        dtip (drum::pSlice, "La tranche jouée (à verrouiller pas par pas : chaque pas sa tranche)."_fr);
+        dtip (drum::pStart, "Où le son commence."_fr);
+        dtip (drum::pReverse, "Le son joué à l'envers."_fr);
+        dtip (drum::pChoke, "Les pistes d'un même groupe se coupent (un charleston fermé coupe l'ouvert)."_fr);
+        dtip (drum::pNote, "La hauteur de la piste (sur ton clavier, C1 à G1 jouent les pistes 1 à 8, chacune à sa hauteur)."_fr);
+        dtip (drum::pTune, "L'accord fin, ±24 demi-tons."_fr);
+        dtip (drum::pSweep, "La hauteur qui tombe au début du coup (la grosse caisse, le tom) : de combien de demi-tons."_fr);
+        dtip (drum::pSweepTime, "En combien de temps elle tombe."_fr);
+        dtip (drum::pPmod, "La voix modulée en phase par une seconde, à RATIO : le métal, les cloches."_fr);
+        dtip (drum::pRatio, "Le rapport de la modulante : entier, harmonique ; entre deux, inharmonique."_fr);
+        dtip (drum::pAttack, "L'attaque, de 0 à 200 ms."_fr);
+        dtip (drum::pDecay, "La décroissance. HOLD : le son joue jusqu'au bout."_fr);
+        dtip (drum::pBody, "Le corps (la voix ou le son)."_fr);
+        dtip (drum::pClick, "Un clic au début du coup."_fr);
+        dtip (drum::pNoise, "Du bruit, coloré par TONE (la caisse claire, le charleston)."_fr);
+        dtip (drum::pLevel, "Le niveau de la piste."_fr);
+        dtip (drum::pPan, "Sa place dans le stéréo."_fr);
+        dtip (drum::pFilter, "Le filtre de la piste : passe-bas, passe-haut, passe-bande."_fr);
+        dtip (drum::pCutoff, "Sa fréquence. OPEN : ouvert."_fr);
+        dtip (drum::pReso, "Sa résonance."_fr);
+        dtip (drum::pTone, "La couleur du bruit : sombre à gauche, brillant à droite."_fr);
+        dtip (drum::pDrive, "La piste saturée."_fr);
     }
     // SAMPLER
     {
@@ -2880,7 +3184,7 @@ void Machine::toggleResample()
 void Machine::showMode (int m)
 {
     if (m == drumMode)
-        return;
+        proc.drumReady();
     capture = false;
     if (m != mode || (int) P (proc, snd::engine) != m)
         setSound (proc, snd::engine, (float) m);
@@ -2889,6 +3193,22 @@ void Machine::showMode (int m)
     if (mode == radioMode)
         proc.radioNet();
     showPage (page[mode]);
+}
+
+void Machine::drumLift (std::vector<int> steps)
+{
+    drumEdit->lifted = std::move (steps);
+    drumEdit->patterns = false;
+    repaint();
+}
+
+void Machine::drumShowPatterns (bool on)
+{
+    drumEdit->patterns = on;
+    drumEdit->lifted.clear();
+    if (proc.drum.allocated())
+        drumEdit->bank = proc.drum.playingPattern() / 16;
+    repaint();
 }
 
 bool Machine::tunerPage() const
@@ -2941,7 +3261,8 @@ void Machine::showPage (int p)
         k.dot = juce::Colours::transparentBlack;
         k.icon = pagePicto (pgs[(size_t) i]);
     }
-    keyboard->setVisible (! capture && mode != radioMode);
+    keyboard->setVisible (! capture && mode != radioMode && mode != drumMode);
+    drumStrip->setVisible (! capture && mode == drumMode);
     captureStrip->setVisible (capture);
     radioStrip->setVisible (! capture && mode == radioMode);
     radioTuner->setVisible (tunerPage());
@@ -3141,6 +3462,7 @@ void Machine::resized()
     keyboard->setBounds (b);
     captureStrip->setBounds (b);
     radioStrip->setBounds (b);
+    drumStrip->setBounds (b);
     // the tuner: over the screen's left part (its title and the panel on the right stay)
     radioTuner->setBounds (screenArea.getX() + 16, screenArea.getY() + 12 + 30, screenArea.getWidth() - 32 - 392 - 14, screenArea.getHeight() - 24 - 30);
     updatePanel.setBounds (getLocalBounds());
@@ -3185,6 +3507,30 @@ void Machine::filesDropped (const juce::StringArray& files, int, int)
 {
     dropping = false;
     repaint();
+    // DRUM: a sound onto the track shown (the next ones onto the next tracks)
+    if (mode == drumMode && ! capture)
+    {
+        int t = proc.drumTrack.load();
+        int loaded = 0;
+        juce::String why;
+        for (auto& f : files)
+        {
+            const juce::File file (f);
+            if (! file.hasFileExtension ("wav;aif;aiff;flac;mp3;ogg") || t >= drum::numTracks)
+                continue;
+            if (proc.drumLoadFile (t, file, why))
+            {
+                ++t;
+                ++loaded;
+            }
+            else
+                showMessage (why, true);
+        }
+        if (loaded > 1)
+            showMessage (juce::String (loaded) + " sons sur les pistes "_fr + juce::String (t - loaded + 1) + " à "_fr + juce::String (t) + ".");
+        if (loaded > 0)
+            return;
+    }
     for (auto& f : files)
         if (instrumentio::isImportable (juce::File (f)))
         {
@@ -3399,8 +3745,10 @@ void Machine::timerCallback()
         captureStrip->repaint();
     // the engine moved by the host (automation, a project loaded): the pages follow
     const int engine = (int) P (proc, snd::engine);
-    if (! capture && engine != mode && engine != snd::drum)
+    if (! capture && engine != mode && engine >= 0 && engine < numModes)
     {
+        if (engine == drumMode)
+            proc.drumReady();
         mode = engine;
         focus = nullptr;
         showPage (page[mode]);
@@ -3430,6 +3778,8 @@ void Machine::timerCallback()
     modScenes->repaint();
     if (radioStrip->isVisible())
         radioStrip->repaint();
+    if (drumStrip->isVisible())
+        drumStrip->repaint();
     if (radioTuner->isVisible() != tunerPage())
         radioTuner->setVisible (tunerPage());
     static int tick = 0;

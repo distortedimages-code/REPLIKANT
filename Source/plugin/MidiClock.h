@@ -32,6 +32,7 @@ public:
     Mode getMode() const                             { return (Mode) mode.load(); }
     void setRunning (bool);                          // INTERNE: start / stop
     bool isRunning() const                           { return running.load(); }   // ticking now
+    bool isWanted() const                            { return wanted.load(); }    // INTERNE: started (sent somewhere or not)
     void bindTempo (std::atomic<float>* t)           { tempo = t; }
 
     // audio thread, each block: the DAW's transport, and the plug-in's MIDI out

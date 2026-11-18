@@ -262,9 +262,16 @@ void RadioStrip::layout()
     row.removeFromLeft (8.0f);
     grabKey = row;
     right.removeFromTop (8.0f);
-    takeKey = right.removeFromTop (h);
+    // (to the SAMPLER on the left, to the DRUM track shown on the right)
+    const float sw = (right.getWidth() - 8.0f) * 0.54f;
+    auto takeRow = right.removeFromTop (h);
+    takeKey = takeRow.removeFromLeft (sw);
+    takeRow.removeFromLeft (8.0f);
+    takeDrumKey = takeRow;
     right.removeFromTop (8.0f);
-    padKey = right;
+    padKey = right.removeFromLeft (sw);
+    right.removeFromLeft (8.0f);
+    padDrumKey = right;
 }
 
 void RadioStrip::paint (juce::Graphics& g)
@@ -368,11 +375,17 @@ void RadioStrip::paint (juce::Graphics& g)
     // what goes to the SAMPLER
     const bool hasTake = take != nullptr && take->audio != nullptr;
     key (g, takeKey, hasTake ? KeyState::accent : KeyState::off, false, 10.0f);
-    text (g, "take → sampler"_fr, takeKey.withTrimmedBottom (3.0f), mono (13.0f, 600), hasTake ? col::accentInk : col::ink3, juce::Justification::centred);
+    text (g, "take → sampler"_fr, takeKey.withTrimmedBottom (3.0f), mono (12.0f, 600), hasTake ? col::accentInk : col::ink3, juce::Justification::centred);
     const bool padOk = hasTake && selected >= 0;
     key (g, padKey, padOk ? KeyState::normal : KeyState::off, false, 10.0f);
     text (g, padOk ? "pad " + juce::String (selected + 1) + " → sampler"_fr : juce::String ("pad → sampler"_fr), padKey.withTrimmedBottom (3.0f),
-          mono (13.0f, 600), padOk ? col::ink : col::ink3, juce::Justification::centred);
+          mono (12.0f, 600), padOk ? col::ink : col::ink3, juce::Justification::centred);
+    // ... and to the DRUM track shown: the take and its slices, or the pad
+    const auto track = juce::String (juce::jlimit (0, drum::numTracks - 1, proc.drumTrack.load()) + 1);
+    key (g, takeDrumKey, hasTake ? KeyState::accent : KeyState::off, false, 10.0f);
+    text (g, "→ drum "_fr + track, takeDrumKey.withTrimmedBottom (3.0f), mono (12.0f, 600), hasTake ? col::accentInk : col::ink3, juce::Justification::centred);
+    key (g, padDrumKey, padOk ? KeyState::normal : KeyState::off, false, 10.0f);
+    text (g, "→ drum "_fr + track, padDrumKey.withTrimmedBottom (3.0f), mono (12.0f, 600), padOk ? col::ink : col::ink3, juce::Justification::centred);
 }
 
 void RadioStrip::mouseDown (const juce::MouseEvent& e)
@@ -431,6 +444,18 @@ void RadioStrip::mouseDown (const juce::MouseEvent& e)
         if (selected < 0)
             message ("Choisis un pad d'abord (clique dessus)."_fr, true);
         else if (! proc.radioToSampler (selected, why))
+            message (why, true);
+    }
+    else if (takeDrumKey.contains (e.position))
+    {
+        if (! proc.radioToDrum (-1, proc.drumTrack.load(), why))
+            message (why, true);
+    }
+    else if (padDrumKey.contains (e.position))
+    {
+        if (selected < 0)
+            message ("Choisis un pad d'abord (clique dessus)."_fr, true);
+        else if (! proc.radioToDrum (selected, proc.drumTrack.load(), why))
             message (why, true);
     }
     repaint();

@@ -217,6 +217,7 @@ namespace
         { "rdChoke",   "Choke",                       K::toggle,  0, 1, 0, 1, nullptr, false, "" },
         { "rdPadLevel","Level",                       K::linear,  0, 1, 0.8f, 1, nullptr, true, "%" },
         { "rdOn",      "On air",                      K::toggle,  0, 1, 1, 1, nullptr, false, "" },
+        { "drSwing",   "Swing",                       K::linear,  0.5f, 0.8f, 0.5f, 1, nullptr, true, "swg" },
     };
 
     std::string fmt (const char* f, double v)
@@ -361,6 +362,7 @@ std::string text (int id, float v)
     if (u == "orb") return v < 0.005f ? std::string ("STILL") : hzText (v);
     if (u == "deg") return fmt ("%.0f\xc2\xb0", v * 360.0f);
     if (u == "tun") return std::abs (v) < 0.005f ? std::string ("0.00 ST") : fmt ("%+.2f ST", v);
+    if (u == "swg") return fmt ("%.0f %%", v * 100.0f);
     if (u == "rsq") return v < 0.005f ? std::string ("OFF") : fmt ("%.0f DB", -66.0 + 56.0 * v);
     if (u == "rgb") return v < 0.005f ? std::string ("KEEP") : fmt ("%.0f %%", v * 100.0f);
     if (u == "rbw") return v < 0.01f ? std::string ("FULL") : hzText (12000.0 * std::pow (250.0 / 12000.0, (double) v));
@@ -401,6 +403,7 @@ std::string longName (int id)
     if (in (subMode, subFollow))   return "Sub " + name;
     if (id == mxSub)               return "Mixer Sub";
     if (in (rdRx, rdDrive) || id == rdOn) return "Radio " + name;
+    if (id == drSwing)             return "Drum Swing";
     if (in (rdTake, rdPads))       return "Radio " + name;
     if (in (rdPadTune, rdPadLevel)) return "Radio Pads " + name;
     return name;

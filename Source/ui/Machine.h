@@ -2,7 +2,7 @@
 // the keyboard (or the capture's keys), the mods and scenes, WTF?!.
 //
 //   SYNTHÉ    the oscillators of cycles, played at once
-//   DRUM      (0.4)
+//   DRUM      (0.4) eight tracks (a sample, a radio take's slices, a voice of the synth's cycles) and their sequencer
 //   SAMPLER   the instrument (captured, or a sound dropped on the window)
 //   RADIO     (0.3.5) the radio: a station or a shortwave receiver, its air, the takes cut into pads
 //   CAPTURE   over any mode: the synth sampled (notes), its cycles, or what comes out of the effects (resampling)
@@ -17,6 +17,8 @@
 
 namespace te
 {
+    struct DrumEdit;
+
     // a key of the body (a button drawn with the look)
     class Key : public juce::Button
     {
@@ -66,6 +68,8 @@ namespace te
         // for the snapshots: what a timer tick would refresh; a bank of the page shown
         void refreshNow()                          { timerCallback(); }
         void showBank (int bank);
+        void drumLift (std::vector<int> steps);    // (DRUM: steps lifted for p-locks)
+        void drumShowPatterns (bool);              // (DRUM: the patterns on the strip)
 
         struct Bank { juce::String name; std::vector<Ctl> ctls; };
         struct Page { juce::String name; juce::String viz; std::vector<Bank> banks; };
@@ -139,6 +143,8 @@ namespace te
         std::unique_ptr<Encoder> encoders[8];
         std::unique_ptr<juce::Component> keyboard, modScenes, wtfPanel, captureStrip;
         std::unique_ptr<juce::Component> radioStrip, radioTuner;   // (RADIO: the pads in the keyboard's place, the tuner over the screen)
+        std::unique_ptr<juce::Component> drumStrip;                // (DRUM: its tracks and steps in the keyboard's place)
+        std::unique_ptr<DrumEdit> drumEdit;                         // (what the drum's screen, strip and encoders edit)
         bool tunerPage() const;
         int radioPad() const;
         juce::Rectangle<int> screenArea, keysArea, encArea, bottomArea, deckArea, inMeter, outMeter;

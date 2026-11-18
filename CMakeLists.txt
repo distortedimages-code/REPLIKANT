@@ -5,7 +5,7 @@ if(APPLE)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Universal binary")
 endif()
 
-project(REPLIKANT VERSION 0.3.6 LANGUAGES C CXX)
+project(REPLIKANT VERSION 0.4.0 LANGUAGES C CXX)
 
 # GitHub repository whose releases the plug-in checks for updates (public releases).
 set(RK_UPDATE_REPO "distortedimages-code/REPLIKANT" CACHE STRING "owner/repo checked for updates (empty = no update check)")
@@ -55,7 +55,9 @@ add_library(rk_core STATIC
     # RADIO: the receivers' feed and history, the listening, the takes and their pads; the decoder (minimp3, CC0)
     Source/radio/RadioCore.cpp
     Source/radio/RadioDec.cpp
-    Source/radio/RadioSlicer.cpp)
+    Source/radio/RadioSlicer.cpp
+    # DRUM: eight tracks, their voices and their sequencer
+    Source/drum/DrumCore.cpp)
 target_compile_features(rk_core PUBLIC cxx_std_17)
 # Signalsmith Stretch and Linear (MIT), vendored in ThirdParty
 target_include_directories(rk_core PUBLIC ThirdParty)
@@ -106,6 +108,7 @@ set(RK_APP_SOURCES
     Source/ui/Controls.cpp
     Source/ui/UpdatePanel.cpp
     Source/ui/RadioUi.cpp
+    Source/ui/DrumUi.cpp
     Source/ui/Machine.cpp)
 
 # Fonts (SIL Open Font License, see Resources/fonts)
@@ -166,6 +169,11 @@ if(RK_BUILD_TESTS)
     target_link_libraries(RadioTests PRIVATE rk_core)
     target_compile_definitions(RadioTests PRIVATE RK_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Tests/radio")
     add_test(NAME RadioTests COMMAND RadioTests)
+
+    # DRUM: the sequencer to the sample, the patterns, the sources, the voices
+    add_executable(DrumTests Tests/DrumTests.cpp)
+    target_link_libraries(DrumTests PRIVATE rk_core)
+    add_test(NAME DrumTests COMMAND DrumTests)
 
     # a whole session on the test synth: recorder, worker, instrument, player, saving, exports
     juce_add_console_app(EngineTests PRODUCT_NAME "EngineTests")

@@ -250,6 +250,23 @@ static void radioAsAHost()
     // one pad
     CHECK (proc->radioToSampler (3, why), "pad 4 to sampler: %s", why.toRawUTF8());
     CHECK (waitFor ([&] { auto ins = proc->getInstrument(); return ins != nullptr && ins->name.endsWith ("pad 4"); }, 20.0), "pad 4's instrument");
+    // the take onto DRUM track 4: its slices, a trig on each step, the drum shown
+    CHECK (proc->radioToDrum (-1, 3, why), "to drum: %s", why.toRawUTF8());
+    CHECK ((int) proc->player.get (snd::engine) == snd::drum, "the drum shown");
+    if (proc->drum.allocated())
+    {
+        const auto& tk = proc->drum.pattern (proc->drum.playingPattern()).tr[3];
+        int trigs = 0;
+        for (int st = 0; st < drum::numSteps; ++st)
+            trigs += tk.trig[st];
+        const auto ds = proc->drumSound (3);
+        CHECK (ds != nullptr && (int) ds->slices.size() == pads && trigs == pads && (int) tk.len == pads
+               && (int) std::lround (tk.p[drum::pSource]) == drum::slices,
+               "track 4: %d slices, %d trigs, length %d", ds != nullptr ? (int) ds->slices.size() : -1, trigs, (int) tk.len);
+    }
+    // one pad onto track 5
+    CHECK (proc->radioToDrum (2, 4, why), "pad 3 to drum: %s", why.toRawUTF8());
+    CHECK (proc->drumSound (4) != nullptr && proc->drumSound (4)->length() == take->slices[2].end - take->slices[2].start, "track 5: pad 3");
     // the project: a receiver tuned, the take; read back by another
     RadioNet::Source s;
     s.kind = 1;
@@ -268,6 +285,145 @@ static void radioAsAHost()
     if (auto t2 = again->radioTake())
         CHECK (std::abs (t2->length() - takeLen) < 2 && ! t2->slices.empty(), "the take back: %d frames, %zu pads", t2->length(), t2->slices.size());
     CHECK (again->radioNet().getSource (2).name == "Test station", "RX 3 tuned as it was");
+    CHECK (waitFor ([&] { return again->drumSound (3) != nullptr; }, 10.0), "track 4's take back");
+    if (auto d3 = again->drumSound (3))
+        CHECK ((int) d3->slices.size() == pads, "its slices back: %zu", d3->slices.size());
+}
+
+
+// DRUM as a host plays it: its sequencer on the host's transport (a kick on the quarters), a track muted, a sound
+// dropped on a track, the project read back (the steps, a p-lock, a ratchet, the sound)
+struct TestHead : juce::AudioPlayHead
+{
+    bool playing = true;
+    double ppq = 0.0, bpm = 120.0;
+    juce::Optional<PositionInfo> getPosition() const override
+    {
+        PositionInfo p;
+        p.setIsPlaying (playing);
+        p.setBpm (bpm);
+        p.setPpqPosition (ppq);
+        return p;
+    }
+};
+
+static void drumAsAHost()
+{
+    const double rate = 48000.0;
+    const int block = 480;
+    TestHead head;
+    auto proc = std::make_unique<ReplikantProcessor>();
+    proc->setPlayHead (&head);
+    proc->setRateAndBufferSizeDetails (rate, block);
+    proc->prepareToPlay (rate, block);
+    proc->setSoundParam (snd::engine, (float) snd::drum);
+    proc->drumReady();
+    CHECK (proc->drum.allocated(), "the drum made");
+    auto& pat = proc->drum.pattern (0);
+    for (int s : { 0, 4, 8, 12 })
+        pat.tr[0].trig[s] = 1;
+    const int chans = juce::jmax (proc->getTotalNumInputChannels(), proc->getTotalNumOutputChannels());
+    juce::AudioBuffer<float> buf (chans, block);
+    std::vector<float> out;
+    bool finite = true;
+    auto play = [&] (double seconds)
+    {
+        out.clear();
+        for (int pos = 0; pos < (int) (seconds * rate); pos += block)
+        {
+            buf.clear();
+            juce::MidiBuffer midi;
+            proc->processBlock (buf, midi);
+            if (head.playing)
+                head.ppq += block / rate * head.bpm / 60.0;
+            for (int i = 0; i < block; ++i)
+            {
+                const float v = buf.getSample (0, i);
+                finite = finite && std::isfinite (v);
+                out.push_back (v);
+            }
+        }
+    };
+    auto rms = [&] (int from, int len)
+    {
+        double e = 0.0;
+        for (int i = from; i < from + len && i < (int) out.size(); ++i)
+            e += (double) out[(size_t) i] * out[(size_t) i];
+        return std::sqrt (e / juce::jmax (1, len));
+    };
+    // a bar at 120: the kick on each quarter (every 24000 frames), quiet just before each
+    play (2.0);
+    int onBeats = 0;
+    for (int q = 0; q < 4; ++q)
+    {
+        const int at = q * 24000;
+        const double before = q == 0 ? 0.0 : rms (at - 1200, 1000), after = rms (at, 1200);
+        onBeats += after > 0.02 && after > 4.0 * before ? 1 : 0;
+    }
+    std::printf ("  drum on the host's transport: %d of 4 quarters hit, first %.3f rms\n", onBeats, rms (0, 1200));
+    CHECK (finite && onBeats == 4, "the kick on the four quarters: %d", onBeats);
+    // the host stopped: silence once the last hit has died away
+    head.playing = false;
+    play (3.0);
+    const double stopped = rms (96000, 48000);
+    CHECK (stopped < 1.0e-4, "stopped, silent: %.5f", stopped);
+    // a track muted: nothing from it
+    head.playing = true;
+    head.ppq = 0.0;
+    proc->drum.mute[0] = true;
+    play (1.0);
+    CHECK (rms (0, 48000) < 1.0e-4, "track 1 muted: %.5f", rms (0, 48000));
+    proc->drum.mute[0] = false;
+    // a sound dropped on track 2: a short burst at 1 kHz, played on step 3
+    const auto wav = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("replik8-drum-test.wav");
+    {
+        wav.deleteFile();
+        juce::WavAudioFormat fmt;
+        std::unique_ptr<juce::OutputStream> os (wav.createOutputStream().release());
+        std::unique_ptr<juce::AudioFormatWriter> w (fmt.createWriterFor (os.get(), 48000.0, 1, 24, {}, 0));
+        if (w != nullptr)
+            os.release();
+        juce::AudioBuffer<float> b (1, 9600);
+        for (int i = 0; i < 9600; ++i)
+            b.setSample (0, i, 0.5f * std::exp (-(float) i / 3000.0f) * (float) std::sin (6.283185307 * 1000.0 * i / 48000.0));
+        if (w != nullptr)
+            w->writeFromAudioSampleBuffer (b, 0, 9600);
+    }
+    juce::String why;
+    CHECK (proc->drumLoadFile (1, wav, why), "the sound on track 2: %s", why.toRawUTF8());
+    CHECK (proc->drumSound (1) != nullptr && (int) std::lround (pat.tr[1].p[drum::pSource]) == drum::sample, "track 2 plays a sample");
+    for (int s : { 0, 4, 8, 12 })
+        pat.tr[0].trig[s] = 0;
+    pat.tr[1].trig[2] = 1;
+    pat.tr[1].rat[10] = 3;
+    pat.tr[1].trig[10] = 1;
+    pat.tr[1].lock[2][drum::pTune] = 12.0f;
+    pat.chg = 32;
+    proc->drumTrack = 1;
+    head.ppq = 0.0;
+    play (1.0);
+    const double sample = rms (12000, 4800), beforeIt = rms (6000, 4800);
+    std::printf ("  the sample on step 3: %.4f rms (before %.5f)\n", sample, beforeIt);
+    CHECK (sample > 0.02 && beforeIt < 1.0e-4, "the sample on step 3: %.4f, before %.5f", sample, beforeIt);
+    // the project, read back
+    juce::MemoryBlock state;
+    proc->getStateInformation (state);
+    proc.reset();
+    auto again = std::make_unique<ReplikantProcessor>();
+    again->setRateAndBufferSizeDetails (rate, block);
+    again->prepareToPlay (rate, block);
+    again->setStateInformation (state.getData(), (int) state.getSize());
+    CHECK (again->drum.allocated(), "the drum back");
+    if (again->drum.allocated())
+    {
+        const auto& p2 = again->drum.pattern (0);
+        CHECK (p2.tr[1].trig[2] == 1 && p2.tr[1].trig[10] == 1 && p2.tr[1].rat[10] == 3 && p2.chg == 32, "its steps back (ratchet %d, change %d)", p2.tr[1].rat[10], p2.chg);
+        CHECK (std::abs (p2.tr[1].lock[2][drum::pTune] - 12.0f) < 1.0e-4f && std::isnan (p2.tr[1].lock[3][drum::pTune]), "its p-lock back");
+        CHECK (waitFor ([&] { return again->drumSound (1) != nullptr; }, 10.0), "its sound back");
+        if (auto s2 = again->drumSound (1))
+            CHECK (std::abs (s2->length() - 9600) < 2, "the sound back: %d frames", s2->length());
+    }
+    wav.deleteFile();
 }
 
 int main()
@@ -340,6 +496,7 @@ int main()
         CHECK (open ? rms > 0.15 : rms < 1.0e-4, "the input heard only with the capture page open (%s: %.4f rms)", open ? "open" : "closed", rms);
     }
     radioAsAHost();
+    drumAsAHost();
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

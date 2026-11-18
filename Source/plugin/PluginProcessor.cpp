@@ -316,7 +316,8 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     const bool onAir = wanted && ! captureOpen.load();
     radio.bank.use.store (radioOn && wanted && ! sampling ? 1 << juce::jlimit (0, radio::numRx - 1, (int) player.get (snd::rdRx)) : 0,
                           std::memory_order_relaxed);
-    if (! sampling && radioOn && n <= radioBuffer.getNumSamples())
+    const bool drumOn = (int) player.get (snd::engine) == snd::drum && drum.allocated();
+    if (! sampling && (radioOn || drumOn) && n <= radioBuffer.getNumSamples())
     {
         radioEvents.clear();
         for (const auto meta : playMidi)
@@ -358,7 +359,30 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         rs.playing = transport.playing;
         auto* rl = radioBuffer.getWritePointer (0);
         auto* rr = radioBuffer.getWritePointer (1);
-        radio.render (rl, rr, n, rs, radioEvents.data(), (int) radioEvents.size());
+        if (radioOn)
+            radio.render (rl, rr, n, rs, radioEvents.data(), (int) radioEvents.size());
+        else
+        {
+            // DRUM: the host's song position when it plays, else REPLIK8's own clock (the play key), from 0
+            drum::Engine::Clock dc;
+            const bool own = ! transport.playing && clock.getMode() == MidiClock::Mode::internal && clock.isWanted();
+            if (transport.playing)
+            {
+                dc.running = true;
+                dc.ppq = transport.ppq;
+            }
+            else if (own)
+            {
+                if (! drumClockWas)
+                    drumPpq = 0.0;
+                dc.running = true;
+                dc.ppq = drumPpq;
+                drumPpq += (double) n / sampleRate * transport.bpm / 60.0;
+            }
+            drumClockWas = own;
+            dc.bpm = transport.bpm;
+            drum.render (rl, rr, n, dc, player.get (snd::drSwing), radioEvents.data(), (int) radioEvents.size());
+        }
         if (mon == 2 && kept[0] != nullptr)
             for (int i = 0; i < n; ++i)
             {
@@ -465,6 +489,7 @@ void ReplikantProcessor::timerCallback()
     collectOldInstruments();
     resampleTick();
     radioTick();
+    drumTick();
     // the clock a session started stops with it
     if (clockStartedBySampling && ! isSampling())
     {
@@ -1073,6 +1098,8 @@ void ReplikantProcessor::getStateInformation (juce::MemoryBlock& dest)
             r->setProperty ("take", takeFile.getFullPathName());
         xml.setAttribute ("radio", juce::JSON::toString (juce::var (r), true));
     }
+    if (drum.allocated())
+        xml.setAttribute ("drum", juce::JSON::toString (drumToVar(), true));
     copyXmlToBinary (xml, dest);
 }
 
@@ -1144,6 +1171,8 @@ void ReplikantProcessor::setStateInformation (const void* data, int size)
                 later ([this, a, take] { takeFile = take; useTake (a, take.getFileNameWithoutExtension(), false); });
             });
     }
+    if (xml->hasAttribute ("drum"))
+        drumFromVar (juce::JSON::parse (xml->getStringAttribute ("drum")));
     settingsChanged();
     const auto f = instrumentio::movedFolder (juce::File (xml->getStringAttribute ("instrument")));
     if (xml->hasAttribute ("instrument"))
@@ -1594,4 +1623,379 @@ void ReplikantProcessor::radioTick()
     {
         return k.retiredAt > 0.0 && now - k.retiredAt > 2.0 && k.take.get() != used && k.take.get() != set;
     }), takes.end());
+}
+
+//============================================================================== DRUM
+void ReplikantProcessor::drumReady()
+{
+    if (drum.allocated())
+        return;
+    drum.allocate();
+    drumBasic = dsp::CycleBank::basics();
+    drum.setBanks (drumBasic.get(), drumCaptured.get());
+}
+
+std::shared_ptr<const drum::Sound> ReplikantProcessor::drumSound (int track) const
+{
+    return track >= 0 && track < drum::numTracks ? drumSlots[(size_t) track].sound : nullptr;
+}
+
+// a sound on a track: the audio swaps it in (the old one kept until it has), kept as a WAV when it isn't one already
+void ReplikantProcessor::useDrumSound (int track, std::shared_ptr<const radio::Take::Audio> a, std::vector<radio::Slice> slices,
+                                       const juce::String& name, const juce::String& path, int from, int to)
+{
+    if (track < 0 || track >= drum::numTracks || a == nullptr || a->l.empty())
+        return;
+    drumReady();
+    auto s = std::make_shared<drum::Sound>();
+    s->audio = a;
+    s->slices = std::move (slices);
+    s->name = name.toStdString();
+    auto& slot = drumSlots[(size_t) track];
+    if (slot.sound != nullptr)
+        drumKept.push_back ({ slot.sound, juce::Time::getMillisecondCounterHiRes() * 0.001 });
+    slot.sound = s;
+    slot.path = path;
+    slot.from = from;
+    slot.to = to;
+    drum.setSound (track, s.get());
+    if (path.isEmpty())
+    {
+        // (kept beside the instruments: the project finds it again)
+        const auto file = instrumentsRoot().getChildFile ("Drums").getNonexistentChildFile (juce::File::createLegalFileName (name).trim().isNotEmpty()
+                                                                                            ? juce::File::createLegalFileName (name).trim() : juce::String ("drum"), ".wav", false);
+        radioPool->addJob ([this, a, file, track, s]
+        {
+            if (! file.getParentDirectory().createDirectory().wasOk()
+                || ! rk::writeWav (file.getFullPathName().toStdString(), { a->l, a->r }, a->sampleRate, 24, {}))
+                return;
+            later ([this, file, track, s, len = (int) a->l.size()]
+            {
+                auto& sl = drumSlots[(size_t) track];
+                if (sl.sound == s)
+                {
+                    sl.path = file.getFullPathName();
+                    sl.from = 0;
+                    sl.to = len;
+                }
+            });
+        });
+    }
+    sendChangeMessage();
+}
+
+// a track made ready for a sound (its voice's own colours off: no sweep, click, noise; open; held to its end)
+static void soundAsIs (drum::Track& tk)
+{
+    tk.p[drum::pStart] = 0.0f;
+    tk.p[drum::pReverse] = 0.0f;
+    tk.p[drum::pTune] = 0.0f;
+    tk.p[drum::pSweep] = 0.0f;
+    tk.p[drum::pPmod] = 0.0f;
+    tk.p[drum::pBody] = 1.0f;
+    tk.p[drum::pClick] = 0.0f;
+    tk.p[drum::pNoise] = 0.0f;
+    tk.p[drum::pAttack] = 0.0f;
+    tk.p[drum::pDecay] = 1.0f;
+    tk.p[drum::pCutoff] = 20000.0f;
+    tk.p[drum::pReso] = 0.0f;
+    tk.p[drum::pDrive] = 0.0f;
+    tk.p[drum::pNote] = 60.0f;
+}
+
+bool ReplikantProcessor::radioToDrum (int pad, int track, juce::String& why)
+{
+    const auto t = takeNow;
+    if (t == nullptr || t->audio == nullptr || t->audio->l.empty())
+    {
+        why = "Pas encore de prise : GRAB ou REC d'abord."_fr;
+        return false;
+    }
+    track = juce::jlimit (0, drum::numTracks - 1, track);
+    drumReady();
+    const auto& A = *t->audio;
+    const juce::String takePath = takeFile.existsAsFile() ? takeFile.getFullPathName() : juce::String();
+    auto& tk = drum.pattern (drum.playingPattern()).tr[track];
+    bool empty = true;
+    for (int s = 0; s < drum::numSteps; ++s)
+        empty = empty && tk.trig[s] == 0;
+    if (pad < 0)
+    {
+        // the whole take, its slices: on SLICES; a track with no trig gets them on its steps, one a step, in order
+        useDrumSound (track, t->audio, t->slices, juce::String (t->name), takePath, 0, (int) A.l.size());
+        tk.p[drum::pSource] = drum::slices;
+        soundAsIs (tk);
+        if (empty)
+        {
+            const int n = juce::jmin (drum::pageSteps, (int) t->slices.size());
+            tk.len = (uint8_t) juce::jmax (1, n);
+            for (int s = 0; s < n; ++s)
+            {
+                tk.trig[s] = 1;
+                tk.lock[s][drum::pSlice] = (float) s;
+            }
+        }
+        if (onMessage)
+            onMessage ("La prise est sur la piste "_fr + juce::String (track + 1) + " : ses " + juce::String ((int) t->slices.size())
+                       + (empty ? " tranches sur les pas, dans l'ordre (SLICE se verrouille par pas)."_fr : juce::String (" tranches (SLICE choisit laquelle joue)."_fr)));
+    }
+    else
+    {
+        if (pad >= (int) t->slices.size())
+        {
+            why = "Ce pad est vide."_fr;
+            return false;
+        }
+        const int a = juce::jlimit (0, (int) A.l.size() - 1, t->slices[(size_t) pad].start);
+        const int b = juce::jlimit (a + 1, (int) A.l.size(), t->slices[(size_t) pad].end);
+        auto cut = std::make_shared<radio::Take::Audio>();
+        cut->sampleRate = A.sampleRate;
+        cut->l.assign (A.l.begin() + a, A.l.begin() + b);
+        cut->r.assign (A.r.begin() + a, A.r.begin() + b);
+        useDrumSound (track, cut, {}, juce::String (t->name) + " pad " + juce::String (pad + 1), takePath, a, b);
+        tk.p[drum::pSource] = drum::sample;
+        soundAsIs (tk);
+        if (onMessage)
+            onMessage ("Pad "_fr + juce::String (pad + 1) + " sur la piste "_fr + juce::String (track + 1) + ".");
+    }
+    drumTrack = track;
+    setSoundParam (snd::engine, (float) snd::drum);
+    sendChangeMessage();
+    return true;
+}
+
+bool ReplikantProcessor::drumLoadFile (int track, const juce::File& f, juce::String& why)
+{
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> r (formats.createReaderFor (f));
+    if (r == nullptr || r->lengthInSamples <= 0 || r->sampleRate <= 0.0)
+    {
+        why = "Je ne sais pas lire ce son : "_fr + f.getFileName();
+        return false;
+    }
+    const int frames = (int) juce::jmin ((juce::int64) (30.0 * r->sampleRate), r->lengthInSamples);
+    juce::AudioBuffer<float> buf (2, frames);
+    r->read (&buf, 0, frames, 0, true, true);
+    auto a = std::make_shared<radio::Take::Audio>();
+    a->sampleRate = r->sampleRate;
+    a->l.assign (buf.getReadPointer (0), buf.getReadPointer (0) + frames);
+    a->r.assign (buf.getReadPointer (r->numChannels > 1 ? 1 : 0), buf.getReadPointer (r->numChannels > 1 ? 1 : 0) + frames);
+    drumReady();
+    // (a WAV is found again where it is; anything else is kept as a WAV beside the instruments)
+    const bool asIs = f.hasFileExtension ("wav") && frames == (int) r->lengthInSamples;
+    useDrumSound (track, a, {}, f.getFileNameWithoutExtension(), asIs ? f.getFullPathName() : juce::String(), 0, frames);
+    auto& tk = drum.pattern (drum.playingPattern()).tr[juce::jlimit (0, drum::numTracks - 1, track)];
+    tk.p[drum::pSource] = drum::sample;
+    soundAsIs (tk);
+    drum.pattern (drum.playingPattern()).used = 1;
+    drumTrack = juce::jlimit (0, drum::numTracks - 1, track);
+    if (onMessage)
+        onMessage (f.getFileName() + " sur la piste "_fr + juce::String (track + 1) + ".");
+    return true;
+}
+
+void ReplikantProcessor::drumClearSound (int track)
+{
+    if (track < 0 || track >= drum::numTracks)
+        return;
+    auto& slot = drumSlots[(size_t) track];
+    if (slot.sound != nullptr)
+        drumKept.push_back ({ slot.sound, juce::Time::getMillisecondCounterHiRes() * 0.001 });
+    slot = {};
+    drum.setSound (track, nullptr);
+}
+
+void ReplikantProcessor::drumTick()
+{
+    const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
+    if ((int) player.get (snd::engine) == snd::drum)
+        drumReady();
+    if (! drum.allocated())
+        return;
+    // the CAPTURED cycles: the instrument's (the old bank kept a moment, the audio may still read it)
+    auto ins = getInstrument();
+    auto bank = ins != nullptr ? ins->cycles : nullptr;
+    if (bank != drumCaptured)
+    {
+        drumCapturedBefore = drumCaptured;
+        drumCapturedSince = now;
+        drumCaptured = bank;
+        drum.setBanks (drumBasic.get(), drumCaptured.get());
+    }
+    else if (drumCapturedBefore != nullptr && now - drumCapturedSince > 2.0)
+        drumCapturedBefore = nullptr;
+    // the sounds the audio no longer plays, let go
+    drumKept.erase (std::remove_if (drumKept.begin(), drumKept.end(), [&] (const KeptSound& k)
+    {
+        if (now - k.retiredAt < 2.0)
+            return false;
+        for (int t = 0; t < drum::numTracks; ++t)
+            if (drum.soundInUse (t) == k.sound.get() || drum.soundSet (t) == k.sound.get())
+                return false;
+        return true;
+    }), drumKept.end());
+}
+
+// the project: the patterns written (their sounds, steps, ratchets, locks), the mutes, the chain, the sounds' files
+juce::var ReplikantProcessor::drumToVar() const
+{
+    auto* o = new juce::DynamicObject();
+    auto& d = const_cast<drum::Engine&> (drum);
+    o->setProperty ("playing", d.playingPattern());
+    juce::Array<juce::var> chain, mutes, sounds, pats;
+    for (int c : d.chain())
+        chain.add (c);
+    for (int t = 0; t < drum::numTracks; ++t)
+    {
+        mutes.add (d.mute[t].load());
+        const auto& sl = drumSlots[(size_t) t];
+        if (sl.sound == nullptr || sl.path.isEmpty())
+        {
+            sounds.add (juce::var());
+            continue;
+        }
+        auto* s = new juce::DynamicObject();
+        s->setProperty ("path", sl.path);
+        s->setProperty ("from", sl.from);
+        s->setProperty ("to", sl.to);
+        s->setProperty ("name", juce::String (sl.sound->name));
+        juce::Array<juce::var> cuts;
+        for (const auto& c : sl.sound->slices)
+            cuts.add (juce::Array<juce::var> { c.start, c.end });
+        s->setProperty ("slices", cuts);
+        sounds.add (juce::var (s));
+    }
+    for (int i = 0; i < drum::numPatterns; ++i)
+    {
+        const auto& pat = d.pattern (i);
+        if (! pat.used)
+            continue;
+        auto* po = new juce::DynamicObject();
+        po->setProperty ("i", i);
+        po->setProperty ("chg", (int) pat.chg);
+        juce::Array<juce::var> tracks;
+        for (const auto& tk : pat.tr)
+        {
+            auto* to = new juce::DynamicObject();
+            juce::Array<juce::var> rat, locks;
+            juce::String trig;
+            for (int s = 0; s < drum::numSteps; ++s)
+            {
+                trig << (tk.trig[s] ? "1" : "0");
+                if (tk.rat[s] > 1)
+                    rat.add (juce::Array<juce::var> { s, (int) tk.rat[s] });
+                for (int k = 0; k < drum::numParams; ++k)
+                    if (! std::isnan (tk.lock[s][k]))
+                        locks.add (juce::Array<juce::var> { s, juce::String (drum::def (k).id), tk.lock[s][k] });
+            }
+            auto* pv = new juce::DynamicObject();
+            for (int k = 0; k < drum::numParams; ++k)
+                pv->setProperty (drum::def (k).id, tk.p[k]);
+            to->setProperty ("p", juce::var (pv));
+            to->setProperty ("len", (int) tk.len);
+            to->setProperty ("speed", (int) tk.speed);
+            to->setProperty ("trig", trig);
+            to->setProperty ("rat", rat);
+            to->setProperty ("locks", locks);
+            tracks.add (juce::var (to));
+        }
+        po->setProperty ("tracks", tracks);
+        pats.add (juce::var (po));
+    }
+    o->setProperty ("chain", chain);
+    o->setProperty ("mute", mutes);
+    o->setProperty ("sounds", sounds);
+    o->setProperty ("patterns", pats);
+    return juce::var (o);
+}
+
+void ReplikantProcessor::drumFromVar (const juce::var& v)
+{
+    if (! v.isObject())
+        return;
+    drumReady();
+    auto paramOf = [] (const juce::String& id) { for (int k = 0; k < drum::numParams; ++k) if (id == drum::def (k).id) return k; return -1; };
+    for (int i = 0; i < drum::numPatterns; ++i)
+        drum.pattern (i).reset();
+    if (auto* pats = v.getProperty ("patterns", {}).getArray())
+        for (const auto& po : *pats)
+        {
+            const int i = (int) po.getProperty ("i", -1);
+            if (i < 0 || i >= drum::numPatterns)
+                continue;
+            auto& pat = drum.pattern (i);
+            pat.used = 1;
+            pat.chg = (uint8_t) juce::jlimit (0, 255, (int) po.getProperty ("chg", 0));
+            if (auto* tracks = po.getProperty ("tracks", {}).getArray())
+                for (int t = 0; t < juce::jmin (drum::numTracks, tracks->size()); ++t)
+                {
+                    const auto& to = (*tracks)[t];
+                    auto& tk = pat.tr[t];
+                    if (auto* pv = to.getProperty ("p", {}).getDynamicObject())
+                        for (const auto& kv : pv->getProperties())
+                            if (const int k = paramOf (kv.name.toString()); k >= 0)
+                                tk.p[k] = drum::legal (k, (float) (double) kv.value);
+                    tk.len = (uint8_t) juce::jlimit (1, drum::numSteps, (int) to.getProperty ("len", 16));
+                    tk.speed = (uint8_t) juce::jlimit (0, drum::numSpeeds - 1, (int) to.getProperty ("speed", 4));
+                    const auto trig = to.getProperty ("trig", "").toString();
+                    for (int s = 0; s < drum::numSteps && s < trig.length(); ++s)
+                        tk.trig[s] = trig[s] == '1' ? 1 : 0;
+                    if (auto* rat = to.getProperty ("rat", {}).getArray())
+                        for (const auto& r : *rat)
+                            if (const int s = (int) r[0]; s >= 0 && s < drum::numSteps)
+                                tk.rat[s] = (uint8_t) juce::jlimit (1, 16, (int) r[1]);
+                    if (auto* locks = to.getProperty ("locks", {}).getArray())
+                        for (const auto& l : *locks)
+                        {
+                            const int s = (int) l[0], k = paramOf (l[1].toString());
+                            if (s >= 0 && s < drum::numSteps && k >= 0)
+                                tk.lock[s][k] = drum::legal (k, (float) (double) l[2]);
+                        }
+                }
+        }
+    drum.pattern (0).used = 1;
+    if (auto* m = v.getProperty ("mute", {}).getArray())
+        for (int t = 0; t < juce::jmin (drum::numTracks, m->size()); ++t)
+            drum.mute[t] = (bool) (*m)[t];
+    std::vector<int> chain;
+    if (auto* c = v.getProperty ("chain", {}).getArray())
+        for (const auto& x : *c)
+            chain.push_back ((int) x);
+    drum.queue (juce::jlimit (0, drum::numPatterns - 1, (int) v.getProperty ("playing", 0)));
+    drum.setChain (chain);
+    // the sounds, read back from their files (on the radio's thread)
+    for (int t = 0; t < drum::numTracks; ++t)
+        drumClearSound (t);
+    if (auto* sounds = v.getProperty ("sounds", {}).getArray())
+        for (int t = 0; t < juce::jmin (drum::numTracks, sounds->size()); ++t)
+        {
+            const auto s = (*sounds)[t];
+            if (! s.isObject())
+                continue;
+            const juce::File file (s.getProperty ("path", "").toString());
+            const int from = (int) s.getProperty ("from", 0), to = (int) s.getProperty ("to", 0);
+            const juce::String name = s.getProperty ("name", "").toString();
+            std::vector<radio::Slice> cuts;
+            if (auto* cs = s.getProperty ("slices", {}).getArray())
+                for (const auto& c : *cs)
+                    cuts.push_back ({ (int) c[0], (int) c[1], 0.0f });
+            if (! file.existsAsFile())
+                continue;
+            radioPool->addJob ([this, file, from, to, name, cuts, t]
+            {
+                rk::Channels ch;
+                double rate = 0.0;
+                rk::WavInfo info;
+                if (! rk::readWav (file.getFullPathName().toStdString(), ch, rate, info) || ch.empty() || rate <= 0.0)
+                    return;
+                const int len = (int) ch[0].size();
+                const int a = juce::jlimit (0, juce::jmax (0, len - 1), from), b = to > a ? juce::jmin (len, to) : len;
+                auto au = std::make_shared<radio::Take::Audio>();
+                au->sampleRate = rate;
+                au->l.assign (ch[0].begin() + a, ch[0].begin() + b);
+                au->r.assign (ch[ch.size() > 1 ? 1 : 0].begin() + a, ch[ch.size() > 1 ? 1 : 0].begin() + b);
+                later ([this, au, name, file, from, to, cuts, t] { useDrumSound (t, au, cuts, name, file.getFullPathName(), from, to); });
+            });
+        }
 }

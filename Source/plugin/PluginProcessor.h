@@ -11,6 +11,7 @@
 #include "../engine/Player.h"
 #include "../engine/TestSynth.h"
 #include "../radio/RadioCore.h"
+#include "../drum/DrumCore.h"
 #include "Updater.h"
 #include "MidiClock.h"
 
@@ -136,6 +137,16 @@ public:
     void radioClear();
     juce::String radioStationName (int rx) const;    // what a receiver is tuned to (its station, its frequency)
 
+    // DRUM (drum/DrumCore.h): eight tracks and their sequencer. Their sounds (a sample, a radio take and its slices)
+    // are kept here as WAV files beside the instruments (Drums/), and with the project.
+    drum::Engine drum;
+    void drumReady();                                // (the patterns made, the first time they're wanted)
+    std::atomic<int> drumTrack { 0 };                // the track shown (where RADIO's -> DRUM puts a take)
+    std::shared_ptr<const drum::Sound> drumSound (int track) const;
+    bool radioToDrum (int pad, int track, juce::String& why);    // the take (pad < 0: its slices) or a pad onto a track
+    bool drumLoadFile (int track, const juce::File&, juce::String& why);
+    void drumClearSound (int track);
+
     // the MIDI clock
     MidiClock clock;
     bool clockWithSampling = false;               // a sampling session starts and stops it
@@ -248,6 +259,21 @@ private:
     void useTake (std::shared_ptr<const radio::Take::Audio>, const juce::String& name, bool save);
     void radioTick();
     juce::File radioFolder() const;
+
+    // DRUM: each track's sound (and where it's kept), the ones the audio may still play, the banks of cycles
+    struct DrumSlot { std::shared_ptr<const drum::Sound> sound; juce::String path; int from = 0, to = 0; };
+    std::array<DrumSlot, drum::numTracks> drumSlots;
+    struct KeptSound { std::shared_ptr<const drum::Sound> sound; double retiredAt = 0.0; };
+    std::vector<KeptSound> drumKept;
+    std::shared_ptr<const dsp::CycleBank> drumBasic, drumCaptured, drumCapturedBefore;
+    double drumCapturedSince = 0.0;
+    double drumPpq = 0.0;
+    bool drumClockWas = false;
+    void useDrumSound (int track, std::shared_ptr<const radio::Take::Audio>, std::vector<radio::Slice>, const juce::String& name,
+                       const juce::String& path, int from, int to);
+    void drumTick();
+    juce::var drumToVar() const;
+    void drumFromVar (const juce::var&);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ReplikantProcessor)
 };

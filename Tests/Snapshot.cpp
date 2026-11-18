@@ -412,6 +412,80 @@ int main (int argc, char** argv)
         set (snd::rdCrackle, 0.0f);
     }
 
+    // DRUM: a beat on the synth's voices (the internal clock running), a p-lock, the patterns and their chain; the
+    // radio's take on track 6 when there is one
+    {
+        set (snd::fModel, 0.0f);
+        set (snd::rvOn, 0.0f);
+        set (snd::chOn, 0.0f);
+        set (snd::tempo, 112.0f);
+        set (snd::drSwing, 0.56f);
+        view->showMode (te::Machine::drumMode);
+        auto& d = proc.drum;
+        auto& pat = d.pattern (0);
+        auto steps = [&] (int t, std::initializer_list<int> ss) { for (int s : ss) pat.tr[t].trig[s] = 1; };
+        steps (0, { 0, 6, 8, 11, 14 });
+        steps (1, { 4, 12 });
+        steps (2, { 0, 2, 4, 6, 8, 10, 12, 14 });
+        steps (3, { 7, 15 });
+        steps (4, { 10, 13 });
+        steps (6, { 3, 9 });
+        steps (7, { 15 });
+        pat.tr[0].rat[14] = 2;
+        pat.tr[2].rat[14] = 3;
+        pat.tr[2].lock[6][drum::pDecay] = 0.62f;
+        pat.tr[2].lock[10][drum::pMicro] = 0.25f;
+        pat.tr[2].lock[10][drum::pProb] = 0.6f;
+        pat.tr[6].len = 12;
+        pat.tr[7].len = 32;
+        steps (7, { 19, 27, 30 });
+        if (proc.radioTake() != nullptr)
+        {
+            juce::String why;
+            auto said = proc.onMessage;                 // (its message left out of the shots)
+            proc.onMessage = nullptr;
+            proc.radioToDrum (-1, 5, why);
+            proc.onMessage = said;
+            view->showMode (te::Machine::drumMode);
+        }
+        for (int i : { 1, 2, 9, 17 })
+        {
+            d.pattern (i) = pat;
+            d.pattern (i).used = 1;
+        }
+        d.pattern (1).tr[1].trig[14] = 1;
+        proc.setClockRunning (true);
+        proc.drumTrack = 0;
+        view->showPage (0);
+        run (240);
+        shoot ("39-drum-trig.png");
+        view->showPage (2);
+        run (90);
+        shoot ("40-drum-pitch.png");
+        proc.drumTrack = 2;
+        view->drumLift ({ 6, 10 });
+        view->showPage (3);
+        run (90);
+        shoot ("41-drum-plock.png");
+        view->drumLift ({});
+        d.setChain ({ 0, 1, 0, 2 });
+        view->drumShowPatterns (true);
+        view->showPage (5);
+        run (90);
+        shoot ("42-drum-patterns.png");
+        view->drumShowPatterns (false);
+        d.setChain ({});
+        if (proc.drumSound (5) != nullptr)
+        {
+            proc.drumTrack = 5;
+            view->showPage (1);
+            run (90);
+            shoot ("43-drum-slices.png");
+        }
+        proc.setClockRunning (false);
+        run (40);
+    }
+
     // the project keeps the sound: settings, routes, steps, scenes
     {
         proc.player.steps[1][3] = -0.75f;

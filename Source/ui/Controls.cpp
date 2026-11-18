@@ -113,6 +113,7 @@ namespace
         else if (u == "rbw")           { add (0.0f, "FULL"); add (1.0f, "250"); c.ticks = 9; }
         else if (u == "rdc")           { add (0.0f, "20MS"); add (1.0f, "HOLD"); c.ticks = 9; }
         else if (u == "s")             decades ({ 1.0, 5.0, 20.0 }, nullptr);
+        else if (u == "swg")           { add (0.0f, "50"); add (at (0.65), "65"); add (1.0f, "80"); c.ticks = 7; }
         else if (u == "shp")           { add (0.0f, "TRI"); add (0.5f, "SAW"); add (1.0f, "SQR"); c.ticks = 9; }
         else if (u == "deg")           { add (0.0f, "0"); add (0.5f, "180"); add (1.0f, "360"); c.ticks = 9; }
         else if (u == "ct" || u == "oct" || u == "sym" || (d.lo < 0.0f && d.hi > 0.0f))

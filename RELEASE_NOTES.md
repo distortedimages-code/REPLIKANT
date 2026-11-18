@@ -1,3 +1,12 @@
+**REPLIK8 0.4.0** : le DRUM, huit pistes et leur séquenceur.
+
+- **Huit pistes** : chacune joue une voix faite des cycles du synthé (les basiques ou ceux capturés de ton synthé), un son glissé sur la fenêtre, ou une prise de la radio et ses tranches. Elle se règle comme une batterie : NOTE et TUNE, SWEEP (la hauteur qui tombe, pour les grosses caisses et les toms) et son temps, PMOD et RATIO (le métal, les cloches), ATTACK et DECAY, BODY, CLICK, NOISE et sa couleur, un filtre par piste, DRIVE, LEVEL, PAN et quatre groupes de CHOKE
+- **Le séquenceur** : 64 pas en quatre pages, une longueur et une vitesse par piste (de 1/8X à 2X, ternaires compris) pour faire tourner les pistes les unes contre les autres. Chaque pas peut garder ses propres réglages (lève-le, tourne les encodeurs), un ratchet (glisse le pas vers le haut), sa probabilité, son micro-décalage, et un retrig en roulement dont les coups se resserrent ou s'écartent, montent ou s'éteignent. SWING pour toute la machine
+- **Patterns** : 128, en huit banques de seize (A01 à H16). Le suivant part à la fin de celui qui joue, ou au bout de 1 à 8 mesures ; des chaînes les enchaînent ; copier, coller, vider
+- **L'horloge** : le DRUM suit le transport du DAW, ou la touche ▶ dans l'appli. Les pistes se jouent aussi sur ton clavier, de C1 à G1
+- **De la RADIO au DRUM** : → DRUM pose la prise sur la piste choisie, une tranche par pas, ou un seul pad. Un son glissé sur la fenêtre va sur la piste choisie (plusieurs sons : sur les suivantes)
+- Le DRUM passe dans le filtre et les effets, avec les mods et les scènes
+
 **REPLIK8 0.3.6** : plus de larsen à la capture, et la radio qu'on peut couper.
 
 - **MONITOR sur OFF par défaut** : l'entrée n'est plus renvoyée à la sortie quand la page CAPTURE s'ouvre, ni pendant une capture (elle enregistre quand même). Une entrée qui entend les enceintes (le micro du Mac, une piste qui écoute sa sortie) ne peut plus siffler. Les anciens réglages repassent sur OFF ; DIRECT reste dans SETTINGS, au casque

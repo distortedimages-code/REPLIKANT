@@ -76,6 +76,8 @@ namespace snd
         rdTake, rdSens, rdPads, rdPadTune, rdPadDecay, rdChoke, rdPadLevel,
         // (0.3.6) RADIO: ON AIR (off: the radio not heard, the pads still played)
         rdOn,
+        // (0.4) DRUM: the swing of its sequencer (every second sixteenth late)
+        drSwing,
         count
     };
 

@@ -24,7 +24,7 @@ namespace te
         void paint (juce::Graphics&, juce::Rectangle<float>, ReplikantProcessor&, int selectedPad);
     };
 
-    // under the screen: the pads, REC, GRAB, and what goes to the SAMPLER
+    // under the screen: the pads, REC, GRAB, and what goes to the SAMPLER or to a DRUM track
     class RadioStrip : public juce::Component
     {
     public:
@@ -37,7 +37,7 @@ namespace te
     private:
         ReplikantProcessor& proc;
         std::function<void (const juce::String&, bool)> message;
-        juce::Rectangle<float> pads[radio::numPads], airKey, recKey, grabKey, takeKey, padKey;
+        juce::Rectangle<float> pads[radio::numPads], airKey, recKey, grabKey, takeKey, padKey, takeDrumKey, padDrumKey;
         int held = -1;
         double lastPaint = 0.0;
         const radio::Take* cachedTake = nullptr;
