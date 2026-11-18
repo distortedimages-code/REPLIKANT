@@ -43,10 +43,23 @@ namespace snd
         xfade, sceneA, sceneB,
         // the tempo of the modulators and the clock when the host doesn't give one
         tempo,
+        // (0.3) what the voices play: the SYNTHÉ's oscillators, the DRUM's pads, the SAMPLER's instrument
+        engine,
+        // SYNTHÉ: two oscillators reading banks of cycles (the position morphs through the bank), B moving A's
+        // phase, a sub an octave under A, noise, up to four detuned voices spread across the stereo
+        oaBank, oaPos, oaOct, oaSemi, oaFine, oaLevel,
+        obBank, obPos, obOct, obSemi, obFine, obLevel,
+        pmBA, subLevel, noiseLevel, unison, detune, width,
+        // SAMPLER: the loop's end crossfaded into what comes before its start
+        loopXfade,
+        // WTF?! (after IMPAKT's): the sound pulled away from itself, a new draw every eighth note (LIVE) or a loop
+        // of eight draws coming back (LOOP); at 0, the sound as it is
+        wtf, wtfMode,
         count
     };
 
     constexpr int numMods = 4, routesPerMod = 8, maxSteps = 16, numScenes = 16;
+    enum Engine { synth = 0, drum = 1, sampler = 2 };
     // what a scene can hold (everything but the scenes themselves and a few settings of the whole)
     bool sceneLockable (int id);
     enum ModSetting { mType, mShape, mSync, mDiv, mHz, mSmooth, mPolarity, mRetrig, mLen, mVari,

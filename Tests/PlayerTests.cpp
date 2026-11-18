@@ -134,6 +134,7 @@ static void testAntiAliasing()
     // an 18 kHz tone played a fourth higher (24.0 kHz: over Nyquist) must vanish; a 1 kHz one must pass untouched
     auto hi = instrumentOf (sine (18000.0, 1.0));
     Player p;
+    p.set (snd::engine, (float) snd::sampler);
     plain (p);
     p.setInstrument (hi.get());
     auto out = play (p, 0.5, { { 0.0, 65, 127 } });
@@ -163,6 +164,7 @@ static void testAliasingScale()
     for (int k = 0; k <= 100; k += 2)
     {
         Player p;
+        p.set (snd::engine, (float) snd::sampler);
         plain (p);
         p.setInstrument (ins.get());
         p.set (snd::alias, (float) k / 100.0f);
@@ -179,6 +181,7 @@ static void testAliasingScale()
         for (int k = 0; k < 2; ++k)
         {
             Player p;
+            p.set (snd::engine, (float) snd::sampler);
             plain (p);
             p.setInstrument (ins.get());
             p.set (snd::alias, b + (k == 0 ? -0.0005f : 0.0005f));
@@ -195,6 +198,7 @@ static void testAliasingScale()
     // the extreme end: a tone below Nyquist, its image above the band (what drop sample makes) louder than itself
     auto mid = instrumentOf (sine (9000.0, 1.0));
     Player p;
+    p.set (snd::engine, (float) snd::sampler);
     plain (p);
     p.setInstrument (mid.get());
     p.set (snd::alias, 1.0f);
@@ -209,6 +213,7 @@ static void testAliasingScale()
     std::printf ("  ALIASING 100 %%: the image at %.1f dB, the tone at %.1f dB\n", db (image / 0.5), db (tone / 0.5));
     // and at 0 the same image is gone
     Player q;
+    q.set (snd::engine, (float) snd::sampler);
     plain (q);
     q.setInstrument (mid.get());
     auto clean = play (q, 0.3, { { 0.0, 67, 127 } });
@@ -224,6 +229,7 @@ static void testPhaseModulation()
         ramp[(size_t) i] = (float) i / (float) len;
     auto ins = instrumentOf (ramp);
     Player p;
+    p.set (snd::engine, (float) snd::sampler);
     plain (p);
     p.setInstrument (ins.get());
     p.set (snd::pmSource, 1.0f);        // SINUS
@@ -257,6 +263,7 @@ static void testPhaseModulation()
 
     // from the audio input: the address follows it
     Player q;
+    q.set (snd::engine, (float) snd::sampler);
     plain (q);
     q.setInstrument (ins.get());
     q.set (snd::pmSource, 3.0f);        // ENTRÉE
@@ -278,6 +285,7 @@ static void testReverseElasticLoops()
     auto ins = instrumentOf (ramp);
     {
         Player p;
+        p.set (snd::engine, (float) snd::sampler);
         plain (p);
         p.setInstrument (ins.get());
         p.set (snd::reverse, 1.0f);
@@ -288,6 +296,7 @@ static void testReverseElasticLoops()
     {
         // elastic at half speed: the grains read around where the half-speed head is
         Player p;
+        p.set (snd::engine, (float) snd::sampler);
         plain (p);
         p.setInstrument (ins.get());
         p.set (snd::playMode, 1.0f);
@@ -304,6 +313,7 @@ static void testReverseElasticLoops()
         // elastic keeps the pitch at any speed
         auto tone = instrumentOf (sine (440.0, 2.0));
         Player p;
+        p.set (snd::engine, (float) snd::sampler);
         plain (p);
         p.setInstrument (tone.get());
         p.set (snd::playMode, 1.0f);
@@ -326,6 +336,7 @@ static void testReverseElasticLoops()
         // a loop made shorter and moved: its seam smoothed (no jump bigger than the sound's own steps)
         auto tone = instrumentOf (sine (220.0, 2.0), 24000, 24000 + 218 * 40);     // (218 samples a period, about)
         Player p;
+        p.set (snd::engine, (float) snd::sampler);
         plain (p);
         p.setInstrument (tone.get());
         p.set (snd::loopSize, 0.137f);
@@ -343,6 +354,7 @@ static void testReverseElasticLoops()
         // BITS 4: only a few levels
         auto tone = instrumentOf (sine (220.0, 1.0, 0.9f));
         Player p;
+        p.set (snd::engine, (float) snd::sampler);
         plain (p);
         p.setInstrument (tone.get());
         p.set (snd::bits, 4.0f);
@@ -364,6 +376,7 @@ static void testFarPitch()
     auto ins = instrumentOf (two, 48000, 48000 + 96 * 200);       // (96 samples: 4 periods of one, 7 of the other)
     ins->prepareForPlaying();
     Player p;
+    p.set (snd::engine, (float) snd::sampler);
     plain (p);
     p.setInstrument (ins.get());
     auto out = play (p, 0.3, { { 0.0, 96, 127 } });
@@ -374,6 +387,7 @@ static void testFarPitch()
     auto timeOf = [&] (int note)
     {
         Player q;
+        q.set (snd::engine, (float) snd::sampler);
         plain (q);
         q.setInstrument (ins.get());
         q.set (snd::fine, 1.0f);      // (moved a little: interpolated, not the exact copy)
@@ -399,6 +413,7 @@ static void testFarPitch()
     auto clickLength = [&] (bool keep)
     {
         Player q;
+        q.set (snd::engine, (float) snd::sampler);
         plain (q);
         q.setInstrument (drum.get());
         q.set (snd::transients, keep ? 1.0f : 0.0f);
@@ -419,6 +434,7 @@ static void testScenes()
 {
     auto tone = instrumentOf (sine (220.0, 1.0));
     Player p;
+    p.set (snd::engine, (float) snd::sampler);
     plain (p);
     p.setInstrument (tone.get());
     p.set (snd::fModel, 1.0f);
@@ -462,6 +478,7 @@ static void testVoices()
     {
         // LEGATO with a glide: one voice, the pitch going on to the second note
         Player p;
+        p.set (snd::engine, (float) snd::sampler);
         plain (p);
         p.setInstrument (tone.get());
         p.set (snd::voiceMode, 2.0f);
@@ -480,6 +497,7 @@ static void testVoices()
     {
         // POLY: never more than 8 (and the ones let go fade out)
         Player p;
+        p.set (snd::engine, (float) snd::sampler);
         plain (p);
         p.setInstrument (tone.get());
         std::vector<Event> ev;
@@ -491,6 +509,7 @@ static void testVoices()
     {
         // MONO: each note starts again, one voice once the old one has faded
         Player p;
+        p.set (snd::engine, (float) snd::sampler);
         plain (p);
         p.setInstrument (tone.get());
         p.set (snd::voiceMode, 1.0f);
@@ -518,6 +537,7 @@ static void testFilterModsFx()
     double open = 0.0;
     {
         Player p;
+        p.set (snd::engine, (float) snd::sampler);
         plain (p);
         p.setInstrument (ins.get());
         auto out = play (p, 0.5, { { 0.0, 60, 127 } });
@@ -527,6 +547,7 @@ static void testFilterModsFx()
     for (int model = 1; model <= 6; ++model)
     {
         Player p;
+        p.set (snd::engine, (float) snd::sampler);
         plain (p);
         p.setInstrument (ins.get());
         p.set (snd::fModel, (float) model);
@@ -543,6 +564,7 @@ static void testFilterModsFx()
     {
         auto tone = instrumentOf (sine (440.0, 3.0), 24000, 24000 + 4800);
         Player p;
+        p.set (snd::engine, (float) snd::sampler);
         plain (p);
         p.setInstrument (tone.get());
         p.set (snd::m1Type, 0.0f);
@@ -559,6 +581,7 @@ static void testFilterModsFx()
     // FX mode: the input through the chain; with nothing on it comes out as it went in
     {
         Player p;
+        p.set (snd::engine, (float) snd::sampler);
         plain (p);
         auto in = sine (330.0, 0.5, 0.4f);
         auto out = play (p, 0.5, {}, nullptr, &in, true);
@@ -575,6 +598,7 @@ static void testFilterModsFx()
         CHECK (diff / (double) (out.size() - 12000) > 0.01, "FX mode with CRUSH changes the sound");
         // and the input is not added when it isn't through the effects
         Player q;
+        q.set (snd::engine, (float) snd::sampler);
         plain (q);
         out = play (q, 0.2, {}, nullptr, &in, false);
         CHECK (rms (out, 0, out.size()) < 1.0e-9, "input not through the effects: silence from the player");
@@ -592,6 +616,7 @@ static void testStability()
     for (int model = 1; model <= 6; ++model)
     {
         Player p;
+        p.set (snd::engine, (float) snd::sampler);
         p.prepare (sr, 512);
         p.setInstrument (ins.get());
         p.set (snd::fModel, (float) model);
@@ -647,6 +672,7 @@ static void testCpu()
     for (int elastic = 0; elastic < 2; ++elastic)
     {
         Player p;
+        p.set (snd::engine, (float) snd::sampler);
         p.prepare (sr, 512);
         p.setInstrument (ins.get());
         p.set (snd::fModel, 2.0f);
@@ -665,6 +691,28 @@ static void testCpu()
         const double took = std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count();
         std::printf ("  8 voices %s, MS-20 4x, PM, whole chain: %.1f %% of a core\n", elastic ? "ELASTIQUE" : "SAMPLE", took / 5.0 * 100.0);
         // (a loose bound: a shared CI machine can be slow; the figure printed is what to watch)
+        CHECK (took / 5.0 < 1.5, "CPU %.0f %%", took / 5.0 * 100.0);
+    }
+    // SYNTHÉ: eight voices of four unison voices each, both oscillators, PM, an MS-20 at 4x, the whole chain
+    {
+        Player p;
+        p.set (snd::engine, (float) snd::synth);
+        p.prepare (sr, 512);
+        p.set (snd::fModel, 2.0f);
+        p.set (snd::quality, 2.0f);
+        p.set (snd::unison, 4.0f);
+        p.set (snd::pmBA, 0.5f);
+        p.set (snd::subLevel, 0.3f);
+        p.set (snd::dModel, 3.0f);
+        for (int fx : { snd::spOn, snd::piOn, snd::chOn, snd::crOn, snd::rvOn })
+            p.set (fx, 1.0f);
+        std::vector<Event> ev;
+        for (int k = 0; k < 8; ++k)
+            ev.push_back ({ 0.0, 48 + k * 3, 120 });
+        const auto t0 = std::chrono::steady_clock::now();
+        play (p, 5.0, ev, nullptr, nullptr, false, 512);
+        const double took = std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count();
+        std::printf ("  8 voices SYNTHÉ x4 unison, PM, MS-20 4x, whole chain: %.1f %% of a core\n", took / 5.0 * 100.0);
         CHECK (took / 5.0 < 1.5, "CPU %.0f %%", took / 5.0 * 100.0);
     }
 }
@@ -735,6 +783,7 @@ static void testSmoothing()
     // the tone's sidebands at 1500 -+ 230 Hz (away from its harmonics and theirs)
     {
         Player p;
+        p.set (snd::engine, (float) snd::sampler);
         plain (p);
         p.setInstrument (tone.get());
         resonant (p, 2000.0f);               // its peak sweeping well above the tone (no legitimate sidebands that far)
@@ -752,6 +801,7 @@ static void testSmoothing()
     // vibrato: the pitch moved by a sine, the same sidebands
     {
         Player p;
+        p.set (snd::engine, (float) snd::sampler);
         plain (p);
         p.setInstrument (tone.get());
         p.set (snd::m1Type, 0.0f);
@@ -769,6 +819,7 @@ static void testSmoothing()
     // second difference, stays near the tone's own)
     {
         Player p;
+        p.set (snd::engine, (float) snd::sampler);
         plain (p);
         p.setInstrument (tone.get());
         resonant (p, 400.0f);
@@ -801,6 +852,144 @@ static void testSmoothing()
     }
 }
 
+//==============================================================================
+// SYNTHÉ: in tune, nothing folding back even at the top of the keyboard, the bank's cycles morphing, the unison;
+// SAMPLER: the loop's seam crossfaded
+static void testSynth()
+{
+    auto synthPlayer = [] (Player& p)
+    {
+        plain (p);
+        p.set (snd::engine, (float) snd::synth);
+        p.set (snd::oaPos, 2.0f / 7.0f);      // the saw
+        p.set (snd::obLevel, 0.0f);
+        p.set (snd::unison, 1.0f);
+    };
+    {
+        Player p;
+        synthPlayer (p);
+        auto out = play (p, 0.6, { { 0.0, 69, 127 } });
+        const auto pitch = rk::detectPitch (out, sr, 440.0, 4800, 24000);
+        CHECK (pitch.ok && std::abs (pitch.cents) < 0.5, "the saw at A4: %.2f cents (ok %d)", pitch.cents, (int) pitch.ok);
+        // a saw: its second harmonic half the first (-6 dB)
+        const double h1 = toneLevel (out, 4800, 16384, 440.0), h2 = toneLevel (out, 4800, 16384, 880.0);
+        CHECK (std::abs (db (h2 / h1) + 6.0) < 0.5, "saw: the 2nd harmonic at %.2f dB", db (h2 / h1));
+    }
+    {
+        // C8 (4186 Hz): its 7th harmonic (29.3 kHz) would fold back to 18.7 kHz
+        Player p;
+        synthPlayer (p);
+        auto out = play (p, 0.6, { { 0.0, 108, 127 } });
+        const double f = toneLevel (out, 4800, 16384, rk::noteHz (108));
+        const double alias = std::max (toneLevel (out, 4800, 16384, 48000.0 - 7.0 * rk::noteHz (108)),
+                                       toneLevel (out, 4800, 16384, 48000.0 - 6.0 * rk::noteHz (108)));
+        std::printf ("  SYNTHÉ saw at C8: the fold-back at %.1f dB\n", db (alias / f));
+        CHECK (db (alias / f) < -90.0, "saw at C8 folds back at %.1f dB", db (alias / f));
+    }
+    {
+        // the bank: position 0 a sine (no 2nd or 3rd harmonic), the square (odd only)
+        Player p;
+        synthPlayer (p);
+        p.set (snd::oaPos, 0.0f);
+        auto out = play (p, 0.5, { { 0.0, 57, 127 } });
+        const double h1 = toneLevel (out, 4800, 16384, 220.0), h3 = toneLevel (out, 4800, 16384, 660.0);
+        CHECK (db (h3 / h1) < -80.0, "position 0 is a sine: 3rd harmonic at %.1f dB", db (h3 / h1));
+        Player q;
+        synthPlayer (q);
+        q.set (snd::oaPos, 3.0f / 7.0f);
+        auto sq = play (q, 0.5, { { 0.0, 57, 127 } });
+        const double s1 = toneLevel (sq, 4800, 16384, 220.0), s2 = toneLevel (sq, 4800, 16384, 440.0), s3 = toneLevel (sq, 4800, 16384, 660.0);
+        CHECK (db (s2 / s1) < -60.0 && std::abs (db (s3 / s1) + 9.54) < 0.6, "the square: 2nd at %.1f dB, 3rd at %.2f dB", db (s2 / s1), db (s3 / s1));
+    }
+    {
+        // unison: four voices, the stereo apart
+        Player p;
+        synthPlayer (p);
+        p.set (snd::unison, 4.0f);
+        p.set (snd::detune, 0.5f);
+        p.set (snd::width, 1.0f);
+        std::vector<float> right;
+        auto left = play (p, 0.5, { { 0.0, 57, 127 } }, &right);
+        double diff = 0.0;
+        for (size_t i = 4800; i < left.size(); ++i)
+            diff += std::abs (left[i] - right[i]);
+        CHECK (diff / (double) (left.size() - 4800) > 0.05 && rms (left, 4800, left.size()) > 0.1, "unison: left and right apart by %.3f",
+               diff / (double) (left.size() - 4800));
+    }
+    {
+        // a loop whose ends don't meet (44.1 cycles): the seam jumps; crossfaded, it doesn't
+        auto ins = instrumentOf (sine (440.0, 2.0), 24000, 24000 + 4811);
+        auto worstStep = [&] (float xf)
+        {
+            Player p;
+            p.set (snd::engine, (float) snd::sampler);
+            plain (p);
+            p.setInstrument (ins.get());
+            p.set (snd::loopXfade, xf);
+            auto out = play (p, 1.5, { { 0.0, 60, 127 } });
+            float worst = 0.0f;
+            for (size_t i = 30000; i < out.size(); ++i)
+                worst = std::max (worst, std::abs (out[i] - out[i - 1]));
+            return worst;
+        };
+        const float natural = 0.5f * (float) (2.0 * pi * 440.0 / sr);
+        const float raw = worstStep (0.0f), smooth = worstStep (0.5f);
+        std::printf ("  loop seam: steps up to %.3f, crossfaded %.3f (the sine's own %.3f)\n", raw, smooth, natural);
+        CHECK (raw > 3.0f * natural && smooth < 1.3f * natural, "crossfade: %.3f then %.3f", raw, smooth);
+    }
+    {
+        // the chain reordered: CRUSH after ESPACE crushes the reverb's tail too (another sound), and the change
+        // passes through a dip, no click
+        auto render = [&] (bool reorder, float* worst)
+        {
+            Player p;
+            synthPlayer (p);
+            p.set (snd::crOn, 1.0f);
+            p.set (snd::crBits, 3.0f);
+            p.set (snd::crMix, 1.0f);
+            p.set (snd::rvOn, 1.0f);
+            p.set (snd::rvMix, 0.6f);
+            std::vector<float> out;
+            juce::AudioBuffer<float> buf (2, 256);
+            for (int b = 0; b < (int) (0.8 * sr / 256); ++b)
+            {
+                juce::MidiBuffer midi;
+                if (b == 0)
+                    midi.addEvent (juce::MidiMessage::noteOn (1, 57, (juce::uint8) 127), 0);
+                if (reorder && b == 60)
+                    p.setFxOrder ({ 0, 1, 2, 3, 5, 4 });
+                buf.clear();
+                p.render (buf, midi, {});
+                for (int i = 0; i < 256; ++i)
+                    out.push_back (buf.getSample (0, i));
+            }
+            if (worst != nullptr)
+            {
+                *worst = 0.0f;
+                for (size_t i = 60 * 256; i < 60 * 256 + 1200; ++i)      // the dip: 10 ms down, 10 up
+                    *worst = std::max (*worst, std::abs (out[i] - out[i - 1]));
+            }
+            return out;
+        };
+        float stepAtChange = 0.0f;
+        auto a = render (false, nullptr), b = render (true, &stepAtChange);
+        double diff = 0.0;
+        for (size_t i = 25000; i < a.size(); ++i)
+            diff += std::abs (a[i] - b[i]);
+        float before = 0.0f;      // the largest steps of either order around the change
+        for (size_t i = 40 * 256; i < 60 * 256; ++i)
+            before = std::max (before, std::abs (b[i] - b[i - 1]));
+        for (size_t i = 60 * 256 + 2400; i < 60 * 256 + 12000; ++i)
+            before = std::max (before, std::abs (b[i] - b[i - 1]));
+        std::printf ("  chain reordered: %.3f apart, steps %.3f at the change (%.3f either side)\n", diff / (double) (a.size() - 25000), stepAtChange, before);
+        CHECK (diff / (double) (a.size() - 25000) > 0.005 && stepAtChange <= before * 1.05f, "reorder: %.4f apart, step %.3f against %.3f",
+               diff / (double) (a.size() - 25000), stepAtChange, before);
+        Player q;
+        q.setFxOrder ({ 0, 0, 1, 2, 3, 4 });
+        CHECK (q.fxOrder()[1] == 1, "a stage twice is refused");
+    }
+}
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI gui;
@@ -813,6 +1002,7 @@ int main()
     testVoices();
     testFilterModsFx();
     testSmoothing();
+    testSynth();
     testStability();
     testClock();
     testCpu();

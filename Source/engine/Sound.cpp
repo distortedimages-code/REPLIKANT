@@ -139,6 +139,29 @@ namespace
         { "sceneA",    "Sc\xc3\xa8ne A",            K::integer, 1, 16, 1, 1, nullptr, false, "" },
         { "sceneB",    "Sc\xc3\xa8ne B",            K::integer, 1, 16, 2, 1, nullptr, false, "" },
         { "tempo",     "Tempo",                     K::linear,  40, 300, 120, 1, nullptr, false, "bpm" },
+
+        { "engine",    "Moteur",                    K::choice,  0, 2, 0, 1, "SYNTH\xc3\x89|DRUM|SAMPLER", false, "" },
+        { "oaBank",    "Banque",                    K::choice,  0, 1, 0, 1, "BASIQUES|CAPTUR\xc3\x89S", false, "" },
+        { "oaPos",     "Position",                  K::linear,  0, 1, 0.2857f, 1, nullptr, true, "%" },
+        { "oaOct",     "Octave",                    K::integer, -3, 3, 0, 1, nullptr, false, "oct" },
+        { "oaSemi",    "Accord",                    K::integer, -12, 12, 0, 1, nullptr, false, "st" },
+        { "oaFine",    "Fin",                       K::linear,  -100, 100, 0, 1, nullptr, true, "ct" },
+        { "oaLevel",   "Niveau",                    K::linear,  0, 1, 0.8f, 1, nullptr, true, "%" },
+        { "obBank",    "Banque",                    K::choice,  0, 1, 0, 1, "BASIQUES|CAPTUR\xc3\x89S", false, "" },
+        { "obPos",     "Position",                  K::linear,  0, 1, 0.4286f, 1, nullptr, true, "%" },
+        { "obOct",     "Octave",                    K::integer, -3, 3, -1, 1, nullptr, false, "oct" },
+        { "obSemi",    "Accord",                    K::integer, -12, 12, 0, 1, nullptr, false, "st" },
+        { "obFine",    "Fin",                       K::linear,  -100, 100, 4, 1, nullptr, true, "ct" },
+        { "obLevel",   "Niveau",                    K::linear,  0, 1, 0.45f, 1, nullptr, true, "%" },
+        { "pmBA",      "PM B \xe2\x86\x92 A",       K::power,   0, 1, 0, 2.0f, nullptr, true, "%" },
+        { "subLevel",  "Sub",                       K::linear,  0, 1, 0, 1, nullptr, true, "%" },
+        { "noiseLevel","Bruit",                     K::linear,  0, 1, 0, 1, nullptr, true, "%" },
+        { "unison",    "Unisson",                   K::integer, 1, 4, 1, 1, nullptr, false, "" },
+        { "detune",    "D\xc3\xa9saccord",          K::linear,  0, 1, 0.2f, 1, nullptr, true, "%" },
+        { "width",     "Largeur",                   K::linear,  0, 1, 0.6f, 1, nullptr, true, "%" },
+        { "loopXfade", "Crossfade",                 K::linear,  0, 1, 0, 1, nullptr, false, "%" },
+        { "wtf",       "WTF?!",                     K::linear,  0, 1, 0, 1, nullptr, false, "%" },
+        { "wtfMode",   "WTF?! mode",                K::choice,  0, 1, 0, 1, "LIVE|LOOP", false, "" },
     };
 
     std::string fmt (const char* f, double v)
@@ -170,7 +193,7 @@ namespace
 bool sceneLockable (int id)
 {
     return id >= 0 && id < count && id != xfade && id != sceneA && id != sceneB && id != tempo && id != quality
-        && id != voices && id != voiceMode;
+        && id != voices && id != voiceMode && id != engine && id != wtfMode;
 }
 
 const Def& def (int id)
@@ -283,7 +306,7 @@ std::string longName (int id)
 {
     const std::string name = def (id).name;
     auto in = [id] (int a, int b) { return id >= a && id <= b; };
-    if (id >= m1Type)
+    if (id >= m1Type && id < xfade)
         return "M" + std::to_string ((id - m1Type) / modSettings + 1) + " " + name;
     if (in (attack, release))      return "Ampli " + name;
     if (in (fType, quality))       return "Filtre " + name;
@@ -295,6 +318,10 @@ std::string longName (int id)
     if (in (crBits, crMix))        return "Crush " + name;
     if (in (rvSize, rvMix))        return "Espace " + name;
     if (in (pmRatio, pmIndex))     return "PM " + name;
+    if (in (oaBank, oaLevel))      return "Osc A " + name;
+    if (in (obBank, obLevel))      return "Osc B " + name;
+    if (in (subLevel, width))      return "Synth\xc3\xa9 " + name;
+    if (id == loopXfade)           return "Boucle " + name;
     return name;
 }
 }

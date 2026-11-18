@@ -316,6 +316,49 @@ void Player::limitPolyphony (int keep)
 
 void Player::startVoice (int note, int velocity, float fromPitch, const Chunk& c)
 {
+    if ((int) c.v[snd::engine] == snd::synth)
+    {
+        // SYNTHÉ: the oscillators (the first unison voice from zero, the others anywhere: no flanging at the start)
+        auto* vp = freeVoice();
+        if (vp == nullptr)
+            return;
+        auto& v = *vp;
+        v.synth = true;
+        v.active = v.held = true;
+        v.fading = false;
+        v.fade = 1.0f;
+        v.fresh = true;
+        v.s = nullptr;
+        v.index = -1;
+        v.ghostLeft = v.attackLeft = 0;
+        v.transposeAtOn = (int) c.v[snd::transpose];
+        v.phA.fill (0.0);
+        v.phB.fill (0.0);
+        v.phSub = 0.0;
+        v.amp = {};
+        v.flt = {};
+        v.note = v.origin = note;
+        v.velocity = velocity;
+        v.pitch = fromPitch;
+        v.pitchTarget = (float) note;
+        v.age = ++clock;
+        v.gain = std::pow (juce::jlimit (0.0f, 1.0f, (float) velocity / 127.0f), c.v[snd::velocity]);
+        v.rng = 0x9E3779B9u ^ (uint32_t) (v.age * 2654435761u);
+        for (int u = 1; u < 4; ++u)
+        {
+            v.phA[(size_t) u] = uniform (v.rng);
+            v.phB[(size_t) u] = uniform (v.rng);
+        }
+        v.amp.on();
+        v.flt.on();
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            v.filter[ch].set (c.fs);
+            v.filter[ch].reset();
+            v.os[ch].reset();
+        }
+        return;
+    }
     if (ins == nullptr)
         return;
     const int tr = (int) c.v[snd::transpose];
@@ -333,6 +376,7 @@ void Player::startVoice (int note, int velocity, float fromPitch, const Chunk& c
     if (vp == nullptr)
         return;
     auto& v = *vp;
+    v.synth = false;
     v.active = true;
     v.held = true;
     v.fading = false;
@@ -715,6 +759,11 @@ double Player::alignGrain (const Voice& v, const Read& r, double target, double 
 
 void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
 {
+    if (v.synth)
+    {
+        renderSynth (v, L, R, n, c);
+        return;
+    }
     // the glide, over the chunk
     if (std::abs (v.pitch - v.pitchTarget) > 0.0f)
     {
@@ -782,11 +831,24 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
 
     // one frame of the sample at p, with the phase modulation, the bits
     float pm = 0.0f;
+    // CROSSFADE: the loop's end fades into what comes before its start, up to half the loop and no
+    // further back than the sample's beginning
+    const double xfLen = r.loop ? juce::jmin ((double) c.v[snd::loopXfade] * 0.5 * (double) (r.le - r.ls), (double) r.ls) : 0.0;
     auto frame = [&] (double p, float& l, float& rr)
     {
         if (r.pm != 0)
             p += (double) (r.pmIndex * pm);
         readFrame (r, p, l, rr);
+        if (xfLen > 1.0 && p >= (double) r.le - xfLen && p < (double) r.le)
+        {
+            float l2, r2;
+            readFrame (r, p - (double) (r.le - r.ls), l2, r2);
+            // raised cosine: the two sum to one (a sustained tone, the two sides alike, keeps its level)
+            const float t = (float) ((p - ((double) r.le - xfLen)) / xfLen);
+            const float b = 0.5f - 0.5f * std::cos (3.14159265f * t), a = 1.0f - b;
+            l = l * a + l2 * b;
+            rr = rr * a + r2 * b;
+        }
     };
     Read ra = r;                     // the attack kept: at its own speed, its own pitch
     ra.step = v.rateScale;
@@ -973,6 +1035,162 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
     }
 }
 
+
+//============================================================================== SYNTHÉ
+const dsp::CycleBank& Player::bankFor (int choice) const
+{
+    if (choice == 1 && ins != nullptr && ins->cycles != nullptr && ins->cycles->count() > 0)
+        return *ins->cycles;
+    return *basics;
+}
+
+void Player::renderSynth (Voice& v, float* L, float* R, int n, const Chunk& c)
+{
+    if (std::abs (v.pitch - v.pitchTarget) > 0.0f)
+    {
+        const float k = std::pow (1.0f - c.glideK, (float) n);
+        v.pitch = v.pitchTarget + (v.pitch - v.pitchTarget) * k;
+        if (std::abs (v.pitch - v.pitchTarget) < 1.0e-3f)
+            v.pitch = v.pitchTarget;
+    }
+    const auto& bankA = bankFor ((int) c.v[snd::oaBank]);
+    const auto& bankB = bankFor ((int) c.v[snd::obBank]);
+    const double played = (double) v.pitch + (double) (int) c.v[snd::transpose] + (double) c.v[snd::fine] * 0.01 + (double) c.bendSemis;
+    const double hzA = rk::noteHz (played + 12.0 * c.v[snd::oaOct] + c.v[snd::oaSemi] + 0.01 * c.v[snd::oaFine]);
+    const double hzB = rk::noteHz (played + 12.0 * c.v[snd::obOct] + c.v[snd::obSemi] + 0.01 * c.v[snd::obFine]);
+
+    // the unison: each voice detuned (up to +-30 cents at the edges) and placed across the stereo
+    const int voicesN = juce::jlimit (1, 4, (int) c.v[snd::unison]);
+    const bool stereo = voicesN > 1;
+    double ratio[4] = { 1.0, 1.0, 1.0, 1.0 };
+    float gl[4] = { 1.0f, 1.0f, 1.0f, 1.0f }, gr[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    for (int u = 0; u < voicesN && stereo; ++u)
+    {
+        const float spread = (float) u / (float) (voicesN - 1) * 2.0f - 1.0f;
+        ratio[u] = std::exp2 ((double) (spread * c.v[snd::detune] * 0.3f) / 12.0);
+        const float pan = spread * c.v[snd::width];
+        gl[u] = std::cos ((pan + 1.0f) * 0.25f * 3.14159265f) * 1.41421356f;
+        gr[u] = std::sin ((pan + 1.0f) * 0.25f * 3.14159265f) * 1.41421356f;
+    }
+    const float norm = 1.0f / std::sqrt ((float) voicesN);
+    const double top = stereo ? std::exp2 ((double) (c.v[snd::detune] * 0.3f) / 12.0) : 1.0;
+    const int levA = dsp::CycleBank::levelFor (hzA * top, sr), levB = dsp::CycleBank::levelFor (hzB * top, sr);
+    const float lvA = c.v[snd::oaLevel], lvB = c.v[snd::obLevel], sub = c.v[snd::subLevel], noise = c.v[snd::noiseLevel];
+    const float pmTo = c.v[snd::pmBA] * c.v[snd::pmBA] * 1.5f;     // B moves A's phase by up to 1.5 cycles
+
+    // the filter, its cutoff following the keys and the velocity; everything ramped from the last chunk
+    if (c.filterOn)
+        for (int ch = 0; ch < (stereo ? 2 : 1); ++ch)
+            v.filter[ch].set (c.fs);
+    const float ktOct = c.v[snd::keyTrack] * ((float) v.note - 60.0f) / 12.0f;
+    const float velOct = -c.v[snd::velCutoff] * 4.0f * (1.0f - (float) v.velocity / 127.0f);
+    const float baseOct = c.cutoffOct + ktOct + velOct;
+    const double incA = hzA / sr, incB = hzB / sr;
+    const float posA = c.v[snd::oaPos], posB = c.v[snd::obPos];
+    if (v.fresh)
+    {
+        v.cutFrom = baseOct;
+        v.envFrom = c.envOct;
+        v.incAFrom = incA;
+        v.incBFrom = incB;
+        v.posAFrom = posA;
+        v.posBFrom = posB;
+        v.pmFrom = pmTo;
+        v.fresh = false;
+    }
+    const float invN = 1.0f / (float) juce::jmax (1, n);
+    float cutNow = v.cutFrom, envNow = v.envFrom, pA = v.posAFrom, pB = v.posBFrom, pmNow = v.pmFrom;
+    double iA = v.incAFrom, iB = v.incBFrom;
+    const float cutInc = (baseOct - cutNow) * invN, envInc = (c.envOct - envNow) * invN;
+    const float pAInc = (posA - pA) * invN, pBInc = (posB - pB) * invN, pmInc = (pmTo - pmNow) * invN;
+    const double iAInc = (incA - iA) / (double) juce::jmax (1, n), iBInc = (incB - iB) / (double) juce::jmax (1, n);
+    v.cutFrom = baseOct;
+    v.envFrom = c.envOct;
+    v.incAFrom = incA;
+    v.incBFrom = incB;
+    v.posAFrom = posA;
+    v.posBFrom = posB;
+    v.pmFrom = pmTo;
+    const float fadeStep = 1.0f / (float) (0.004 * sr);
+
+    for (int i = 0; i < n; ++i)
+    {
+        cutNow += cutInc;
+        envNow += envInc;
+        pA += pAInc;
+        pB += pBInc;
+        pmNow += pmInc;
+        iA += iAInc;
+        iB += iBInc;
+        float xl = 0.0f, xr = 0.0f;
+        for (int u = 0; u < voicesN; ++u)
+        {
+            double& b = v.phB[(size_t) u];
+            b += iB * ratio[u];
+            b -= std::floor (b);
+            const float sb = lvB > 0.0f || pmNow > 0.0f ? bankB.read (pB, b, levB) : 0.0f;
+            double& a = v.phA[(size_t) u];
+            a += iA * ratio[u];
+            a -= std::floor (a);
+            const float sa = bankA.read (pA, a + (double) (pmNow * sb), levA);
+            const float x = sa * lvA + sb * lvB;
+            xl += x * gl[u];
+            xr += x * gr[u];
+        }
+        xl *= norm;
+        xr *= norm;
+        if (sub > 0.0f)
+        {
+            v.phSub += iA * 0.5;
+            v.phSub -= std::floor (v.phSub);
+            const float s = sub * std::sin (twoPi * (float) v.phSub);
+            xl += s;
+            xr += s;
+        }
+        if (noise > 0.0f)
+        {
+            const float w = noise * 0.5f * (uniform (v.rng) * 2.0f - 1.0f);
+            xl += w;
+            xr += w;
+        }
+        if (! stereo)
+            xr = xl;
+
+        const float fe = tick (v.flt, c.flt, false);
+        if (c.filterOn)
+        {
+            const float oct = cutNow + envNow * fe;
+            auto& f0 = v.filter[0];
+            xl = v.os[0].process (xl, [&f0, oct] (float u) { return f0.tick (u, oct); });
+            if (stereo)
+            {
+                auto& f1 = v.filter[1];
+                xr = v.os[1].process (xr, [&f1, oct] (float u) { return f1.tick (u, oct); });
+            }
+            else
+                xr = xl;
+        }
+        float g = tick (v.amp, c.amp, true) * v.gain;
+        if (v.fading)
+        {
+            v.fade -= fadeStep;
+            if (v.fade <= 0.0f)
+            {
+                v.active = false;
+                return;
+            }
+            g *= v.fade;
+        }
+        L[i] += xl * g;
+        R[i] += xr * g;
+        if (v.amp.stage == Env::idle)
+        {
+            v.active = false;
+            return;
+        }
+    }
+}
+
 //============================================================================== modulators, settings
 float Player::smoothed (int i, float k, bool snap)
 {
@@ -1124,10 +1342,11 @@ void Player::modulate (int offset, int n, const Transport& t, Chunk& c, bool atR
     }
 
     glidePrimed = true;
+    applyWtf (ppq, n, c);
     c.n = n;
     c.elastic = c.v[snd::playMode] > 0.5f;
     c.loops = c.v[snd::loops] > 0.5f;
-    c.oneShot = ins != nullptr && ins->session.oneShot;
+    c.oneShot = ins != nullptr && ins->session.oneShot && (int) c.v[snd::engine] != snd::synth;
     c.bendSemis = (float) (bend * c.v[snd::bend]);
     c.glideK = c.v[snd::glide] > 0.5f ? (float) (1.0 - std::exp (-1.0 / (c.v[snd::glide] * 0.001 * sr * 0.25))) : 1.0f;
     auto rates = [this] (float a, float d, float s, float r)
@@ -1153,7 +1372,71 @@ void Player::modulate (int offset, int n, const Transport& t, Chunk& c, bool atR
     c.envOct = c.v[snd::fEnv] * 6.0f;
 }
 
+
+// WTF?!: each of the engine's most telling settings pulled from where it is by up to the whole knob's amount, a new
+// pull every eighth note, glided to (30 ms); LOOP draws the same eight again and again
+void Player::applyWtf (double ppq, int n, Chunk& c)
+{
+    const float amount = c.v[snd::wtf];
+    const bool synthEngine = (int) c.v[snd::engine] == snd::synth;
+    static const int synthIds[wtfCount] = { snd::oaPos, snd::obPos, snd::pmBA, snd::cutoff, snd::reso, snd::fEnv, snd::detune,
+                                            snd::decay, snd::dAmt, snd::subLevel };
+    static const int samplerIds[wtfCount] = { snd::start, snd::spray, snd::alias, snd::loopStart, snd::loopSize, snd::pmIndex,
+                                              snd::cutoff, snd::reso, snd::decay, snd::speed };
+    const int* ids = synthEngine ? synthIds : samplerIds;
+    const auto step = (int64_t) std::floor (ppq * 2.0);
+    if (step != wtfStep)
+    {
+        wtfStep = step;
+        if ((int) c.v[snd::wtfMode] == 1)
+            wtfRng = 0x7f4a7c15u + (uint32_t) (((step % 8) + 8) % 8) * 2654435761u;   // LOOP: the eighth's own draw
+        for (auto& t : wtfTarget)
+            t = uniform (wtfRng) * 2.0f - 1.0f;
+    }
+    const float k = 1.0f - std::exp (-(float) n / (float) (0.03 * sr));
+    for (int j = 0; j < wtfCount; ++j)
+    {
+        wtfNow[(size_t) j] += (wtfTarget[(size_t) j] * amount - wtfNow[(size_t) j]) * k;
+        if (amount <= 0.0f && std::abs (wtfNow[(size_t) j]) < 1.0e-4f)
+            wtfNow[(size_t) j] = 0.0f;
+        if (! (std::abs (wtfNow[(size_t) j]) > 0.0f))
+            continue;
+        const int id = ids[j];
+        const float norm = juce::jlimit (0.0f, 1.0f, snd::toNorm (id, c.v[id]) + wtfNow[(size_t) j]);
+        c.v[id] = snd::fromNorm (id, norm);
+        shownNorm[(size_t) id].store (norm, std::memory_order_relaxed);
+        shownMoved[(size_t) id].store (true, std::memory_order_relaxed);
+    }
+}
+
 //============================================================================== the chain
+void Player::setFxOrder (const std::array<int, numStages>& order)
+{
+    int seen = 0, code = 0, mul = 1;
+    for (int p = 0; p < numStages; ++p)
+    {
+        const int st = order[(size_t) p];
+        if (st < 0 || st >= numStages || (seen & (1 << st)) != 0)
+            return;
+        seen |= 1 << st;
+        code += st * mul;
+        mul *= numStages;
+    }
+    orderWanted = code;
+}
+
+std::array<int, Player::numStages> Player::fxOrder() const
+{
+    std::array<int, numStages> o {};
+    int code = orderWanted.load();
+    for (int p = 0; p < numStages; ++p)
+    {
+        o[(size_t) p] = code % numStages;
+        code /= numStages;
+    }
+    return o;
+}
+
 void Player::runChain (float* L, float* R, int n, const Chunk& c)
 {
     const float rampStep = (float) n / (float) (0.02 * sr);     // on / off in 20 ms
@@ -1182,93 +1465,132 @@ void Player::runChain (float* L, float* R, int n, const Chunk& c)
         }
     };
 
-    // drive (the model kept while it fades out)
+    // the stages, in the order chosen (0 drive, the model kept while it fades out; 1..5 the effects)
+    int code = orderNow;
+    for (int pos = 0; pos < numStages; ++pos, code /= numStages)
     {
-        const int model = (int) c.v[snd::dModel];
-        dsp::DriveSettings d;
-        if (model != 0)
-            lastDriveModel = model;
-        d.model = (dsp::DriveModel) lastDriveModel;
-        d.drive = c.v[snd::dAmt];
-        d.tone = c.v[snd::dTone];
-        d.mix = c.v[snd::dMix];
-        drive.set (d);
-        stage (0, model != 0, [this] (float* l, float* r, int m) { drive.process (l, r, m); });
-    }
-    {
-        dsp::SpectralSettings s;
-        s.voices = (int) c.v[snd::spVoices];
-        s.slice = c.v[snd::spSlice];
-        s.blur = c.v[snd::spBlur];
-        s.glide = c.v[snd::spGlide];
-        s.centre = c.v[snd::spCentre];
-        s.bandwidth = c.v[snd::spWidth];
-        s.octave = c.v[snd::spOct];
-        s.wave = (int) c.v[snd::spWave];
-        s.freeze = c.v[snd::spFreeze] > 0.5f;
-        s.feedback = c.v[snd::spFeedback];
-        s.mix = c.v[snd::spMix];
-        spectral.set (s);
-        stage (1, c.v[snd::spOn] > 0.5f, [this] (float* l, float* r, int m) { spectral.process (l, r, m); });
-    }
-    {
-        dsp::PitchSettings s;
-        s.semis[0] = c.v[snd::piA];
-        s.semis[1] = c.v[snd::piB];
-        s.fine[0] = c.v[snd::piDetune];
-        s.fine[1] = -c.v[snd::piDetune];
-        s.delay[0] = c.v[snd::piDelay] * 0.001f;
-        s.delay[1] = juce::jmin (1.0f, c.v[snd::piDelay] * 0.0015f);
-        s.level[0] = 1.0f;
-        s.level[1] = c.v[snd::piLevelB];
-        s.feedback = c.v[snd::piFeedback];
-        s.crystals = c.v[snd::piCrystals] > 0.5f;
-        s.mix = c.v[snd::piMix];
-        pitch.set (s);
-        stage (2, c.v[snd::piOn] > 0.5f, [this] (float* l, float* r, int m) { pitch.process (l, r, m); });
-    }
-    {
-        dsp::ChorusSettings s;
-        s.mode = (int) c.v[snd::chMode];
-        s.rate = c.v[snd::chRate];
-        s.depth = c.v[snd::chDepth];
-        s.feedback = c.v[snd::chFeedback];
-        s.tone = c.v[snd::chTone];
-        s.mix = c.v[snd::chMix];
-        chorus.set (s);
-        stage (3, c.v[snd::chOn] > 0.5f, [this] (float* l, float* r, int m) { chorus.process (l, r, m); });
-    }
-    {
-        dsp::CrushSettings s;
-        s.bits = c.v[snd::crBits];
-        s.rateHz = (float) juce::jmin ((double) c.v[snd::crRate], sr);
-        s.jitter = c.v[snd::crJitter];
-        s.tone = c.v[snd::crTone];
-        s.mix = c.v[snd::crMix];
-        crush.set (s);
-        stage (4, c.v[snd::crOn] > 0.5f, [this] (float* l, float* r, int m) { crush.process (l, r, m); });
-    }
-    {
-        dsp::SpaceSettings s;
-        s.size = c.v[snd::rvSize];
-        s.decay = c.v[snd::rvDecay];
-        s.tone = c.v[snd::rvTone];
-        s.shimmer = c.v[snd::rvShimmer];
-        s.mod = c.v[snd::rvMod];
-        s.mix = c.v[snd::rvMix];
-        space.set (s);
-        stage (5, c.v[snd::rvOn] > 0.5f, [this] (float* l, float* r, int m) { space.process (l, r, m); });
+        switch (code % numStages)
+        {
+            case 0:
+            {
+                const int model = (int) c.v[snd::dModel];
+                dsp::DriveSettings d;
+                if (model != 0)
+                    lastDriveModel = model;
+                d.model = (dsp::DriveModel) lastDriveModel;
+                d.drive = c.v[snd::dAmt];
+                d.tone = c.v[snd::dTone];
+                d.mix = c.v[snd::dMix];
+                drive.set (d);
+                stage (0, model != 0, [this] (float* l, float* r, int m) { drive.process (l, r, m); });
+            }
+                break;
+            case 1:
+            {
+                dsp::SpectralSettings s;
+                s.voices = (int) c.v[snd::spVoices];
+                s.slice = c.v[snd::spSlice];
+                s.blur = c.v[snd::spBlur];
+                s.glide = c.v[snd::spGlide];
+                s.centre = c.v[snd::spCentre];
+                s.bandwidth = c.v[snd::spWidth];
+                s.octave = c.v[snd::spOct];
+                s.wave = (int) c.v[snd::spWave];
+                s.freeze = c.v[snd::spFreeze] > 0.5f;
+                s.feedback = c.v[snd::spFeedback];
+                s.mix = c.v[snd::spMix];
+                spectral.set (s);
+                stage (1, c.v[snd::spOn] > 0.5f, [this] (float* l, float* r, int m) { spectral.process (l, r, m); });
+            }
+                break;
+            case 2:
+            {
+                dsp::PitchSettings s;
+                s.semis[0] = c.v[snd::piA];
+                s.semis[1] = c.v[snd::piB];
+                s.fine[0] = c.v[snd::piDetune];
+                s.fine[1] = -c.v[snd::piDetune];
+                s.delay[0] = c.v[snd::piDelay] * 0.001f;
+                s.delay[1] = juce::jmin (1.0f, c.v[snd::piDelay] * 0.0015f);
+                s.level[0] = 1.0f;
+                s.level[1] = c.v[snd::piLevelB];
+                s.feedback = c.v[snd::piFeedback];
+                s.crystals = c.v[snd::piCrystals] > 0.5f;
+                s.mix = c.v[snd::piMix];
+                pitch.set (s);
+                stage (2, c.v[snd::piOn] > 0.5f, [this] (float* l, float* r, int m) { pitch.process (l, r, m); });
+            }
+                break;
+            case 3:
+            {
+                dsp::ChorusSettings s;
+                s.mode = (int) c.v[snd::chMode];
+                s.rate = c.v[snd::chRate];
+                s.depth = c.v[snd::chDepth];
+                s.feedback = c.v[snd::chFeedback];
+                s.tone = c.v[snd::chTone];
+                s.mix = c.v[snd::chMix];
+                chorus.set (s);
+                stage (3, c.v[snd::chOn] > 0.5f, [this] (float* l, float* r, int m) { chorus.process (l, r, m); });
+            }
+                break;
+            case 4:
+            {
+                dsp::CrushSettings s;
+                s.bits = c.v[snd::crBits];
+                s.rateHz = (float) juce::jmin ((double) c.v[snd::crRate], sr);
+                s.jitter = c.v[snd::crJitter];
+                s.tone = c.v[snd::crTone];
+                s.mix = c.v[snd::crMix];
+                crush.set (s);
+                stage (4, c.v[snd::crOn] > 0.5f, [this] (float* l, float* r, int m) { crush.process (l, r, m); });
+            }
+                break;
+            case 5:
+            {
+                dsp::SpaceSettings s;
+                s.size = c.v[snd::rvSize];
+                s.decay = c.v[snd::rvDecay];
+                s.tone = c.v[snd::rvTone];
+                s.shimmer = c.v[snd::rvShimmer];
+                s.mod = c.v[snd::rvMod];
+                s.mix = c.v[snd::rvMix];
+                space.set (s);
+                stage (5, c.v[snd::rvOn] > 0.5f, [this] (float* l, float* r, int m) { space.process (l, r, m); });
+            }
+                break;
+            default:
+                break;
+        }
     }
 
-    // volume, gliding
+    // volume, gliding; a new order of the stages taken through a dip of 10 ms down and 10 back up
     const float target = juce::Decibels::decibelsToGain (c.v[snd::volume], -100.0f);
     const float g0 = volumeGain;
     volumeGain = target;
+    const int wanted = orderWanted.load (std::memory_order_relaxed);
+    if (orderPhase == 0 && wanted != orderNow)
+        orderPhase = 1;
+    const float dip = 1.0f / (float) (0.01 * sr);
     for (int i = 0; i < n; ++i)
     {
-        const float g = g0 + (target - g0) * (float) (i + 1) / (float) n;
+        float g = g0 + (target - g0) * (float) (i + 1) / (float) n;
+        if (orderPhase == 1)
+            orderGain = juce::jmax (0.0f, orderGain - dip);
+        else if (orderPhase == 2)
+        {
+            orderGain = juce::jmin (1.0f, orderGain + dip);
+            if (orderGain >= 1.0f)
+                orderPhase = 0;
+        }
+        g *= orderGain;
         L[i] *= g;
         R[i] *= g;
+    }
+    if (orderPhase == 1 && orderGain <= 0.0f)
+    {
+        orderNow = wanted;          // silent: the next chunk runs in the new order, coming back up
+        orderPhase = 2;
     }
 }
 
@@ -1446,7 +1768,16 @@ void Player::render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi
                 last = &v;
         }
     activeVoices = count;
-    if (last != nullptr)
+    if (last != nullptr && last->synth)
+    {
+        // SYNTHÉ: no sample to show, the voice's phase (the oscillator's cycle drawn turning)
+        shownSample = -1;
+        shownPosition = (float) last->phA[0];
+        for (auto& g : grainAt)
+            g = -1.0f;
+        filterEnv = last->flt.v;
+    }
+    else if (last != nullptr)
     {
         shownSample = last->index;
         // from the frames it reads to the recording's: a rendered key is the recording at another speed (its loop

@@ -48,7 +48,8 @@ add_library(rk_core STATIC
     Source/dsp/Drive.cpp
     Source/dsp/Modulators.cpp
     Source/dsp/Space.cpp
-    Source/dsp/Effects.cpp)
+    Source/dsp/Effects.cpp
+    Source/dsp/Cycles.cpp)
 target_compile_features(rk_core PUBLIC cxx_std_17)
 # Signalsmith Stretch and Linear (MIT), vendored in ThirdParty
 target_include_directories(rk_core PUBLIC ThirdParty)
@@ -93,18 +94,20 @@ set(RK_APP_SOURCES
     Source/engine/Worker.cpp
     Source/engine/Player.cpp
     Source/engine/TestSynth.cpp
-    Source/ui/Pixel.cpp
+    Source/ui/Look.cpp
+    Source/ui/Pictos.cpp
+    Source/ui/Controls.cpp
     Source/ui/UpdatePanel.cpp
-    Source/ui/KeyMap.cpp
-    Source/ui/WaveView.cpp
-    Source/ui/PlayerViews.cpp
-    Source/ui/MainView.cpp)
+    Source/ui/Machine.cpp)
 
 # Pixel fonts (SIL Open Font License, see Resources/fonts)
 juce_add_binary_data(RkFonts SOURCES
-    Resources/fonts/Silkscreen-Regular.ttf
-    Resources/fonts/Silkscreen-Bold.ttf
-    Resources/fonts/VT323-Regular.ttf)
+    Resources/fonts/IBMPlexMono-Regular.ttf
+    Resources/fonts/IBMPlexMono-Medium.ttf
+    Resources/fonts/IBMPlexMono-SemiBold.ttf
+    Resources/fonts/SpaceGrotesk-Light.ttf
+    Resources/fonts/SpaceGrotesk-Medium.ttf
+    Resources/fonts/SpaceGrotesk-Bold.ttf)
 set_target_properties(RkFonts PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # This version's notes, for the window that tells what it brought the first time it opens
@@ -186,7 +189,7 @@ if(RK_BUILD_TESTS)
     # the look: fonts and text layout (a tooltip with characters the pixel fonts lack must not recurse)
     juce_add_console_app(UiTests PRODUCT_NAME "UiTests")
     juce_generate_juce_header(UiTests)
-    target_sources(UiTests PRIVATE Tests/UiTests.cpp Source/ui/Pixel.cpp)
+    target_sources(UiTests PRIVATE Tests/UiTests.cpp Source/ui/Look.cpp)
     target_compile_definitions(UiTests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
     target_link_libraries(UiTests PRIVATE
         RkFonts

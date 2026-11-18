@@ -1,11 +1,11 @@
-// Not a test: runs a short session on the test synth through the real processor, and draws the window to PNG
-// files (during the session, then on each page with the instrument), to look at the interface without a Mac.
+// Not a test: plays the synth, runs a short capture on the test synth through the real processor, and draws the
+// window to PNG files (each mode and page), to look at the interface without a Mac.
 //   Snapshot <folder>
 
 #include <JuceHeader.h>
 #include "../Source/plugin/PluginProcessor.h"
 #include "../Source/plugin/PluginEditor.h"
-#include "../Source/ui/MainView.h"
+#include "../Source/ui/Machine.h"
 
 static void pump (int ms)
 {
@@ -46,17 +46,137 @@ int main (int argc, char** argv)
 
     std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
     ed->setVisible (true);
-    pump (300);
-    save (*ed, dir.getChildFile ("0-start.png"));
+    te::Machine* view = nullptr;
+    std::function<void (juce::Component&)> find = [&] (juce::Component& c)
+    {
+        for (auto* child : c.getChildren())
+        {
+            if (auto* v = dynamic_cast<te::Machine*> (child)) { view = v; return; }
+            find (*child);
+        }
+    };
+    find (*ed);
+    if (view == nullptr)
+        return 1;
+    juce::AudioBuffer<float> buf (2, 256);
+    juce::MidiBuffer midi;
+    auto run = [&] (int blocks)
+    {
+        for (int b = 0; b < blocks; ++b)
+        {
+            buf.clear();
+            midi.clear();
+            proc.processBlock (buf, midi);
+            if (b % 8 == 0)
+                pump (20);
+        }
+        view->refreshNow();
+        pump (150);
+    };
+    auto set = [&] (int id, float v)
+    {
+        auto* param = proc.params.getParameter (snd::def (id).id);
+        param->setValueNotifyingHost (param->convertTo0to1 (v));
+    };
+    auto shoot = [&] (const char* name) { save (*ed, dir.getChildFile (name)); };
 
+    // the synth, a chord held, a few things moving
+    pump (300);
+    shoot ("0-start.png");
+    set (snd::fModel, 1.0f);
+    set (snd::cutoff, 1800.0f);
+    set (snd::reso, 0.45f);
+    set (snd::unison, 3.0f);
+    set (snd::rvOn, 1.0f);
+    set (snd::chOn, 1.0f);
+    proc.player.setRoute (0, snd::oaPos, 0.25f);
+    proc.player.setRoute (0, snd::cutoff, 0.2f);
+    for (int n : { 48, 55, 63 })
+        proc.audition (n, 100, true);
+    const char* synthShots[] = { "1-synthe-osc-a.png", "2-synthe-osc-b.png", "3-synthe-voix.png", "4-synthe-filtre.png", "5-synthe-ampli.png",
+                                 "6-synthe-fx.png", "7-synthe-mods.png", "8-synthe-reglages.png" };
+    for (int pg = 0; pg < 8; ++pg)
+    {
+        view->showPage (pg);
+        run (60);
+        shoot (synthShots[pg]);
+    }
+    // the filter's other banks and models: the drive on tape, the MS-20 high-pass, the light theme
+    view->showPage (3);
+    set (snd::dModel, 3.0f);
+    set (snd::dAmt, 0.5f);
+    view->showBank (2);
+    run (40);
+    shoot ("16-synthe-drive-bande.png");
+    set (snd::fModel, 2.0f);
+    set (snd::fType, 2.0f);
+    view->showBank (0);
+    run (40);
+    shoot ("17-synthe-filtre-ms20.png");
+    te::setTheme (te::Theme::clair);
+    ed->sendLookAndFeelChange();
+    run (20);
+    shoot ("18-clair-filtre.png");
+    view->showPage (5);
+    run (20);
+    shoot ("19-clair-fx.png");
+    te::setTheme (te::Theme::noirEtOr);
+    ed->sendLookAndFeelChange();
+    set (snd::fModel, 1.0f);
+    set (snd::fType, 0.0f);
+    set (snd::dModel, 0.0f);
+    // every picto, on the screen and on a key
+    {
+        struct Sheet : juce::Component
+        {
+            void paint (juce::Graphics& g) override
+            {
+                using te::Picto;
+                const std::pair<Picto, const char*> all[] = {
+                    { Picto::sine, "synthé" }, { Picto::drum, "drum" }, { Picto::cassette, "sampler" }, { Picto::cycles, "osc a" },
+                    { Picto::saw, "osc b" }, { Picto::voices, "voix" }, { Picto::filterBox, "filtre" }, { Picto::envelope, "ampli" },
+                    { Picto::chain, "fx" }, { Picto::cable, "mods" }, { Picto::sliders, "réglages" }, { Picto::playhead, "lecture" },
+                    { Picto::loop, "boucle" }, { Picto::fork, "hauteur" }, { Picto::lowpass, "passe-bas" }, { Picto::bandpass, "passe-bande" },
+                    { Picto::highpass, "passe-haut" }, { Picto::notch, "réjecteur" }, { Picto::off, "aucun" }, { Picto::ladder, "moog" },
+                    { Picto::ms20, "ms-20" }, { Picto::sem, "sem" }, { Picto::oscar, "oscar" }, { Picto::wasp, "wasp" },
+                    { Picto::polivoks, "polivoks" }, { Picto::tube, "préampli" }, { Picto::console, "console" }, { Picto::reels, "bande" },
+                    { Picto::spectrum, "spectre" }, { Picto::shift, "pitch" }, { Picto::chorus, "chorus" }, { Picto::crush, "crush" },
+                    { Picto::space, "espace" }, { Picto::steps, "pas" }, { Picto::random, "hasard" }, { Picto::follower, "suiveur" },
+                    { Picto::jack, "source" }, { Picto::keys, "notes" }, { Picto::clock, "durées" }, { Picto::onset, "attaque" },
+                    { Picto::vuMeter, "niveau" }, { Picto::resample, "rééchantillonner" }, { Picto::record, "capture" } };
+                g.fillAll (te::col::body);
+                te::screen (g, getLocalBounds().toFloat().reduced (16.0f));
+                const int cols = 9;
+                const float cw = (getWidth() - 64.0f) / (float) cols, ch = 118.0f;
+                int i = 0;
+                for (auto& [p, name] : all)
+                {
+                    const float x = 32.0f + (float) (i % cols) * cw, y = 32.0f + (float) (i / cols) * ch;
+                    te::picto (g, p, { x + cw * 0.5f - 30.0f, y + 6.0f, 60.0f, 60.0f }, te::col::sBlue, 1.8f);
+                    te::picto (g, p, { x + cw * 0.5f - 9.0f, y + 74.0f, 18.0f, 18.0f }, te::col::screenText, 1.4f);
+                    te::text (g, juce::String::fromUTF8 (name), { x, y + 94.0f, cw, 16.0f }, te::mono (10.0f), te::col::screenDim, juce::Justification::centred);
+                    ++i;
+                }
+            }
+        } sheet;
+        sheet.setSize (1360, 640);
+        save (sheet, dir.getChildFile ("20-pictos.png"));
+    }
+    for (int n : { 48, 55, 63 })
+        proc.audition (n, 0, false);
+    run (40);
+
+    // the capture: the plan, then a session going
+    view->showCapture (true);
+    view->showPage (1);
+    run (10);
+    shoot ("9-capture-plan.png");
     juce::String why;
     if (! proc.startSampling (why))
     {
         std::printf ("can't start: %s\n", why.toRawUTF8());
         return 1;
     }
-    juce::AudioBuffer<float> buf (2, 256);
-    juce::MidiBuffer midi;
     int blocks = 0;
     bool midShot = false;
     while (proc.isSampling() && blocks < 200000)
@@ -68,12 +188,12 @@ int main (int argc, char** argv)
             pump (2);
         if (! midShot && proc.status().done >= 13)
         {
+            view->refreshNow();
             pump (100);
-            save (*ed, dir.getChildFile ("1-sampling.png"));
+            shoot ("10-capture-en-cours.png");
             midShot = true;
         }
     }
-    // the worker assembles and renders
     for (int i = 0; i < 600; ++i)
     {
         pump (100);
@@ -81,95 +201,30 @@ int main (int argc, char** argv)
         if (ins != nullptr && ! ins->keys.empty() && ! proc.status().busy)
             break;
     }
-    // play a chord so the map and the keyboard light up
-    for (int n : { 48, 55, 63 })
-        proc.audition (n, 100, true);
-    for (int b = 0; b < 60; ++b)
-    {
-        buf.clear();
-        midi.clear();
-        proc.processBlock (buf, midi);
-    }
-    pump (200);
-    save (*ed, dir.getChildFile ("2-instrument.png"));
+    view->refreshNow();     // the capture over: the sampler plays it
 
-    // the other pages
-    std::function<void (juce::Component&)> clickPage = [&] (juce::Component& c)
+    // the sampler, its pages
+    set (snd::loopXfade, 0.4f);
+    set (snd::loopStart, 0.2f);
+    for (int n : { 48, 55 })
+        proc.audition (n, 100, true);
+    const char* samplerShots[] = { "11-sampler-lecture.png", "12-sampler-boucle.png", "13-sampler-hauteur.png", "14-sampler-filtre.png" };
+    for (int pg = 0; pg < 4; ++pg)
     {
-        for (auto* child : c.getChildren())
-        {
-            if (auto* b = dynamic_cast<juce::TextButton*> (child))
-                if (b->getButtonText() == juce::String (std::getenv ("RK_PAGE_NAME") ? std::getenv ("RK_PAGE_NAME") : ""))
-                {
-                    b->triggerClick();
-                    return;
-                }
-            clickPage (*child);
-        }
-    };
-    for (auto [name, file] : { std::pair<const char*, const char*> { "TRAITEMENT", "3-traitement.png" }, { "TRANSPOSITION", "4-transposition.png" } })
-    {
-        setenv ("RK_PAGE_NAME", name, 1);
-        clickPage (*ed);
-        pump (200);
-        save (*ed, dir.getChildFile (file));
+        view->showPage (pg);
+        run (60);
+        shoot (samplerShots[pg]);
     }
-    // the player's pages, with a sound that shows something on each
-    MainView* view = nullptr;
-    std::function<void (juce::Component&)> find = [&] (juce::Component& c)
-    {
-        for (auto* child : c.getChildren())
-        {
-            if (auto* v = dynamic_cast<MainView*> (child)) { view = v; return; }
-            find (*child);
-        }
-    };
-    find (*ed);
-    auto set = [&] (int id, float v)
-    {
-        auto* param = proc.params.getParameter (snd::def (id).id);
-        param->setValueNotifyingHost (param->convertTo0to1 (v));
-    };
-    set (snd::fModel, 2.0f);
-    set (snd::cutoff, 1400.0f);
-    set (snd::reso, 0.55f);
-    set (snd::fEnv, 0.4f);
-    set (snd::fm, 0.2f);
-    set (snd::dModel, 3.0f);
-    set (snd::dAmt, 0.45f);
-    set (snd::spOn, 1.0f);
-    set (snd::rvOn, 1.0f);
-    set (snd::playMode, 1.0f);
-    set (snd::speed, 0.4f);
-    set (snd::m2Type, 1.0f);
-    proc.player.setRoute (0, snd::cutoff, 0.35f);
-    proc.player.setRoute (1, snd::cutoff, -0.2f);
-    proc.player.setRoute (1, snd::pmIndex, 0.6f);
-    proc.player.setRoute (2, snd::spMix, 0.5f);
+    // a mod armed: the encoders show its routes
+    proc.player.setRoute (1, snd::cutoff, -0.3f);
     proc.player.setSceneLock (0, snd::cutoff, 300.0f);
     proc.player.setSceneLock (1, snd::cutoff, 6000.0f);
-    proc.player.setSceneLock (1, snd::rvMix, 0.7f);
     set (snd::xfade, 0.35f);
-    if (view != nullptr)
-    {
-        const char* names[] = { "5-son.png", "6-lecture.png", "7-filtre.png", "8-spectre.png", "9-espace.png", "10-mods.png", "11-scenes.png" };
-        for (int pg = 0; pg < 7; ++pg)
-        {
-            view->showPage (1, pg);
-            for (int b = 0; b < 120; ++b)
-            {
-                buf.clear();
-                midi.clear();
-                proc.processBlock (buf, midi);
-                if (b % 8 == 0)
-                    pump (34);
-            }
-            pump (200);
-            save (*ed, dir.getChildFile (names[pg]));
-        }
-        view->showPage (0, 0);
-    }
-    for (int n : { 48, 55, 63 })
+    set (snd::wtf, 0.3f);
+    view->showPage (3);
+    run (60);
+    shoot ("15-sampler-filtre-wtf.png");
+    for (int n : { 48, 55 })
         proc.audition (n, 0, false);
 
     // the project keeps the sound: settings, routes, steps, scenes
@@ -180,10 +235,10 @@ int main (int argc, char** argv)
         ReplikantProcessor other;
         other.setStateInformation (state.getData(), (int) state.getSize());
         const bool same = std::abs (other.player.get (snd::cutoff) - proc.player.get (snd::cutoff)) < 0.01f
-                       && std::abs (other.player.routeAmount (1, snd::pmIndex) - 0.6f) < 1.0e-4f
-                       && std::abs (other.player.sceneLock (1, snd::rvMix) - 0.7f) < 1.0e-4f
+                       && std::abs (other.player.routeAmount (1, snd::cutoff) + 0.3f) < 1.0e-4f
+                       && std::abs (other.player.sceneLock (1, snd::cutoff) - 6000.0f) < 1.0f
                        && std::abs (other.player.steps[1][3].load() + 0.75f) < 1.0e-4f
-                       && (int) other.player.get (snd::fModel) == 2;
+                       && (int) other.player.get (snd::engine) == (int) proc.player.get (snd::engine);
         std::printf ("state round trip: %s\n", same ? "same" : "DIFFERENT");
     }
     ed.reset();

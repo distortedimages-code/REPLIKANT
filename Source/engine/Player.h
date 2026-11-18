@@ -20,6 +20,7 @@
 #include "../dsp/Drive.h"
 #include "../dsp/Effects.h"
 #include "../dsp/Modulators.h"
+#include "../dsp/Cycles.h"
 
 #include <array>
 #include <atomic>
@@ -67,6 +68,13 @@ public:
     float sceneLock (int scene, int id) const;
     bool sceneHolds (int scene) const;
     void clearScene (int scene);
+
+    //========================================================================== the chain's order
+    // the six stages (0 drive, 1 SPECTRE, 2 PITCH, 3 CHORUS, 4 CRUSH, 5 ESPACE) in the order they run; a new order
+    // is taken through a 10 ms dip of the chain's output (no click)
+    static constexpr int numStages = 6;
+    void setFxOrder (const std::array<int, numStages>&);      // ignored unless a permutation
+    std::array<int, numStages> fxOrder() const;
 
     // message thread: the route of mod m to `dest` set to `amount` (made if needed, removed at 0); false when the
     // mod has no room left
@@ -163,6 +171,12 @@ private:
         bool fresh = true;
         float cutFrom = 0.0f, envFrom = 0.0f;
         double stepFrom = 1.0;
+        // SYNTHÉ: the oscillators' phases (each unison voice its own), the sub's; where the last chunk left their
+        // increments and positions
+        bool synth = false;
+        std::array<double, 4> phA {}, phB {};
+        double phSub = 0.0, incAFrom = 0.0, incBFrom = 0.0;
+        float posAFrom = 0.0f, posBFrom = 0.0f, pmFrom = 0.0f;
         uint64_t age = 0;
         int originalLength = 0;
     };
@@ -172,6 +186,8 @@ private:
     void noteOff (int note, const Chunk&);
     void startVoice (int note, int velocity, float fromPitch, const Chunk&);
     void renderVoice (Voice&, float* L, float* R, int n, const Chunk&);
+    void renderSynth (Voice&, float* L, float* R, int n, const Chunk&);
+    const dsp::CycleBank& bankFor (int choice) const;
     void readFrame (const Read&, double pos, float& left, float& right) const;
     double alignGrain (const Voice&, const Read&, double target, double search) const;
     void prepareRead (Voice&, const Chunk&, Read&) const;
@@ -184,6 +200,7 @@ private:
     static constexpr int maxVoices = 12;   // 8 playing, and room for those fading out
     std::array<Voice, maxVoices> voices;
     const Instrument* ins = nullptr;
+    std::shared_ptr<const dsp::CycleBank> basics = dsp::CycleBank::basics();
     double sr = 48000.0;
     int quality = 0;                     // the voices' oversampling factor now
     double bend = 0.0;                   // -1..1
@@ -204,6 +221,12 @@ private:
     std::array<bool, snd::count> gliding {};
     bool glidePrimed = false;
     float inCutFrom = -1.0f;             // the input filter's cutoff (FX mode), ramped like the voices'
+    // WTF?!: what it pulls each setting by (drawn every eighth note, glided to), the draw's step
+    static constexpr int wtfCount = 10;
+    std::array<float, wtfCount> wtfTarget {}, wtfNow {};
+    int64_t wtfStep = -1;
+    uint32_t wtfRng = 0x7f4a7c15u;
+    void applyWtf (double ppq, int n, Chunk&);
 
     // modulators
     std::array<dsp::Modulator, snd::numMods> mods;
@@ -224,6 +247,10 @@ private:
     dsp::Crush crush;
     dsp::Space space;
     float wet[6] {};                     // drive and the five effects, faded in and out
+    static constexpr int defaultOrder = 0 + 1 * 6 + 2 * 36 + 3 * 216 + 4 * 1296 + 5 * 7776;   // stage at position p: digit p (base 6)
+    std::atomic<int> orderWanted { defaultOrder };
+    int orderNow = defaultOrder, orderPhase = 0;    // 1: fading out to change, 2: fading back in
+    float orderGain = 1.0f;
     int lastDriveModel = 1;
     float volumeGain = 1.0f;
     juce::AudioBuffer<float> bus, dry;

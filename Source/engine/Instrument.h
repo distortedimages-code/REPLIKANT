@@ -12,6 +12,7 @@
 #include "../core/Plan.h"
 #include "../core/Analysis.h"
 
+#include "../dsp/Cycles.h"
 #include <array>
 #include <memory>
 
@@ -29,6 +30,7 @@ struct Instrument
     std::vector<std::array<rk::Channels, 3>> octaves;
     rk::NoiseFloor noise;
     juce::var sound;                          // the player's sound kept with it (settings, routes, scenes), if any
+    std::shared_ptr<const dsp::CycleBank> cycles;   // its cycles (CAPTURE CYCLES), for the SYNTHÉ's oscillators
 
     // what plays for a key and velocity: the sample (or its rendered key) and the shift still to apply live
     struct Source

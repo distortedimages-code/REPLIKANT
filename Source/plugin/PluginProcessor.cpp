@@ -34,6 +34,8 @@ namespace
     // the settings that were there in 0.1 keep their version
     int idVersion (int id)
     {
+        if (id >= snd::engine)
+            return 3;      // (0.3)
         return id == snd::volume || id == snd::attack || id == snd::release || id == snd::velocity || id == snd::bend ? 1 : 2;
     }
 }
@@ -714,6 +716,7 @@ void ReplikantProcessor::getStateInformation (juce::MemoryBlock& dest)
         xml.addChildElement (st.release());
     xml.setAttribute ("routes", juce::JSON::toString (modsToVar(), true));
     xml.setAttribute ("scenes", juce::JSON::toString (scenesToVar(), true));
+    xml.setAttribute ("fxOrder", juce::JSON::toString (fxOrderToVar(), true));
     copyXmlToBinary (xml, dest);
 }
 
@@ -731,11 +734,18 @@ void ReplikantProcessor::setStateInformation (const void* data, int size)
     options.monitor = juce::jlimit (0, 2, xml->getIntAttribute ("monitor", options.monitor));
     options.thru = xml->getBoolAttribute ("thru", options.thru);
     if (auto* st = xml->getChildByName (params.state.getType()))
+    {
         params.replaceState (juce::ValueTree::fromXml (*st));
+        // a project from before 0.3 played its instrument: the SAMPLER (the SYNTHÉ is what a new one starts on)
+        if (st->getChildByAttribute ("id", snd::def (snd::engine).id) == nullptr && xml->hasAttribute ("instrument"))
+            if (auto* e = params.getParameter (snd::def (snd::engine).id))
+                e->setValueNotifyingHost (e->convertTo0to1 ((float) snd::sampler));
+    }
     // the routes, steps and loops of the modulators (not parameters)
     if (xml->hasAttribute ("routes"))
         modsFromVar (juce::JSON::parse (xml->getStringAttribute ("routes")));
     scenesFromVar (juce::JSON::parse (xml->getStringAttribute ("scenes")));
+    fxOrderFromVar (juce::JSON::parse (xml->getStringAttribute ("fxOrder")));
     settingsChanged();
     const juce::File f (xml->getStringAttribute ("instrument"));
     if (xml->hasAttribute ("instrument"))
@@ -830,7 +840,30 @@ juce::var ReplikantProcessor::soundToVar() const
     o->setProperty ("params", juce::var (p));
     o->setProperty ("mods", modsToVar());
     o->setProperty ("scenes", scenesToVar());
+    o->setProperty ("fxOrder", fxOrderToVar());
     return juce::var (o);
+}
+
+// the chain's order, by the stages' names (an unknown or missing order: the usual one)
+juce::var ReplikantProcessor::fxOrderToVar() const
+{
+    static const char* names[Player::numStages] = { "drive", "spectre", "pitch", "chorus", "crush", "espace" };
+    juce::Array<juce::var> a;
+    for (int st : player.fxOrder())
+        a.add (juce::String (names[st]));
+    return a;
+}
+
+void ReplikantProcessor::fxOrderFromVar (const juce::var& v)
+{
+    static const char* names[Player::numStages] = { "drive", "spectre", "pitch", "chorus", "crush", "espace" };
+    std::array<int, Player::numStages> order { 0, 1, 2, 3, 4, 5 };
+    if (v.isArray() && v.size() == Player::numStages)
+        for (int p = 0; p < Player::numStages; ++p)
+            for (int st = 0; st < Player::numStages; ++st)
+                if (v[p].toString() == names[st])
+                    order[(size_t) p] = st;
+    player.setFxOrder (order);      // (not a permutation: ignored, the order stays)
 }
 
 void ReplikantProcessor::soundFromVar (const juce::var& v)
@@ -846,11 +879,14 @@ void ReplikantProcessor::soundFromVar (const juce::var& v)
             auto* param = params.getParameter (d.id);
             if (param == nullptr)
                 continue;
-            const float value = p->hasProperty (d.id) ? (float) (double) p->getProperty (d.id) : d.def;
+            // (a sound kept before 0.3 had no engine: it was the sampler's)
+            const float missing = i == snd::engine ? (float) snd::sampler : d.def;
+            const float value = p->hasProperty (d.id) ? (float) (double) p->getProperty (d.id) : missing;
             param->setValueNotifyingHost (param->convertTo0to1 (snd::legal (i, value)));
         }
     modsFromVar (v["mods"]);
     scenesFromVar (v["scenes"]);
+    fxOrderFromVar (v["fxOrder"]);
     sendChangeMessage();
 }
 
@@ -891,7 +927,9 @@ void ReplikantProcessor::scenesFromVar (const juce::var& v)
 void ReplikantProcessor::resetSound()
 {
     auto* o = new juce::DynamicObject();
-    o->setProperty ("params", juce::var (new juce::DynamicObject()));
+    auto* params0 = new juce::DynamicObject();
+    params0->setProperty (snd::def (snd::engine).id, (double) snd::def (snd::engine).def);    // (a fresh sound: the synth)
+    o->setProperty ("params", juce::var (params0));
     juce::Array<juce::var> mods;
     for (int m = 0; m < snd::numMods; ++m)
         mods.add (juce::var (new juce::DynamicObject()));

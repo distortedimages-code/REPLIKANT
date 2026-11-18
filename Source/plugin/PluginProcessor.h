@@ -123,6 +123,8 @@ private:
     juce::var modsToVar() const;
     void modsFromVar (const juce::var&);
     juce::var scenesToVar() const;
+    juce::var fxOrderToVar() const;
+    void fxOrderFromVar (const juce::var&);
     void scenesFromVar (const juce::var&);
     void saveGlobalSettings();
     static juce::AudioProcessorValueTreeState::ParameterLayout layout();
