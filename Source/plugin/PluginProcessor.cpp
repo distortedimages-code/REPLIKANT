@@ -140,6 +140,10 @@ void ReplikantProcessor::prepareToPlay (double sr, int block)
     toSynth.reset (sr);
     toPlayer.reset (sr);
     synthBuffer.setSize (2, juce::jmax (block, 4096) * 2, false, true, false);
+    silence.setSize (2, juce::jmax (block, 4096) * 2, false, true, false);
+    silence.clear();
+    for (auto& h : sentHeads)
+        h.valid = false;
     playMidi.ensureSize (4096);
     synthMidi.ensureSize (2048);
     outMidi.ensureSize (4096);
@@ -218,6 +222,17 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         for (int c = 0; c < numIn; ++c)
             chans[c] = input.getReadPointer (c);
     }
+    // some hosts hand back, as the input, the buffer just played (in place, nothing written into it since): our
+    // own output again. Heard, it would add to itself block after block (every note forever, a buzz at the
+    // block rate). Spotted by comparison with what went out lately, and taken as silence
+    const bool echoed = src != (int) Source::testSynth && isOwnOutput (input, n);
+    if (echoed)
+    {
+        input.clear();
+        if (src == (int) Source::input)
+            for (int c = 0; c < numIn; ++c)
+                chans[c] = silence.getReadPointer (c);
+    }
     if (numIn > 0 && n <= synthBuffer.getNumSamples())
         recorder.capture (chans, numIn, n);
 
@@ -281,8 +296,48 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     if (! sampling)
         player.render (out, playMidi, transport, kept[0] != nullptr ? kept : nullptr, numIn, mon == 2);
 
+    rememberOutput (out, n);
+
     clock.process (transport.playing, transport.ppq, transport.bpm, n, sampleRate, outMidi);
     midi.swapWith (outMidi);
+}
+
+// the start of the output, kept for the last few blocks (a host may hand back one played a block or two ago)
+void ReplikantProcessor::rememberOutput (const juce::AudioBuffer<float>& out, int n)
+{
+    auto& h = sentHeads[(size_t) sentNext];
+    sentNext = (sentNext + 1) % (int) sentHeads.size();
+    h.n = juce::jmin (n, headLength);
+    h.channels = juce::jmin (2, out.getNumChannels());
+    h.valid = h.n > 0 && h.channels > 0;
+    h.silent = true;
+    for (int c = 0; c < h.channels; ++c)
+        for (int i = 0; i < h.n; ++i)
+        {
+            h.x[c][i] = out.getSample (c, i);
+            h.silent = h.silent && h.x[c][i] == 0.0f;
+        }
+}
+
+bool ReplikantProcessor::isOwnOutput (const juce::AudioBuffer<float>& in, int n) const
+{
+    const int len = juce::jmin (n, headLength);
+    const int chans = juce::jmin (2, in.getNumChannels());
+    if (len <= 0 || chans <= 0)
+        return false;
+    for (const auto& h : sentHeads)
+    {
+        // (the very same numbers: a real input never repeats what went out, sample for sample)
+        if (! h.valid || h.silent || h.n != len || h.channels < chans)
+            continue;
+        bool same = true;
+        for (int c = 0; c < chans && same; ++c)
+            for (int i = 0; i < len && same; ++i)
+                same = in.getSample (c, i) == h.x[c][i];
+        if (same)
+            return true;
+    }
+    return false;
 }
 
 //==============================================================================

@@ -5,6 +5,8 @@
 #include <JuceHeader.h>
 #include "../Source/plugin/PluginProcessor.h"
 
+#include <tuple>
+
 static int failures = 0, checks = 0;
 #define CHECK(cond, ...)                                                                      \
     do {                                                                                      \
@@ -67,6 +69,58 @@ static void playAsAHost (double rate, int block)
     CHECK (repeats == 0, "%d blocks played twice (%.0f Hz / %d)", repeats, rate, block);
 }
 
+// A host that hands the plug-in the same buffer each time without clearing it (in place, nothing on the input):
+// what comes in is what went out the block before. Notes must still end: the sound back to silence after the
+// release, never piling up.
+static void playAsALazyHost (double rate, int block, int lag = 1)
+{
+    ReplikantProcessor proc;
+    proc.setRateAndBufferSizeDetails (rate, block);
+    proc.prepareToPlay (rate, block);
+    const int chans = juce::jmax (proc.getTotalNumInputChannels(), proc.getTotalNumOutputChannels());
+    // (lag 2: two buffers taking turns, so what comes in went out two blocks before)
+    std::vector<juce::AudioBuffer<float>> bufs ((size_t) lag, juce::AudioBuffer<float> (chans, block));
+    for (auto& b : bufs)
+        b.clear();
+    int turn = 0;
+    const int total = (int) (3.0 * rate);
+    float peak = 0.0f, during = 0.0f;
+    double tail = 0.0;
+    int tailFrames = 0;
+    for (int pos = 0; pos < total; pos += block)
+    {
+        juce::MidiBuffer midi;
+        for (auto [at, note, on] : { std::tuple<double, int, bool> { 0.0, 60, true }, { 0.2, 64, true }, { 0.4, 67, true },
+                                     { 0.6, 60, false }, { 0.6, 64, false }, { 0.6, 67, false } })
+        {
+            const int s = (int) (at * rate);
+            if (s >= pos && s < pos + block)
+                midi.addEvent (on ? juce::MidiMessage::noteOn (1, note, (juce::uint8) 100) : juce::MidiMessage::noteOff (1, note), s - pos);
+        }
+        auto& buf = bufs[(size_t) turn];
+        turn = (turn + 1) % lag;
+        proc.processBlock (buf, midi);          // (not cleared: an earlier block's output is this block's input)
+        for (int ch = 0; ch < juce::jmin (2, proc.getTotalNumOutputChannels()); ++ch)
+            for (int i = 0; i < block; ++i)
+            {
+                const float x = buf.getSample (ch, i);
+                peak = std::max (peak, std::isfinite (x) ? std::abs (x) : 1.0e9f);
+                if (pos < (int) (0.6 * rate))
+                    during = std::max (during, std::abs (x));
+                if (pos >= (int) (2.5 * rate))
+                {
+                    tail += (double) x * x;
+                    ++tailFrames;
+                }
+            }
+    }
+    const double tailRms = std::sqrt (tail / juce::jmax (1, tailFrames));
+    std::printf ("  a lazy host at %.0f Hz, blocks of %d (input = output %d block%s before): peak %.2f, after the release %.5f rms\n",
+                 rate, block, lag, lag > 1 ? "s" : "", peak, tailRms);
+    CHECK (during > 0.05f && peak < 1.2f, "lazy host: notes at %.2f, peak %.2f (%.0f Hz / %d)", during, peak, rate, block);
+    CHECK (tailRms < 1.0e-3, "lazy host: the notes end (%.5f rms left, %.0f Hz / %d)", tailRms, rate, block);
+}
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI gui;
@@ -79,7 +133,11 @@ int main()
    #endif
     for (double rate : { 44100.0, 48000.0, 96000.0 })
         for (int block : { 64, 512, 1024 })
+        {
             playAsAHost (rate, block);
+            playAsALazyHost (rate, block);
+        }
+    playAsALazyHost (48000.0, 512, 2);
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

@@ -4,6 +4,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <array>
 #include "../engine/Instrument.h"
 #include "../engine/Recorder.h"
 #include "../engine/Worker.h"
@@ -192,8 +193,16 @@ private:
     std::atomic<bool> thruAudio { false };
     juce::MidiMessageCollector toSynth, toPlayer;   // from the editor
     juce::MidiBuffer playMidi, outMidi, synthMidi;
-    juce::AudioBuffer<float> synthBuffer, inputCopy;
+    juce::AudioBuffer<float> synthBuffer, inputCopy, silence;
     bool wasSampling = false;
+    // the start of what went out over the last blocks: an input that is that again is the host handing our own
+    // output back (see processBlock)
+    static constexpr int headLength = 64;
+    struct Head { float x[2][headLength] {}; int n = 0, channels = 0; bool valid = false, silent = true; };
+    std::array<Head, 4> sentHeads;
+    int sentNext = 0;
+    void rememberOutput (const juce::AudioBuffer<float>&, int n);
+    bool isOwnOutput (const juce::AudioBuffer<float>&, int n) const;
 
     double sampleRate = 48000.0;
     bool clockStartedBySampling = false;
