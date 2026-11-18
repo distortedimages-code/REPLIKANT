@@ -1,4 +1,4 @@
-/* REPLIKANT's site, in the plug-in's own look (0.3, NOIR & OR): a near-black, a black screen, the gold of the keys that
+/* REPLIK8's site, in the plug-in's own look (0.3, NOIR & OR): a near-black, a black screen, the gold of the keys that
    are on, a deep red for what records; fine-line pictos. Fonts: Space Grotesk and IBM Plex Mono (SIL OFL). */
 @font-face { font-family: Grotesk; font-weight: 300; src: url(fonts/SpaceGrotesk-Light.woff2) format('woff2'); font-display: swap; }
 @font-face { font-family: Grotesk; font-weight: 500; src: url(fonts/SpaceGrotesk-Medium.woff2) format('woff2'); font-display: swap; }
@@ -33,7 +33,7 @@ svg.p .f { fill: currentColor; stroke: none; }
   background: rgba(18, 19, 18, .92); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border-bottom: 1px solid var(--line);
 }
 .logo { display: flex; align-items: center; gap: 10px; font: 500 18px var(--sans); letter-spacing: .05em; text-decoration: none; color: var(--cream); margin-right: 10px; white-space: nowrap; }
-.logo svg { width: 34px; height: 18px; }
+.logo svg { width: 86px; height: 25px; display: block; }
 .bar nav { display: flex; gap: 6px; flex: 1; overflow-x: auto; scrollbar-width: none; }
 .bar nav a, .tabs button {
   font: 500 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; text-decoration: none; color: var(--cream);
@@ -53,9 +53,8 @@ main { max-width: 1120px; margin: 0 auto; padding: 0 18px; }
 
 /* the hero ---------------------------------------------------------------------------------------------------------- */
 .hero { padding: 56px 0 10px; text-align: center; }
-.eye { display: block; width: 110px; height: 56px; margin: 0 auto 6px; }
-.title { font: 500 76px/1 var(--sans); letter-spacing: .06em; margin: 10px 0 0; }
-.title i { color: var(--red-hi); }
+.title { margin: 10px 0 0; line-height: 0; }
+.title .badge { width: 400px; max-width: 86vw; height: auto; }
 .tag { font: 500 13px var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--gold-hi); margin: 16px 0 0; }
 .lead { font-size: 23px; line-height: 1.45; max-width: 820px; margin: 22px auto 30px; }
 .get { display: flex; flex-direction: column; align-items: center; gap: 16px; }
@@ -132,7 +131,7 @@ footer .links { font: 500 12px var(--mono); letter-spacing: .1em; text-transform
   body { font-size: 17px; }
   .bar nav { display: none; }
   .bar { justify-content: space-between; }
-  .title { font-size: 48px; }
+  .title .badge { width: 280px; }
   .lead { font-size: 20px; }
   .facts, .daw { grid-template-columns: 1fr; }
   .steps-list li { padding-left: 0; text-indent: 0; }

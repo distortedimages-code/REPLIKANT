@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""REPLIKANT's site (GitHub Pages): site/ as it is, with the version (CMakeLists.txt) and the two Terminal commands of the
+"""REPLIK8's site (GitHub Pages): site/ as it is, with the version (CMakeLists.txt) and the two Terminal commands of the
 disk image (tools/dmg) written in, so that the page and the DMG always say the same thing.
 
   python3 site/build_site.py [out]        (default site/out)"""
