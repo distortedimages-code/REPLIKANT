@@ -1,6 +1,5 @@
-// The look (0.3): keys with a little depth, black screens, encoders with coloured caps, all in lower case, in a mono
-// font (IBM Plex Mono) with Space Grotesk for the name and the big numbers; after Teenage Engineering's machines
-// (none of their drawings, fonts or names). Two themes: NOIR & OR (black, gold, red) and CLAIR (a light grey body).
+// The look (0.3): black, gold and red; a black screen over a warm grey desk, knobs in relief, capitals in Space
+// Grotesk, fine-line pictos.
 
 #pragma once
 
@@ -12,8 +11,7 @@ namespace te
     constexpr int width = 1360, height = 848;
     constexpr float zoomSteps[] = { 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f };
 
-    // the colours by their role, set by the theme (NOIR & OR, after a palette of black, gold and red; CLAIR, the
-    // light grey body)
+    // the colours by their role (black #121312, gold #a67d43, red #ad0013, a cream for what must be read)
     namespace col
     {
         // the body, its keys
@@ -34,16 +32,11 @@ namespace te
         juce::Colour cap (int i);              // the encoders' caps, in turn
         juce::Colour notch (int i);            // the line on each cap
     }
-    enum class Theme { noirEtOr = 0, clair = 1 };
-    void setTheme (Theme);
-    Theme theme();
-
-    // fonts: weight 400 / 500 / 600 (the writing: IBM Plex Mono in CLAIR, Space Grotesk in NOIR & OR),
-    // 300 / 500 / 700 (grotesk: the name, the big numbers)
+    // fonts, Space Grotesk: weight 400 / 500 / 600 (the writing, in capitals), 300 / 500 / 700 (the name, the big numbers)
     juce::Font mono (float size, int weight = 400);
     juce::Font grotesk (float size, int weight = 500);
 
-    // lower case, French accents included; the theme's case (CLAIR in lower case, NOIR & OR in capitals)
+    // lower case, French accents included; the writing's case (capitals)
     juce::String lower (const juce::String&);
     juce::String themed (const juce::String&);
 
@@ -51,7 +44,7 @@ namespace te
     {
     public:
         Look();
-        void applyTheme();                     // the JUCE colours from the theme's
+        void applyColours();                   // the JUCE colours from the palette
         juce::Typeface::Ptr getTypefaceForFont (const juce::Font&) override;
         void drawPopupMenuBackground (juce::Graphics&, int w, int h) override;
         juce::Font getPopupMenuFont() override                          { return mono (14.0f); }

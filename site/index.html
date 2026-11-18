@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>REPLIKANT — l'autosampleur de tes synthés, un synthé à cycles et un sampler</title>
-<meta name="description" content="REPLIKANT capture tes synthés (leurs notes, leurs cycles, ce qui sort de tes effets) et en fait des instruments : un synthé à cycles, un sampler, des filtres analogiques modélisés, un drive, cinq effets dans l'ordre que tu veux, des mods façon IMPAKT et des scènes façon Octatrack. Mac : Audio Unit, VST3 et appli. Gratuit, GPL-3.">
+<title>REPLIKANT — capture tes synthés, joue-les autrement</title>
+<meta name="description" content="REPLIKANT échantillonne tes synthés tout seul, note par note ou cycle par cycle, et en fait un synthé et un sampler à part entière : filtres analogiques, effets, modulations, scènes, rééchantillonnage sans coupure. Pour Mac : AU, VST3 et appli. Gratuit.">
 <meta name="theme-color" content="#121312">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="preload" href="fonts/SpaceGrotesk-Light.woff2" as="font" type="font/woff2" crossorigin>
@@ -34,8 +34,9 @@
   <svg class="eye" viewBox="0 0 44 22" aria-hidden="true"><defs><clipPath id="lid"><path d="M2 11Q22-7 42 11Q22 29 2 11Z"/></clipPath></defs><g clip-path="url(#lid)"><circle cx="22" cy="11" r="6.6" fill="#ad0013"/><circle cx="22" cy="11" r="2.8" fill="#121312"/><circle cx="23.6" cy="8.9" r="1.1" fill="#fff"/></g><path d="M2 11Q22-7 42 11Q22 29 2 11Z" fill="none" stroke="#ece4d4" stroke-width="1.8"/></svg>
   <h1 class="title">REPLIKANT<i>.</i></h1>
   <p class="tag">synthé · sampler · autosampleur</p>
-  <p class="lead">Il capture tes synthés&nbsp;: leurs notes, leurs cycles, ou ce qui sort de tes effets.
-    Puis il en fait des instruments, un <b>synthé à cycles</b> et un <b>sampler</b>, à passer dans des filtres analogiques, des effets, des mods et des scènes.</p>
+  <p class="lead">Il échantillonne tes synthés tout seul, note par note ou cycle par cycle.
+    Puis il les rejoue comme jamais&nbsp;: un <b>synthé</b>, un <b>sampler</b>, des filtres analogiques, des effets, des modulations.
+    Et quand le son te plaît, tu le rééchantillonnes sans rien couper.</p>
   <div class="get">
     <a class="dl" id="dl" href="https://github.com/distortedimages-code/REPLIKANT/releases/latest/download/REPLIKANT-mac.dmg">
       <span class="dot" aria-hidden="true"></span> Télécharger
@@ -48,22 +49,22 @@
   <figure class="screen">
     <img src="img/synthe-1360.webp" srcset="img/synthe-680.webp 680w, img/synthe-1360.webp 1360w"
          sizes="(max-width: 1100px) 100vw, 1084px" width="1360" height="848"
-         alt="REPLIKANT en mode SYNTHÉ : l'écran noir avec la pile de cycles et la courbe du filtre Moog, les pages, les potards, le clavier, les mods et les scènes.">
+         alt="REPLIKANT en mode SYNTHÉ : l'écran noir avec la pile de cycles et la courbe du filtre, les pages, les potards, le clavier, les mods et les scènes.">
   </figure>
 </section>
 
 <section class="mod" id="quoi">
   <h2><span>00 · Ce qu'il fait</span></h2>
   <div class="facts">
-    <div><h3><svg class="p" viewBox="0 0 24 24"><path d="M2 12c2.5-8 7.5-8 10 0s7.5 8 10 0"/></svg>Synthé</h3><p>Deux oscillateurs qui lisent des cycles (64 basiques, ou ceux de ton synthé), un sub, du bruit, l'unisson, la PM de B vers A. Il joue dès l'ouverture.</p></div>
-    <div><h3><svg class="p" viewBox="0 0 24 24"><rect x="1.5" y="5" width="21" height="14" rx="1.6"/><rect x="5.5" y="8" width="13" height="5.5" rx="2.7" opacity=".6"/><circle cx="9" cy="10.8" r="1.4"/><circle cx="15" cy="10.8" r="1.4"/><path d="M7 19l1.3-3h7.4L17 19"/></svg>Sampler</h3><p>Glisse un son sur la fenêtre et joue-le, comme sur l'Assimil8or&nbsp;: lecture élastique, boucle et son fondu, aliasing, bits.</p></div>
-    <div><h3><svg class="p" viewBox="0 0 24 24"><rect x="1.5" y="5" width="21" height="14" rx="1"/><path d="M7.5 5v14M12 5v14M16.5 5v14" opacity=".6"/><rect class="f" x="6.2" y="5" width="2.6" height="8"/><rect class="f" x="10.7" y="5" width="2.6" height="8"/></svg>Capture des notes</h3><p>L'autosampleur&nbsp;: chaque note jouée au synthé en MIDI, enregistrée, bouclée, accordée, et les touches qui manquent calculées.</p></div>
-    <div><h3><svg class="p" viewBox="0 0 24 24"><path d="M5 10c1.6-5 4.8-5 6.4 0s4.8 5 6.4 0" opacity=".35"/><path d="M3.5 12.5c1.6-5 4.8-5 6.4 0s4.8 5 6.4 0" opacity=".65"/><path d="M2 15c1.6-5 4.8-5 6.4 0s4.8 5 6.4 0"/></svg>Capture des cycles</h3><p>Une note tenue pendant qu'un CC, la vélocité ou ta main fait bouger le son&nbsp;: une banque de cycles pour le synthé, et un wavetable.</p></div>
-    <div><h3><svg class="p" viewBox="0 0 24 24"><path d="M14.6 4.6A8 8 0 1 1 6.3 6"/><path class="f" d="M5 3.2l4.4 1.4-3.2 3.4z"/><circle class="f" cx="12" cy="12" r="3"/></svg>Rééchantillonner</h3><p>Ce qui sort des effets, enregistré sur des mesures puis injecté dans le sampler sans coupure, les effets remis à zéro.</p></div>
-    <div><h3><svg class="p" viewBox="0 0 24 24"><rect x="2.5" y="2.5" width="19" height="19" rx="2"/><path d="M7 8c1.7-2.4 3.3 2.4 5 0s3.3 2.4 5 0M7 12c1.7-2.4 3.3 2.4 5 0s3.3 2.4 5 0M7 16c1.7-2.4 3.3 2.4 5 0s3.3 2.4 5 0"/><path d="M9.5 10.4l5-4.8"/></svg>Filtres</h3><p>MOOG, MS-20, SEM, OSCAR, WASP, POLIVOKS, suréchantillonnés, avec leur enveloppe, la réinjection FM et un drive.</p></div>
-    <div><h3><svg class="p" viewBox="0 0 24 24"><rect x="1" y="8.5" width="6" height="7" rx="1.2"/><rect class="f" x="9" y="8.5" width="6" height="7" rx="1.2"/><rect x="17" y="8.5" width="6" height="7" rx="1.2"/><path d="M7 12h2M15 12h2"/></svg>Effets</h3><p>Spectre, pitch, chorus, crush, espace, dans l'ordre que tu veux&nbsp;: tu glisses les blocs, le son ne claque pas.</p></div>
-    <div><h3><svg class="p" viewBox="0 0 24 24"><circle cx="5" cy="6" r="2.8"/><circle cx="19" cy="6" r="2.8"/><circle class="f" cx="5" cy="6" r=".9"/><circle class="f" cx="19" cy="6" r=".9"/><path d="M5 8.8c0 15 14 15 14 0"/></svg>Mods et scènes</h3><p>Quatre mods façon IMPAKT, seize scènes et un fader façon Octatrack, WTF?! qui bouscule tout au tempo.</p></div>
-    <div><h3><svg class="p" viewBox="0 0 24 24"><rect x="4" y="9" width="16" height="12" rx="1.6"/><path d="M12 15V2M8 6l4-4 4 4"/></svg>Partage</h3><p>Un pack zip (l'instrument, ses samples, ses cycles et son son) à glisser vers un pote, qui le glisse sur sa fenêtre.</p></div>
+    <div><h3><svg class="p" viewBox="0 0 24 24"><path d="M2 12c2.5-8 7.5-8 10 0s7.5 8 10 0"/></svg>Synthé</h3><p>Deux oscillateurs à cycles, nets jusqu'en haut du clavier. Sub, bruit, unisson, modulation de phase. Tu l'ouvres, il joue.</p></div>
+    <div><h3><svg class="p" viewBox="0 0 24 24"><rect x="1.5" y="5" width="21" height="14" rx="1.6"/><rect x="5.5" y="8" width="13" height="5.5" rx="2.7" opacity=".6"/><circle cx="9" cy="10.8" r="1.4"/><circle cx="15" cy="10.8" r="1.4"/><path d="M7 19l1.3-3h7.4L17 19"/></svg>Sampler</h3><p>Glisse un son sur la fenêtre&nbsp;: il est jouable sur tout le clavier. Étire-le, fige-le, boucle-le, abîme-le.</p></div>
+    <div><h3><svg class="p" viewBox="0 0 24 24"><rect x="1.5" y="5" width="21" height="14" rx="1"/><path d="M7.5 5v14M12 5v14M16.5 5v14" opacity=".6"/><rect class="f" x="6.2" y="5" width="2.6" height="8"/><rect class="f" x="10.7" y="5" width="2.6" height="8"/></svg>Capture des notes</h3><p>Ton synthé échantillonné tout seul&nbsp;: chaque note, chaque vélocité, bouclée et accordée. Toi, tu vas te faire un café.</p></div>
+    <div><h3><svg class="p" viewBox="0 0 24 24"><path d="M5 10c1.6-5 4.8-5 6.4 0s4.8 5 6.4 0" opacity=".35"/><path d="M3.5 12.5c1.6-5 4.8-5 6.4 0s4.8 5 6.4 0" opacity=".65"/><path d="M2 15c1.6-5 4.8-5 6.4 0s4.8 5 6.4 0"/></svg>Capture des cycles</h3><p>Balaie un bouton de ton synthé&nbsp;: chaque position devient un cycle. Une banque d'ondes faite de ton propre son.</p></div>
+    <div><h3><svg class="p" viewBox="0 0 24 24"><path d="M14.6 4.6A8 8 0 1 1 6.3 6"/><path class="f" d="M5 3.2l4.4 1.4-3.2 3.4z"/><circle class="f" cx="12" cy="12" r="3"/></svg>Rééchantillonner</h3><p>Enregistre ce qui sort des effets et rejoue-le aussitôt, sans la moindre coupure. Puis repasse-le dans la machine.</p></div>
+    <div><h3><svg class="p" viewBox="0 0 24 24"><rect x="2.5" y="2.5" width="19" height="19" rx="2"/><path d="M7 8c1.7-2.4 3.3 2.4 5 0s3.3 2.4 5 0M7 12c1.7-2.4 3.3 2.4 5 0s3.3 2.4 5 0M7 16c1.7-2.4 3.3 2.4 5 0s3.3 2.4 5 0"/><path d="M9.5 10.4l5-4.8"/></svg>Filtres</h3><p>Six filtres analogiques modélisés au plus près du circuit, suréchantillonnés, avec drive et réinjection FM.</p></div>
+    <div><h3><svg class="p" viewBox="0 0 24 24"><rect x="1" y="8.5" width="6" height="7" rx="1.2"/><rect class="f" x="9" y="8.5" width="6" height="7" rx="1.2"/><rect x="17" y="8.5" width="6" height="7" rx="1.2"/><path d="M7 12h2M15 12h2"/></svg>Effets</h3><p>Spectre, pitch, chorus, crush, espace. Change leur ordre en les glissant, en plein jeu, sans un clic.</p></div>
+    <div><h3><svg class="p" viewBox="0 0 24 24"><circle cx="5" cy="6" r="2.8"/><circle cx="19" cy="6" r="2.8"/><circle class="f" cx="5" cy="6" r=".9"/><circle class="f" cx="19" cy="6" r=".9"/><path d="M5 8.8c0 15 14 15 14 0"/></svg>Mods et scènes</h3><p>Quatre modulateurs calés sur le tempo, seize scènes et un fader pour glisser de l'une à l'autre. Et WTF?! pour tout faire basculer.</p></div>
+    <div><h3><svg class="p" viewBox="0 0 24 24"><rect x="4" y="9" width="16" height="12" rx="1.6"/><path d="M12 15V2M8 6l4-4 4 4"/></svg>Partage</h3><p>Un instrument complet dans un seul fichier. Tu l'envoies, ton pote le glisse dans REPLIKANT, c'est joué.</p></div>
   </div>
 </section>
 
@@ -102,50 +103,50 @@
 <!-- 02 BRANCHER ============================================================= -->
 <section class="mod" id="brancher">
   <h2><span>02 · Brancher</span><svg class="p" viewBox="0 0 24 24"><path d="M1 12h3"/><rect x="4" y="8.6" width="7" height="6.8" rx="1.4"/><path d="M11 10.3h6.5M11 13.7h6.5M17.5 10.3c3 0 3.5 1.7 4 1.7-.5 0-1 1.7-4 1.7"/></svg></h2>
-  <p class="intro">Pour capturer, deux câbles&nbsp;: le <b>MIDI</b> de l'ordinateur vers le synthé, et la <b>sortie audio</b> du synthé dans ta carte son. REPLIKANT envoie les notes directement au port MIDI choisi, quel que soit le DAW. Pour jouer le synthé ou un son glissé, rien à brancher.</p>
+  <p class="intro">Pour jouer, rien à brancher. Pour capturer, deux câbles&nbsp;: le <b>MIDI</b> vers ton synthé, sa <b>sortie audio</b> vers ta carte son. REPLIKANT pilote le synthé lui-même, quel que soit ton DAW.</p>
   <div class="daw">
     <div><h3>L'appli (le plus simple)</h3><ol>
-      <li><b>Fichier › Réglages audio et MIDI</b>&nbsp;: ta carte, et les entrées où arrive le synthé.</li>
-      <li><b>Capture › Source</b>&nbsp;: Son = <b>entrée</b>, Sortie MIDI = le port du synthé, son canal.</li>
-      <li><b>Tester une note</b>&nbsp;: tu dois entendre un C3 et voir le niveau d'entrée bouger.</li></ol></div>
+      <li><b>Fichier › Réglages audio et MIDI</b>&nbsp;: ta carte son et l'entrée du synthé.</li>
+      <li><b>Capture › Source</b>&nbsp;: Son = <b>entrée</b>, Sortie MIDI = le port du synthé.</li>
+      <li><b>Tester une note</b>&nbsp;: tu entends un C3, le niveau d'entrée bouge. C'est prêt.</li></ol></div>
     <div><h3>Logic</h3><ol>
-      <li>Une piste d'instrument, slot d'instrument › <i>Effets contrôlés par MIDI</i> › REPLIKANT&nbsp;: le synthé et le sampler se jouent au clavier.</li>
-      <li>Pour capturer&nbsp;: REPLIKANT en effet audio sur une piste qui reçoit le synthé (monitoring d'entrée allumé), Sortie MIDI = le port du synthé, puis <b>Lancer la capture</b>.</li></ol></div>
+      <li>Pour jouer&nbsp;: une piste d'instrument, slot d'instrument › <i>Effets contrôlés par MIDI</i> › REPLIKANT.</li>
+      <li>Pour capturer&nbsp;: REPLIKANT en effet audio sur la piste qui reçoit le synthé, monitoring d'entrée allumé, puis <b>Lancer la capture</b>.</li></ol></div>
     <div><h3>Bitwig, Reaper, Cubase</h3><ol>
-      <li>REPLIKANT sur une piste&nbsp;: il joue avec les notes de la piste, et enregistre l'audio qui y arrive.</li>
-      <li>Sortie MIDI = le port du synthé (ou <b>DAW</b> si tu routes la sortie MIDI du plug-in vers le synthé).</li></ol></div>
+      <li>REPLIKANT sur une piste&nbsp;: il joue les notes de la piste et enregistre l'audio qui y arrive.</li>
+      <li>Sortie MIDI = le port du synthé, ou <b>DAW</b> si tu routes la sortie MIDI du plug-in.</li></ol></div>
     <div><h3>Ableton Live</h3><ol>
       <li>REPLIKANT sur une piste audio (entrée = le synthé, Monitor <i>In</i>)&nbsp;: il capture et sert de multi-effet.</li>
-      <li>Live n'envoie pas de notes aux effets audio&nbsp;: pour jouer, l'appli, ou l'export en dossier de WAV dans Sampler.</li></ol></div>
+      <li>Pour jouer les instruments&nbsp;: l'appli, ou l'export en dossier de WAV.</li></ol></div>
   </div>
-  <p class="cap" style="margin:14px 24px 0">Pas de synthé sous la main&nbsp;? Source › <b>synthé test</b>&nbsp;: un petit analogique intégré (son filtre suit le CC 74), pour tout essayer. Pour transposer très bas, mets la carte son à <b>96 kHz</b>.</p>
+  <p class="cap" style="margin:14px 24px 0">Pas de synthé sous la main&nbsp;? Choisis le <b>synthé test</b> intégré comme source et essaie tout. Astuce&nbsp;: à <b>96&nbsp;kHz</b>, les transpositions très graves restent nettes.</p>
 </section>
 
 <!-- 03 CAPTURER ============================================================= -->
 <section class="mod" id="capturer">
   <h2><span>03 · Capturer</span><svg class="p" viewBox="0 0 24 24"><rect x="1.5" y="5" width="21" height="14" rx="1"/><path d="M7.5 5v14M12 5v14M16.5 5v14" opacity=".6"/><rect class="f" x="6.2" y="5" width="2.6" height="8"/><rect class="f" x="10.7" y="5" width="2.6" height="8"/></svg></h2>
-  <p class="intro">Bouton <b>Capture</b> en haut, puis ce que tu captures&nbsp;: <b>notes</b>, <b>cycles</b> ou <b>rééchantillonner</b>. Chacun a ses réglages.</p>
+  <p class="intro">Appuie sur <b>Capture</b> et choisis ce que tu veux prendre à ton synthé. REPLIKANT s'occupe du reste.</p>
   <ol class="steps-list">
-    <li><kbd>NOTES</kbd><b>Un multisample</b>&nbsp;: la plage de notes (tous les N demi-tons, N notes, ou à la main), jusqu'à 16 vélocités et 8 prises, la tenue, la relâche, la pause. <small>REPLIKANT mesure le bruit de fond, joue les notes une à une, coupe chaque attaque, trouve la boucle, mesure la justesse (même avec un sub ou des oscillateurs désaccordés), puis calcule les touches entre les notes sans que le timbre bouge. À la fin, le SAMPLER joue l'instrument.</small></li>
-    <li><kbd>CYC</kbd><b>Des cycles</b>&nbsp;: une note grave tenue 8, 16, 32 ou 64 fois, pendant qu'un <b>CC</b> balaie un bouton du synthé (le filtre, une forme d'onde…), que la <b>vélocité</b> monte, ou que <b>tu tournes</b> un bouton à la main. Un cycle est pris dans chaque prise, une fois l'attaque passée. <small>La banque va dans l'osc A du SYNTHÉ (CAPTURÉS)&nbsp;: tourne POSITION pour la parcourir. Elle est gardée avec l'instrument, et en wavetable de 2048 points à côté (Serum, Vital, Bitwig la lisent).</small></li>
-    <li><kbd>RÉÉ</kbd><b>Rééchantillonner</b>&nbsp;: ce qui sort des effets est enregistré, sur 1, 2, 4 ou 8 mesures (à la mesure suivante quand le transport joue) ou en libre. À la fin, l'enregistrement prend le relais en boucle, sans trou, et devient un instrument du SAMPLER, les effets remis à zéro pour ne pas traiter le son deux fois. <small>Joue une note pour reprendre la main, puis modifie-le, transpose-le, repasse-le dans les effets. Avec <b>entrée&nbsp;: par les effets</b>, c'est une piste de ton DAW que tu captures ainsi.</small></li>
+    <li><kbd>NOTES</kbd><b>Un multisample, sans y passer la nuit.</b> Choisis la plage, jusqu'à 16 vélocités et 8 prises par note. REPLIKANT joue chaque note, coupe les attaques au bon endroit, trouve les boucles, vérifie la justesse et calcule les touches manquantes. <small>À la fin, ton instrument t'attend dans le sampler.</small></li>
+    <li><kbd>CYC</kbd><b>Ta propre banque d'ondes.</b> Une note grave tenue 8 à 64 fois, pendant qu'un CC balaie un bouton du synthé, que la vélocité monte ou que tu tournes toi-même un potard. Chaque prise donne un cycle. <small>La banque part directement dans le synthé&nbsp;: tourne POSITION pour la parcourir. Elle est aussi exportée en wavetable standard de 2048 points.</small></li>
+    <li><kbd>RÉÉ</kbd><b>Le son de tes effets, figé en instrument.</b> Enregistre 1, 2, 4 ou 8 mesures calées sur le tempo, ou en libre. À la fin, la boucle prend le relais sans un trou, les effets se remettent à zéro et le son devient un instrument du sampler. <small>Joue une note et tu reprends la main&nbsp;: transpose-le, boucle-le, repasse-le dans les effets. En insert, ça marche avec n'importe quelle piste de ton DAW.</small></li>
   </ol>
   <figure class="shot"><img src="img/capture-1360.webp" srcset="img/capture-680.webp 680w, img/capture-1360.webp 1360w" sizes="(max-width: 1100px) 100vw, 1070px" width="1360" height="848" loading="lazy" alt="Une capture de notes en cours sur le synthé test."></figure>
-  <p class="cap">Une capture de notes en cours&nbsp;: la prise, ce qu'il reste, la forme d'onde qui arrive.</p>
+  <p class="cap">Une capture de notes en cours.</p>
   <figure class="shot"><img src="img/reechantillonner-1360.webp" srcset="img/reechantillonner-680.webp 680w, img/reechantillonner-1360.webp 1360w" sizes="(max-width: 1100px) 100vw, 1070px" width="1360" height="848" loading="lazy" alt="Rééchantillonner : une mesure en train de s'enregistrer."></figure>
-  <p class="cap">Rééchantillonner&nbsp;: les mesures se remplissent, puis la boucle est injectée dans le sampler.</p>
+  <p class="cap">Les mesures se remplissent, puis la boucle prend le relais.</p>
 </section>
 
 <!-- 04 TRANSPOSER =========================================================== -->
 <section class="mod" id="transposer">
   <h2><span>04 · Transposer</span><svg class="p" viewBox="0 0 24 24"><path d="M9 2v9c0 4 6 4 6 0V2M12 14.5V22"/></svg></h2>
-  <p class="intro">Entre deux notes capturées, les touches sont calculées. Trois algorithmes, page <b>Transpo</b> de la capture&nbsp;:</p>
+  <p class="intro">Entre deux notes capturées, REPLIKANT calcule les touches manquantes. Et elles sonnent comme ton synthé, pas comme un sample étiré. Trois moteurs au choix&nbsp;:</p>
   <ul class="steps-list">
-    <li><kbd>HQ</kbd><b>HQ formants</b> (par défaut)&nbsp;: varispeed avec un sinc de 128 points (pas de repliement, aigus intacts), puis l'enveloppe spectrale de chaque instant remise où elle était. Le filtre du synthé ne monte plus avec la note&nbsp;: c'est ce que fait le synthé lui-même.</li>
-    <li><kbd>HD</kbd><b>Classique HD</b>&nbsp;: le varispeed seul, le son des samplers d'origine en propre.</li>
-    <li><kbd>T</kbd><b>Durée fixe</b>&nbsp;: les attaques et les decays gardent leur durée (pitch-shift spectral), avec la même correction de formants.</li>
+    <li><kbd>HQ</kbd><b>HQ formants</b> (par défaut)&nbsp;: la hauteur change, le timbre reste. Le filtre de ton synthé ne monte pas avec la note, exactement comme sur la machine.</li>
+    <li><kbd>HD</kbd><b>Classique HD</b>&nbsp;: le varispeed des samplers d'origine, en haute définition, sans repliement.</li>
+    <li><kbd>T</kbd><b>Durée fixe</b>&nbsp;: attaques et decays gardent leur durée, quelle que soit la note.</li>
   </ul>
-  <p class="intro" style="margin-top:14px">Mesuré sur une dent de scie passée dans un filtre résonant fixe&nbsp;: l'écart moyen des harmoniques avec le vrai synthé jouant la note.</p>
+  <p class="intro" style="margin-top:14px">Mesuré&nbsp;: l'écart moyen des harmoniques avec le vrai synthé jouant la même note. Plus c'est bas, plus c'est fidèle.</p>
   <table class="cmp">
     <tr><th>Transposition</th><th>Varispeed</th><th>HQ formants</th></tr>
     <tr><td>−12 demi-tons</td><td>12,8 dB</td><td class="good">0,8 dB</td></tr>
@@ -162,22 +163,22 @@
   <h2><span>05 · Synthé</span><svg class="p" viewBox="0 0 24 24"><path d="M2 12c2.5-8 7.5-8 10 0s7.5 8 10 0"/></svg></h2>
   <p class="intro">Le mode par défaut&nbsp;: tu ouvres REPLIKANT, tu joues.</p>
   <ul class="steps-list">
-    <li><kbd>OSC</kbd><b>Deux oscillateurs de cycles</b>&nbsp;: chacun lit une banque (les 64 basiques&nbsp;: sinus, triangle, dent de scie, carré, impulsions, sync, formant&nbsp;; ou tes cycles capturés) et glisse de l'un à l'autre avec POSITION. Copies limitées en bande toutes les demi-octaves&nbsp;: rien ne se replie, même tout en haut.</li>
-    <li><kbd>VOIX</kbd>Octave, accord, fin, niveau&nbsp;; <b>PM</b> de B vers A, un <b>sub</b> à l'octave, du <b>bruit</b>&nbsp;; l'<b>unisson</b> jusqu'à 4 voix désaccordées et étalées en stéréo&nbsp;; POLY, MONO ou LEGATO, la glisse.</li>
-    <li><kbd>FLT</kbd>Le même filtre, la même enveloppe, le même drive et les mêmes effets que le sampler.</li>
+    <li><kbd>OSC</kbd><b>Deux oscillateurs à cycles.</b> 64 formes de base (sinus, dents de scie, carrés, impulsions, sync, formants) ou tes propres cycles capturés, à parcourir en continu. Aucun repliement, même tout en haut du clavier.</li>
+    <li><kbd>VOIX</kbd><b>De quoi l'épaissir.</b> Modulation de phase de B vers A, sub à l'octave, bruit, unisson jusqu'à 4 voix étalées en stéréo. Poly, mono ou legato, avec glisse.</li>
+    <li><kbd>FLT</kbd><b>Le même étage de sortie que le sampler</b>&nbsp;: filtres, enveloppes, drive et effets.</li>
   </ul>
   <figure class="shot"><img src="img/cycles-1360.webp" srcset="img/cycles-680.webp 680w, img/cycles-1360.webp 1360w" sizes="(max-width: 1100px) 100vw, 1070px" width="1360" height="848" loading="lazy" alt="Le SYNTHÉ sur huit cycles capturés."></figure>
-  <p class="cap">L'osc A sur une banque capturée au synthé test, son filtre balayé par le CC 74&nbsp;: huit cycles du plus sombre au plus brillant.</p>
+  <p class="cap">Huit cycles capturés sur le synthé test, du plus sombre au plus brillant.</p>
 </section>
 
 <!-- 06 SAMPLER ============================================================== -->
 <section class="mod" id="sampler">
   <h2><span>06 · Sampler</span><svg class="p" viewBox="0 0 24 24"><rect x="1.5" y="5" width="21" height="14" rx="1.6"/><rect x="5.5" y="8" width="13" height="5.5" rx="2.7" opacity=".6"/><circle cx="9" cy="10.8" r="1.4"/><circle cx="15" cy="10.8" r="1.4"/><path d="M7 19l1.3-3h7.4L17 19"/></svg></h2>
-  <p class="intro">L'instrument capturé, ou n'importe quel son&nbsp;: glisse un <b>wav, aiff, flac ou mp3</b> sur la fenêtre. Il est joué sur tout le clavier, depuis sa note (lue dans le fichier, dans son nom, ou dans sa hauteur).</p>
+  <p class="intro">L'instrument capturé, ou n'importe quel son&nbsp;: glisse un <b>wav, aiff, flac ou mp3</b> sur la fenêtre, il est aussitôt jouable sur tout le clavier, à la bonne hauteur.</p>
   <ul class="steps-list">
-    <li><kbd>LEC</kbd><b>Sample</b> ou <b>élastique</b>&nbsp;: en grains alignés sur le son, la vitesse séparée de la hauteur (figée, ralentie, à l'envers). <b>Transitoires gardés</b>&nbsp;: un kick descendu de deux octaves garde son clic.</li>
-    <li><kbd>BCL</kbd><b>Boucle</b> déplacée et raccourcie, avec un <b>fondu de 0 à 100&nbsp;%</b> sur ses raccords.</li>
-    <li><kbd>AL</kbd><b>Aliasing</b>, d'après l'échelle de l'Assimil8or&nbsp;: de la lecture HQ au filtre d'E-mu, au linéaire, au drop-sample du SP-1200, jusqu'aux alias plus forts que le son. <b>Bits</b> de 32 à 1. <b>Modulation de phase</b> par un sinus sur la note, par le sample lui-même ou par l'entrée.</li>
+    <li><kbd>LEC</kbd><b>Lecture élastique</b>&nbsp;: la vitesse indépendante de la hauteur. Fige, ralentis, inverse, sans perdre le punch des attaques.</li>
+    <li><kbd>BCL</kbd><b>Boucles</b> déplaçables, avec un fondu de 0 à 100&nbsp;% pour des raccords invisibles.</li>
+    <li><kbd>GRN</kbd><b>Du grain</b>&nbsp;: de la lecture cristalline au repliement assumé, des bits de 32 à 1, la modulation de phase par le son lui-même ou par l'entrée.</li>
   </ul>
   <figure class="shot"><img src="img/sampler-1360.webp" srcset="img/sampler-680.webp 680w, img/sampler-1360.webp 1360w" sizes="(max-width: 1100px) 100vw, 1070px" width="1360" height="848" loading="lazy" alt="Le SAMPLER : la boucle, son fondu, le début."></figure>
 </section>
@@ -186,10 +187,10 @@
 <section class="mod" id="effets">
   <h2><span>07 · Filtres et effets</span><svg class="p" viewBox="0 0 24 24"><rect x="2.5" y="2.5" width="19" height="19" rx="2"/><path d="M7 8c1.7-2.4 3.3 2.4 5 0s3.3 2.4 5 0M7 12c1.7-2.4 3.3 2.4 5 0s3.3 2.4 5 0M7 16c1.7-2.4 3.3 2.4 5 0s3.3 2.4 5 0"/><path d="M9.5 10.4l5-4.8"/></svg></h2>
   <ul class="steps-list">
-    <li><kbd>FLT</kbd><b>Filtres</b> modélisés et suréchantillonnés (4X par défaut)&nbsp;: MOOG (l'échelle), MS-20 (ses deux filtres), SEM (variable d'état), OSCAR (deux résonances écartées), WASP (CMOS), POLIVOKS (ampli op qui sature). L'écran dessine sa courbe et un bout de son circuit.</li>
-    <li><kbd>DRV</kbd><b>Drive</b>&nbsp;: préampli, console ou bande (bosse de grave, pleurage).</li>
-    <li><kbd>FX</kbd><b>Spectre</b> (façon Panharmonium), <b>pitch</b> (deux voix, cristaux), <b>chorus</b>, <b>crush</b>, <b>espace</b> (la réverbération de MIFM1, son shimmer). <b>Glisse les blocs</b> sur l'écran pour changer l'ordre&nbsp;: le changement passe par un creux de 10&nbsp;ms, sans clic.</li>
-    <li><kbd>IN</kbd><b>Écoute par les effets</b>&nbsp;: en insert sur une piste, REPLIKANT devient un multi-effet, et tu peux en rééchantillonner la sortie.</li>
+    <li><kbd>FLT</kbd><b>Six filtres analogiques</b> modélisés au plus près du circuit et suréchantillonnés&nbsp;: échelle à transistors, double filtre rugueux, variable d'état, double résonance, CMOS, ampli op saturé. L'écran dessine la courbe et le schéma de chacun.</li>
+    <li><kbd>DRV</kbd><b>Drive</b>&nbsp;: lampe, console ou bande magnétique.</li>
+    <li><kbd>FX</kbd><b>Cinq effets</b>&nbsp;: spectre (le son redessiné par une nuée d'oscillateurs), pitch (deux voix, cristaux), chorus, crush, espace (une réverbération immense, avec shimmer). <b>Glisse les blocs</b> pour changer leur ordre, en plein jeu, sans un clic.</li>
+    <li><kbd>IN</kbd><b>Multi-effet</b>&nbsp;: en insert sur une piste, REPLIKANT traite n'importe quelle source, et tu peux rééchantillonner le résultat.</li>
   </ul>
   <figure class="shot"><img src="img/effets-1360.webp" srcset="img/effets-680.webp 680w, img/effets-1360.webp 1360w" sizes="(max-width: 1100px) 100vw, 1070px" width="1360" height="848" loading="lazy" alt="La chaîne d'effets : les blocs à glisser, chacun avec son picto."></figure>
 </section>
@@ -198,33 +199,31 @@
 <section class="mod" id="moduler">
   <h2><span>08 · Moduler</span><svg class="p" viewBox="0 0 24 24"><circle cx="5" cy="6" r="2.8"/><circle cx="19" cy="6" r="2.8"/><circle class="f" cx="5" cy="6" r=".9"/><circle class="f" cx="19" cy="6" r=".9"/><path d="M5 8.8c0 15 14 15 14 0"/></svg></h2>
   <ul class="steps-list">
-    <li><kbd>M</kbd>Quatre mods, comme sur IMPAKT&nbsp;: une <b>onde</b>, des <b>pas</b> (dessinés sur l'écran), du <b>hasard</b> (une boucle de tirages qui revient), une <b>enveloppe</b> lancée par chaque note, ou un <b>suiveur</b> de l'entrée. Au tempo du DAW.</li>
-    <li><kbd>1</kbd>Clique <b>M1</b> en bas, puis tourne n'importe quel potard&nbsp;: la distance tournée devient la profondeur. Un double-clic retire la route.</li>
-    <li><kbd>AB</kbd><b>Scènes</b>, comme sur l'Octatrack&nbsp;: arme une scène, tourne les réglages à y verrouiller&nbsp;; le <b>fader</b> glisse de A à B, automatisable et modulable.</li>
-    <li><kbd>WTF</kbd><b>WTF?!</b>&nbsp;: les réglages les plus parlants du moteur tirés au sort à chaque croche, en LIVE ou en boucle de huit, puis RETOUR.</li>
-    <li><kbd>CLK</kbd><b>Horloge MIDI</b> vers tes séquenceurs&nbsp;: un port du Mac ou la sortie du plug-in, au tempo choisi ou en suivant le DAW.</li>
+    <li><kbd>M</kbd><b>Quatre modulateurs</b>&nbsp;: onde, pas dessinés à la souris, hasard qui revient en boucle, enveloppe, suiveur d'entrée. Tous calés sur le tempo.</li>
+    <li><kbd>1</kbd><b>Assigner, c'est tourner</b>&nbsp;: clique M1, tourne n'importe quel potard, la distance devient la profondeur. Un double-clic pour défaire.</li>
+    <li><kbd>AB</kbd><b>Seize scènes</b>&nbsp;: verrouille des réglages dans une scène, puis glisse de A à B avec le fader, à la main, en automation ou par un modulateur.</li>
+    <li><kbd>WTF</kbd><b>WTF?!</b>&nbsp;: les réglages qui comptent tirés au sort à chaque croche, en direct ou en boucle de huit. RETOUR pour revenir.</li>
+    <li><kbd>CLK</kbd><b>Horloge MIDI</b> pour tes machines, au tempo de ton choix ou à celui du DAW.</li>
   </ul>
   <figure class="shot"><img src="img/mods-1360.webp" srcset="img/mods-680.webp 680w, img/mods-1360.webp 1360w" sizes="(max-width: 1100px) 100vw, 1070px" width="1360" height="848" loading="lazy" alt="La page Mods : un modulateur en onde, ses routes."></figure>
-  <figure class="shot"><img src="img/clair-1360.webp" srcset="img/clair-680.webp 680w, img/clair-1360.webp 1360w" sizes="(max-width: 1100px) 100vw, 1070px" width="1360" height="848" loading="lazy" alt="Le thème clair."></figure>
-  <p class="cap">Fichier › Couleurs&nbsp;: <b>Noir &amp; or</b> (par défaut) ou <b>Clair</b>.</p>
 </section>
 
 <!-- 09 PARTAGER ============================================================= -->
 <section class="mod" id="partager">
   <h2><span>09 · Exporter, partager</span><svg class="p" viewBox="0 0 24 24"><rect x="4" y="9" width="16" height="12" rx="1.6"/><path d="M12 15V2M8 6l4-4 4 4"/></svg></h2>
   <ul class="steps-list">
-    <li><kbd>WAV</kbd><b>Dossier de WAV</b>&nbsp;: chaque fichier porte sa note, sa justesse, sa boucle (chunk <i>smpl</i>) et sa zone (chunk <i>inst</i>), pour le Sampler de Logic, Ableton, Kontakt, un Elektron, une MPC…</li>
-    <li><kbd>BW</kbd><b>Bitwig .multisample</b>&nbsp;: l'instrument complet (zones, vélocités, round robin, boucles).</li>
-    <li><kbd>ZIP</kbd><b>Le pack à partager</b>&nbsp;: <b>Pack .zip</b> en haut réunit l'instrument, ses samples, ses cycles et son son. Glisse-le vers le Finder, AirDrop ou un mail&nbsp;; chez un pote, il le glisse sur la fenêtre de REPLIKANT.</li>
+    <li><kbd>WAV</kbd><b>Dossier de WAV</b>&nbsp;: chaque fichier embarque sa note, sa justesse, sa boucle et sa zone, prêt pour n'importe quel sampler, logiciel ou matériel.</li>
+    <li><kbd>BW</kbd><b>Multisample Bitwig</b>&nbsp;: l'instrument complet, zones, vélocités et boucles comprises.</li>
+    <li><kbd>ZIP</kbd><b>Pack .zip</b>&nbsp;: l'instrument, ses samples, ses cycles et son réglage dans un seul fichier. Envoie-le par mail ou AirDrop&nbsp;; de l'autre côté, il suffit de le glisser dans REPLIKANT.</li>
   </ul>
-  <p class="cap" style="margin:12px 24px 0">L'instrument est un dossier dans <b>Musique › REPLIKANT</b>&nbsp;: un fichier <i>.replikant</i>, ses WAV et ses cycles. Le projet de ton DAW s'en souvient.</p>
+  <p class="cap" style="margin:12px 24px 0">Tes instruments vivent dans <b>Musique › REPLIKANT</b>, et ton projet s'en souvient.</p>
 </section>
 
 </main>
 
 <footer>
   <p class="links"><a href="https://github.com/distortedimages-code/REPLIKANT">Le code</a> · <a href="https://github.com/distortedimages-code/REPLIKANT/releases">Les versions</a></p>
-  <p>REPLIKANT v@VERSION@ · GPL-3 · Pitch-shift spectral&nbsp;: Signalsmith Stretch (MIT) · Espace&nbsp;: MIFM1 (MPL-2.0) · Polices&nbsp;: Space Grotesk et IBM Plex Mono (SIL OFL)</p>
+  <p>REPLIKANT v@VERSION@ · logiciel libre, GPL-3</p>
 </footer>
 
 <script>

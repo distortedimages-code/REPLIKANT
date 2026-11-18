@@ -11,13 +11,11 @@ class ReplikantEditor : public juce::AudioProcessorEditor
 public:
     explicit ReplikantEditor (ReplikantProcessor& p) : AudioProcessorEditor (p), main (p)
     {
-        te::setTheme ((te::Theme) juce::jlimit (0, 1, p.settingsFile().getIntValue ("theme", 0)));
-        look.applyTheme();
+        look.applyColours();
         setLookAndFeel (&look);
         juce::LookAndFeel::setDefaultLookAndFeel (&look);
         addAndMakeVisible (main);
         main.onZoom = [this] (float z) { applyZoom (z); };
-        main.onTheme = [this] { look.applyTheme(); sendLookAndFeelChange(); repaint(); };
         setResizable (false, false);
         applyZoom (main.getZoom());
     }

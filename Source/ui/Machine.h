@@ -39,7 +39,6 @@ namespace te
 
         float getZoom() const                      { return zoom; }
         std::function<void (float)> onZoom;
-        std::function<void()> onTheme;              // the colours changed: the look takes them
 
         enum Mode { synthMode = 0, drumMode = 1, samplerMode = 2 };
         void showMode (int mode);                  // sets the engine (what plays) and shows its pages

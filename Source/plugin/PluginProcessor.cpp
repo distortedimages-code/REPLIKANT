@@ -101,11 +101,17 @@ ReplikantProcessor::ReplikantProcessor()
 
 ReplikantProcessor::~ReplikantProcessor()
 {
+    lifeline->store (false);
     stopTimer();
     worker.onInstrument = nullptr;
     worker.onStatus = nullptr;
     recorder.stop();
     port = nullptr;
+}
+
+void ReplikantProcessor::later (std::function<void()> f)
+{
+    juce::MessageManager::callAsync ([a = lifeline, f = std::move (f)] { if (a->load()) f(); });
 }
 
 bool ReplikantProcessor::isBusesLayoutSupported (const BusesLayout& l) const
@@ -538,10 +544,10 @@ void ReplikantProcessor::openInstrument (const juce::File& f, bool withItsSound)
         auto ins = instrumentio::load (f, err);
         if (ins == nullptr)
         {
-            juce::MessageManager::callAsync ([this, err] { if (onMessage) onMessage (err); });
+            later ([this, err] { if (onMessage) onMessage (err); });
             return;
         }
-        juce::MessageManager::callAsync ([this, ins, withItsSound]
+        later ([this, ins, withItsSound]
         {
             instrumentName = ins->name;
             if (withItsSound && ins->sound.isObject())
@@ -637,7 +643,7 @@ void ReplikantProcessor::injectResample (rk::Channels audio)
     {
         const auto r = instrumentio::save (*ins, folder);
         if (r.failed())
-            juce::MessageManager::callAsync ([this, r] { if (onMessage) onMessage (r.getErrorMessage()); });
+            later ([this, r] { if (onMessage) onMessage (r.getErrorMessage()); });
         worker.renderAndPublish (ins, true);
     });
     if (onMessage)
@@ -679,11 +685,11 @@ void ReplikantProcessor::importAny (const juce::File& f)
             }
             if (ins == nullptr || err.isNotEmpty())
             {
-                juce::MessageManager::callAsync ([this, err] { if (onMessage) onMessage (err); });
+                later ([this, err] { if (onMessage) onMessage (err); });
                 if (ins == nullptr)
                     return;
             }
-            juce::MessageManager::callAsync ([this, ins]
+            later ([this, ins]
             {
                 instrumentName = ins->name;
                 session.renderKeys = false;
@@ -701,7 +707,7 @@ void ReplikantProcessor::importAny (const juce::File& f)
     {
         juce::String err;
         const auto folder = instrumentio::importPack (f, root, err);
-        juce::MessageManager::callAsync ([this, folder, err, name = f.getFileName()]
+        later ([this, folder, err, name = f.getFileName()]
         {
             if (folder == juce::File())
             {
@@ -737,7 +743,7 @@ void ReplikantProcessor::buildPack (std::function<void (const juce::File&)> done
     worker.post ("PACK", [this, ins, sound, zip, done]
     {
         const auto r = instrumentio::exportPack (*ins, sound, zip);
-        juce::MessageManager::callAsync ([this, r, zip, done]
+        later ([this, r, zip, done]
         {
             if (r.failed() && onMessage)
                 onMessage (r.getErrorMessage());
@@ -757,7 +763,7 @@ void ReplikantProcessor::exportInstrument (bool bitwig, bool allKeys, const juce
         const auto r = bitwig ? instrumentio::exportBitwig (*ins, target, allKeys)
                               : instrumentio::exportWavFolder (*ins, target, allKeys);
         const auto text = r.wasOk() ? "Exporté : "_fr + target.getFullPathName() : r.getErrorMessage();
-        juce::MessageManager::callAsync ([this, text, target, ok = r.wasOk()]
+        later ([this, text, target, ok = r.wasOk()]
         {
             if (onMessage)
                 onMessage (text);
@@ -959,7 +965,7 @@ void ReplikantProcessor::setStateInformation (const void* data, int size)
         if (f.isDirectory())
             openInstrument (f, false);     // (the project's own sound, not the one kept with the instrument)
         else
-            juce::MessageManager::callAsync ([this, f] { if (onMessage) onMessage ("Instrument introuvable : "_fr + f.getFullPathName()); });
+            later ([this, f] { if (onMessage) onMessage ("Instrument introuvable : "_fr + f.getFullPathName()); });
     }
 }
 

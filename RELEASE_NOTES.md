@@ -1,10 +1,10 @@
-**REPLIKANT 0.3.0** : un synthé à cycles et un sampler, une capture des cycles, le rééchantillonnage sans coupure, une nouvelle interface.
+**REPLIKANT 0.3.0** : un synthé, un sampler, et trois façons de capturer ton son.
 
-- **Trois modes, SYNTHÉ, SAMPLER et DRUM** (DRUM arrive en 0.4) : REPLIKANT joue dès l'ouverture. Le SYNTHÉ a deux oscillateurs qui lisent des cycles (64 basiques, ou ceux de ton synthé), sans repliement même tout en haut, avec la PM de B vers A, un sub, du bruit, et l'unisson jusqu'à 4 voix étalées en stéréo
-- **SAMPLER, glisse un son** : un wav, aiff, flac (ou mp3 sur Mac) glissé sur la fenêtre se joue sur tout le clavier, depuis sa note (lue dans le fichier, dans son nom ou dans sa hauteur). La boucle a maintenant un fondu de 0 à 100 % sur ses raccords
-- **CAPTURE CYCLES** : une note tenue 8 à 64 fois pendant qu'un CC balaie un bouton du synthé, que la vélocité monte ou que tu tournes un bouton à la main. Un cycle est pris dans chaque prise, et la banque va dans l'osc A du SYNTHÉ (CAPTURÉS). Elle est gardée avec l'instrument, et en wavetable de 2048 points à côté
-- **RÉÉCHANTILLONNER** : ce qui sort des effets est enregistré, sur 1 à 8 mesures (calées sur la mesure suivante quand le transport joue) ou en libre. L'enregistrement prend ensuite le relais en boucle, sans trou, puis devient un instrument du SAMPLER, les effets remis à zéro pour ne pas traiter le son deux fois. Une note reprend la main
-- **Effets dans l'ordre que tu veux** : glisse les blocs de la chaîne sur l'écran. Le changement passe par un creux de 10 ms, sans clic
-- **Nouvelle interface** : un écran noir, huit pages et huit potards, sur un pupitre. Il y a des vu-mètres IN et OUT, et des pictos en traits fins : le schéma de chaque filtre (l'échelle du Moog, les deux filtres du MS-20, l'inverseur du Wasp…), des bobines de bande pour le drive. Deux thèmes : Noir & or et Clair
-- **Plus d'escaliers** : coupure, enveloppe et vitesse évoluent à chaque échantillon, et les réglages glissent quand ils bougent pendant que le son joue. Le filtre est suréchantillonné en 4X par défaut
-- **WTF?!** : les réglages les plus parlants du moteur sont tirés au sort à chaque croche, en LIVE ou en boucle de huit, puis RETOUR les ramène
+- **Il joue dès l'ouverture** : nouveau mode SYNTHÉ, avec deux oscillateurs à cycles nets jusqu'en haut du clavier, un sub, du bruit, l'unisson et la modulation de phase
+- **Glisse un son, joue-le** : un wav, aiff, flac ou mp3 devient jouable sur tout le clavier, à la bonne hauteur. Les boucles se raccordent avec un fondu de 0 à 100 %
+- **Capture des cycles** : balaie un bouton de ton synthé, et chaque position devient un cycle de ta banque d'ondes. Le SYNTHÉ la joue aussitôt, et elle est aussi exportée en wavetable
+- **Rééchantillonner** : enregistre ce qui sort des effets. La boucle prend le relais sans coupure, puis devient un instrument du sampler, les effets remis à zéro
+- **Effets dans l'ordre que tu veux** : glisse les blocs de la chaîne, en plein jeu, sans un clic
+- **Nouvelle interface** : écran noir, pupitre, potards en relief, vu-mètres, et le schéma de chaque filtre dessiné à l'écran
+- **Plus fluide** : les réglages sont lissés à l'échantillon, et les filtres suréchantillonnés en 4X par défaut
+- **WTF?!** : tous les réglages qui comptent tirés au sort à chaque croche ; RETOUR pour revenir

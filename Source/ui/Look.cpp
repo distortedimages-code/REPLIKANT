@@ -10,13 +10,6 @@ namespace
     {
         return juce::Typeface::createSystemTypefaceFor (data, (size_t) size);
     }
-    juce::Typeface::Ptr monoFace (int weight)
-    {
-        static auto regular = load (BinaryData::IBMPlexMonoRegular_ttf, BinaryData::IBMPlexMonoRegular_ttfSize);
-        static auto medium = load (BinaryData::IBMPlexMonoMedium_ttf, BinaryData::IBMPlexMonoMedium_ttfSize);
-        static auto semi = load (BinaryData::IBMPlexMonoSemiBold_ttf, BinaryData::IBMPlexMonoSemiBold_ttfSize);
-        return weight >= 600 ? semi : weight >= 500 ? medium : regular;
-    }
     juce::Typeface::Ptr groteskFace (int weight)
     {
         static auto light = load (BinaryData::SpaceGroteskLight_ttf, BinaryData::SpaceGroteskLight_ttfSize);
@@ -31,7 +24,6 @@ namespace col
     namespace
     {
         juce::Colour modsNow[4], modsScreenNow[4], capsNow[4], notchesNow[4];
-        Theme current = Theme::noirEtOr;
     }
     juce::Colour mod (int m)            { return modsNow[juce::jlimit (0, 3, m)]; }
     juce::Colour modOnScreen (int m)    { return modsScreenNow[juce::jlimit (0, 3, m)]; }
@@ -39,34 +31,13 @@ namespace col
     juce::Colour notch (int i)          { return notchesNow[((i % 4) + 4) % 4]; }
 }
 
-Theme theme()   { return col::current; }
-
-void setTheme (Theme t)
+namespace
 {
-    using namespace col;
-    col::current = t;
-    auto c = [] (juce::uint32 argb) { return juce::Colour (argb); };
-    if (t == Theme::clair)
+    // the palette: black (#121312), gold (#a67d43), red (#ad0013), a cream for what must be read
+    void setPalette()
     {
-        body = c (0xffdddcd7); face = c (0xffe9e8e3); col::key = c (0xfff1f0ec); keyLine = c (0xffb9b8b3); keyShadow = c (0xffa9a8a3); well = c (0xff161616);
-        ink = c (0xff161616); ink2 = c (0xff55554f); ink3 = c (0xff8a8984);
-        keyOn = c (0xff161616); keyOnInk = c (0xfff2f2ee); keyOnEdge = c (0xff000000);
-        accent = c (0xffff5a1f); accentInk = c (0xff161616); accentDark = c (0xffc8410f);
-        tickOff = c (0xffb4b3ae); tickOn = c (0xff161616); red = c (0xffe8291c); violet = c (0xff8b6fe0); white = c (0xfff7f6f2);
-        deck = body; deckEdge = body; deckInk = ink; deckInk2 = ink2;
-        col::screen = c (0xff0c0c0c); screenEdge = c (0xff1d1d1b); screenLine = c (0xff2a2a28); screenGrid = c (0xff1c1c1a);
-        screenText = c (0xfff2f2ee); screenDim = c (0xff8c8c88); screenGhost = c (0xff3b3b38);
-        sBlue = c (0xff4d8dff); sGreen = c (0xff2ecc71); sOrange = c (0xffff6a2b); sYellow = c (0xffffc21a); sRed = c (0xffff3b2f);
-        sPink = c (0xffff6fa3); sViolet = c (0xffa995ff);
-        const juce::Colour m[4] = { c (0xff1f6fe5), c (0xff18a058), c (0xfff0b800), c (0xffef4f8b) };
-        const juce::Colour ms[4] = { sBlue, sGreen, sYellow, sPink };
-        const juce::Colour caps[4] = { c (0xff1f6fe5), c (0xff18a058), white, accent };
-        const juce::Colour n[4] = { juce::Colours::white, juce::Colours::white, ink, ink };
-        std::copy (m, m + 4, modsNow); std::copy (ms, ms + 4, modsScreenNow); std::copy (caps, caps + 4, capsNow); std::copy (n, n + 4, notchesNow);
-    }
-    else
-    {
-        // black (#121312), gold (#a67d43), red (#ad0013), a cream for what must be read
+        using namespace col;
+        auto c = [] (juce::uint32 argb) { return juce::Colour (argb); };
         body = c (0xff121312); face = c (0xff1a1b1a); col::key = c (0xff232422); keyLine = c (0xff30312e); keyShadow = c (0xff050505); well = c (0xff050505);
         ink = c (0xffece4d4); ink2 = c (0xffa67d43); ink3 = c (0xff5f5647);
         keyOn = c (0xffa67d43); keyOnInk = c (0xff121312); keyOnEdge = c (0xff7a5a2e);
@@ -82,18 +53,12 @@ void setTheme (Theme t)
         const juce::Colour n[4] = { c (0xffece4d4), c (0xff121312), c (0xff121312), c (0xffa67d43) };
         std::copy (m, m + 4, modsNow); std::copy (m, m + 4, modsScreenNow); std::copy (caps, caps + 4, capsNow); std::copy (n, n + 4, notchesNow);
     }
-}
-
-namespace
-{
-    struct DefaultTheme { DefaultTheme() { setTheme (Theme::noirEtOr); } } defaultTheme;
+    struct Palette { Palette() { setPalette(); } } palette;
 }
 
 juce::Font mono (float size, int weight)
 {
-    if (theme() == Theme::noirEtOr)
-        return juce::Font (juce::FontOptions (groteskFace (weight >= 600 ? 700 : 500)).withHeight (size * 1.24f)).withExtraKerningFactor (0.04f);
-    return juce::Font (juce::FontOptions (monoFace (weight)).withHeight (size * 1.3f));
+    return juce::Font (juce::FontOptions (groteskFace (weight >= 600 ? 700 : 500)).withHeight (size * 1.24f)).withExtraKerningFactor (0.04f);
 }
 
 juce::Font grotesk (float size, int weight)
@@ -103,13 +68,9 @@ juce::Font grotesk (float size, int weight)
 
 juce::String themed (const juce::String& s)
 {
-    if (theme() == Theme::noirEtOr)
-    {
-        static const juce::String small = juce::String::fromUTF8 ("\xc3\xa0\xc3\xa2\xc3\xa4\xc3\xa7\xc3\xa8\xc3\xa9\xc3\xaa\xc3\xab\xc3\xae\xc3\xaf\xc3\xb4\xc3\xb6\xc3\xb9\xc3\xbb\xc3\xbc\xc5\x93");
-        static const juce::String capital = juce::String::fromUTF8 ("\xc3\x80\xc3\x82\xc3\x84\xc3\x87\xc3\x88\xc3\x89\xc3\x8a\xc3\x8b\xc3\x8e\xc3\x8f\xc3\x94\xc3\x96\xc3\x99\xc3\x9b\xc3\x9c\xc5\x92");
-        return s.replaceCharacters (small, capital).toUpperCase();
-    }
-    return lower (s);
+    static const juce::String small = juce::String::fromUTF8 ("\xc3\xa0\xc3\xa2\xc3\xa4\xc3\xa7\xc3\xa8\xc3\xa9\xc3\xaa\xc3\xab\xc3\xae\xc3\xaf\xc3\xb4\xc3\xb6\xc3\xb9\xc3\xbb\xc3\xbc\xc5\x93");
+    static const juce::String capital = juce::String::fromUTF8 ("\xc3\x80\xc3\x82\xc3\x84\xc3\x87\xc3\x88\xc3\x89\xc3\x8a\xc3\x8b\xc3\x8e\xc3\x8f\xc3\x94\xc3\x96\xc3\x99\xc3\x9b\xc3\x9c\xc5\x92");
+    return s.replaceCharacters (small, capital).toUpperCase();
 }
 
 juce::String lower (const juce::String& s)
@@ -122,10 +83,10 @@ juce::String lower (const juce::String& s)
 //==============================================================================
 Look::Look()
 {
-    applyTheme();
+    applyColours();
 }
 
-void Look::applyTheme()
+void Look::applyColours()
 {
     setColour (juce::ResizableWindow::backgroundColourId, col::body);
     setColour (juce::DocumentWindow::backgroundColourId, col::body);
@@ -168,7 +129,7 @@ juce::Typeface::Ptr Look::getTypefaceForFont (const juce::Font& f)
     // cache and went round until the stack ran out; Live crashed on the first tooltip in 0.1)
     if (f.getTypefaceName() == juce::Font::getDefaultSansSerifFontName()
         || f.getTypefaceName() == juce::Font::getDefaultMonospacedFontName())
-        return monoFace (f.isBold() ? 600 : 400);
+        return groteskFace (f.isBold() ? 700 : 500);
     return LookAndFeel_V4::getTypefaceForFont (f);
 }
 
@@ -265,7 +226,6 @@ void screen (juce::Graphics& g, juce::Rectangle<float> r, float radius)
 {
     g.setColour (col::screen);
     g.fillRoundedRectangle (r, radius);
-    if (theme() == Theme::noirEtOr)
     {
         // a fine grid, and the glass a touch lighter at its top
         g.saveState();
@@ -357,47 +317,8 @@ static void knobInRelief (juce::Graphics& g, juce::Point<float> c, float radius,
 void encoder (juce::Graphics& g, juce::Point<float> c, float radius, float value, bool bipolar, juce::Colour cap,
               juce::Colour notch, float modFrom, float modTo, juce::Colour modColour, bool dim, juce::Colour lit)
 {
-    if (theme() == Theme::noirEtOr)
-    {
-        knobInRelief (g, c, radius, value, bipolar, cap, modFrom, modTo, modColour, dim, lit);
-        return;
-    }
-    constexpr int ticks = 25;
-    const float r1 = radius * 0.80f, r2 = radius * 0.94f;
-    const float pi = juce::MathConstants<float>::pi;
-    auto angle = [pi] (float t) { return (135.0f + 270.0f * t) * pi / 180.0f; };
-    value = juce::jlimit (0.0f, 1.0f, value);
-    const int litTo = juce::roundToInt (value * (ticks - 1));
-    const int mid = (ticks - 1) / 2;
-    const int mLo = juce::roundToInt (juce::jmin (modFrom, modTo) * (ticks - 1)), mHi = juce::roundToInt (juce::jmax (modFrom, modTo) * (ticks - 1));
-    const bool modded = std::abs (modTo - modFrom) > 1.0e-3f;
-    for (int i = 0; i < ticks; ++i)
-    {
-        const float a = angle ((float) i / (float) (ticks - 1));
-        const bool on = bipolar ? (i >= juce::jmin (mid, litTo) && i <= juce::jmax (mid, litTo)) : (value > 0.0f && i <= litTo);
-        juce::Colour t = on ? (lit == juce::Colour() ? col::tickOn : lit) : col::tickOff;
-        if (modded && i >= mLo && i <= mHi && i != litTo)
-            t = modColour;
-        if (dim)
-            t = t.withMultipliedAlpha (0.4f);
-        g.setColour (t);
-        g.drawLine (c.x + r1 * std::cos (a), c.y + r1 * std::sin (a), c.x + r2 * std::cos (a), c.y + r2 * std::sin (a), radius * 0.065f);
-    }
-    // the cap: its shadow, its face, the notch
-    const float rc = radius * 0.6f;
-    g.setColour (col::keyShadow.withMultipliedAlpha (dim ? 0.5f : 1.0f));
-    g.fillEllipse (c.x - rc, c.y - rc + radius * 0.035f, rc * 2.0f, rc * 2.0f);
-    g.setColour (dim ? cap.withMultipliedSaturation (0.3f).brighter (0.3f) : cap);
-    g.fillEllipse (c.x - rc, c.y - rc - radius * 0.02f, rc * 2.0f, rc * 2.0f);
-    if (cap.getPerceivedBrightness() > 0.85f || cap.getPerceivedBrightness() < 0.12f)
-    {
-        g.setColour (cap.getPerceivedBrightness() > 0.5f ? col::keyShadow : col::ink2);
-        g.drawEllipse (c.x - rc, c.y - rc - radius * 0.02f, rc * 2.0f, rc * 2.0f, 1.0f);
-    }
-    const float a = angle (value);
-    g.setColour (notch);
-    g.drawLine (c.x + rc * 0.42f * std::cos (a), c.y - radius * 0.02f + rc * 0.42f * std::sin (a),
-                c.x + rc * 0.88f * std::cos (a), c.y - radius * 0.02f + rc * 0.88f * std::sin (a), radius * 0.085f);
+    juce::ignoreUnused (notch);
+    knobInRelief (g, c, radius, value, bipolar, cap, modFrom, modTo, modColour, dim, lit);
 }
 
 void eye (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour outline, juce::Colour iris, float open)

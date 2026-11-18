@@ -101,7 +101,7 @@ int main (int argc, char** argv)
         run (60);
         shoot (synthShots[pg]);
     }
-    // the filter's other banks and models: the drive on tape, the MS-20 high-pass, the light theme
+    // the filter's other banks and models: the drive on tape, the MS-20 high-pass
     view->showPage (3);
     set (snd::dModel, 3.0f);
     set (snd::dAmt, 0.5f);
@@ -113,15 +113,6 @@ int main (int argc, char** argv)
     view->showBank (0);
     run (40);
     shoot ("17-synthe-filtre-ms20.png");
-    te::setTheme (te::Theme::clair);
-    ed->sendLookAndFeelChange();
-    run (20);
-    shoot ("18-clair-filtre.png");
-    view->showPage (5);
-    run (20);
-    shoot ("19-clair-fx.png");
-    te::setTheme (te::Theme::noirEtOr);
-    ed->sendLookAndFeelChange();
     set (snd::fModel, 1.0f);
     set (snd::fType, 0.0f);
     set (snd::dModel, 0.0f);

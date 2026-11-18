@@ -161,6 +161,10 @@ private:
     static juce::AudioProcessorValueTreeState::ParameterLayout layout();
 
     std::unique_ptr<juce::PropertiesFile> globalSettings;
+    // what the worker hands back to the message thread waits there; the processor may be gone by then (a project
+    // closed while an instrument loads): it runs only while this says the processor is alive
+    std::shared_ptr<std::atomic<bool>> lifeline = std::make_shared<std::atomic<bool>> (true);
+    void later (std::function<void()>);
     Recorder recorder;
     Worker worker { recorder };
     TestSynth testSynth;

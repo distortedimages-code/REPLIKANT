@@ -100,11 +100,8 @@ set(RK_APP_SOURCES
     Source/ui/UpdatePanel.cpp
     Source/ui/Machine.cpp)
 
-# Pixel fonts (SIL Open Font License, see Resources/fonts)
+# Fonts (SIL Open Font License, see Resources/fonts)
 juce_add_binary_data(RkFonts SOURCES
-    Resources/fonts/IBMPlexMono-Regular.ttf
-    Resources/fonts/IBMPlexMono-Medium.ttf
-    Resources/fonts/IBMPlexMono-SemiBold.ttf
     Resources/fonts/SpaceGrotesk-Light.ttf
     Resources/fonts/SpaceGrotesk-Medium.ttf
     Resources/fonts/SpaceGrotesk-Bold.ttf)

@@ -1074,7 +1074,7 @@ public:
             const int note = whiteNote (i);
             auto k = juce::Rectangle<float> (r.getX() + (float) i * ww + 2.0f, r.getY(), ww - 4.0f, r.getHeight());
             const bool down = isDown (note);
-            const auto ivory = theme() == Theme::noirEtOr ? juce::Colour (0xffe8e1d1) : col::key;
+            const auto ivory = juce::Colour (0xffe8e1d1);
             g.setColour (down ? col::accentDark : col::keyShadow);
             g.fillRoundedRectangle (k, 6.0f);
             auto face = k.withTrimmedBottom (down ? 1.0f : 4.0f);
@@ -1849,7 +1849,7 @@ void Machine::buildPages()
         tip (*v, snd::oaPos, "Où lire dans la banque : les cycles se suivent, la position passe de l'un à l'autre en fondu (à moduler)."_fr);
         tip (*v, snd::oaBank, "BASIQUES : du sinus à la scie, au carré, aux impulsions, à la synchro et aux formants. CAPTURÉS : les cycles de ton synthé (CAPTURE CYCLES)."_fr);
         tip (*v, snd::pmBA, "L'oscillateur B pousse la phase de A (modulation de phase, la FM des DX) : des harmoniques qui grincent ou qui chantent."_fr);
-        tip (*v, snd::alias, "0 : la lecture HQ sans repliement. Puis le filtre de l'interpolateur se relâche (E-mu), linéaire, drop-sample (SP-1200), jusqu'aux alias plus forts que le son."_fr);
+        tip (*v, snd::alias, "0 : la lecture HQ, sans repliement. Puis l'interpolation se relâche, devient linéaire, puis disparaît, jusqu'aux alias plus forts que le son."_fr);
         tip (*v, snd::loopXfade, "Un fondu entre la fin de la boucle et ce qui précède son début : un raccord qui ne claque pas, même sur une boucle prise au hasard."_fr);
         tip (*v, snd::transients, "GARDÉS : l'attaque de chaque sample est jouée à sa vitesse, le corps seul est transposé : un kick descendu de deux octaves garde son clic."_fr);
         tip (*v, snd::quality, "Le suréchantillonnage du filtre (4X : le plus propre)."_fr);
@@ -2459,26 +2459,12 @@ void Machine::showFileMenu()
     for (float z : zoomSteps)
         zoomMenu.addItem (id++, juce::String (juce::roundToInt (z * 100)) + " %", true, std::abs (z - zoom) < 0.01f);
     m.addSubMenu ("Taille de la fenêtre"_fr, zoomMenu);
-    juce::PopupMenu themes;
-    themes.addItem (200, "Noir & or", true, theme() == Theme::noirEtOr);
-    themes.addItem (201, "Clair", true, theme() == Theme::clair);
-    m.addSubMenu ("Couleurs", themes);
     if (standalone (proc))
         m.addItem (13, "Réglages audio et MIDI..."_fr);
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&fileKey), [this] (int r)
     {
         if (r <= 0)
             return;
-        if (r >= 200)
-        {
-            setTheme (r == 200 ? Theme::noirEtOr : Theme::clair);
-            proc.settingsFile().setValue ("theme", r - 200);
-            proc.settingsFile().saveIfNeeded();
-            if (onTheme)
-                onTheme();
-            repaint();
-            return;
-        }
         if (r >= 100)
         {
             zoom = zoomSteps[r - 100];

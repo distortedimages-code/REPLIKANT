@@ -1,6 +1,6 @@
 # REPLIKANT
 
-**REPLIKANT** : l'autosampleur de tes synthés, un synthé à cycles et un sampler. Plug-in AU / VST3 et appli pour Mac. Il capture tes synthés (chaque note jouée en MIDI et enregistrée, bouclée, accordée ; ou leurs cycles, pendant qu'un CC balaie un bouton ; ou ce qui sort de tes effets) et en fait des instruments : le SYNTHÉ lit des banques de cycles, le SAMPLER joue un multisample ou n'importe quel son glissé sur la fenêtre. Les deux passent dans des filtres analogiques modélisés, un drive, cinq effets dans l'ordre que tu veux, quatre mods façon IMPAKT et des scènes façon Octatrack. REPLIKANT sert aussi de multi-effet en insert. Exports en dossier de WAV, en `.multisample` Bitwig ou en pack zip à partager.
+**REPLIKANT** : l'autosampleur de tes synthés, un synthé à cycles et un sampler. Plug-in AU / VST3 et appli pour Mac. Il capture tes synthés (chaque note jouée en MIDI et enregistrée, bouclée, accordée ; ou leurs cycles, pendant qu'un CC balaie un bouton ; ou ce qui sort de tes effets) et en fait des instruments : le SYNTHÉ lit des banques de cycles, le SAMPLER joue un multisample ou n'importe quel son glissé sur la fenêtre. Les deux passent dans des filtres analogiques modélisés, un drive, cinq effets dans l'ordre que tu veux, quatre modulateurs et seize scènes. REPLIKANT sert aussi de multi-effet en insert. Exports en dossier de WAV, en `.multisample` Bitwig ou en pack zip à partager.
 
 **Page de téléchargement** : https://distortedimages-code.github.io/REPLIKANT/
 
@@ -12,7 +12,7 @@
 - **CAPTURE CYCLES** : N prises d'une note grave, un CC envoyé avant chacune (ou la vélocité, ou rien : à la main) ; dans chaque prise, la période trouvée par autocorrélation près de la note (ou du double, quand un sub est là), le cycle pris sur un passage par zéro et rééchantillonné en Lanczos. Banque gardée dans `<Nom>/Cycles/<Nom> - cycles 2048.wav` (32 bits flottants, lu par Serum, Vital, Bitwig).
 - **RÉÉCHANTILLONNER** (`Player::resampleChunk`) : la sortie de la chaîne, avant le volume, enregistrée sur 1 à 8 mesures (départ sur la mesure de l'hôte) ou en libre ; la passation se fait en 20 ms à puissance constante. Ensuite, la chaîne rendue neutre (filtre, drive, effets, WTF?! coupés et vidés, voix arrêtées), l'enregistrement y repasse en boucle comme une entrée, identique à l'échantillon près. Sa fin est fondue dans son début avec les 10 ms enregistrées après elle. Injecté dans le SAMPLER, les réglages remis à zéro, puis la chaîne relâchée.
 - **Ordre des effets** libre : une permutation des six étages, prise au fond d'un creux de 10 ms.
-- **Interface** (`Source/ui/Machine`, `Look`, `Pictos`) : écran noir, pages et banques, huit encodeurs, pupitre, vu-mètres ; pictos dessinés (schémas des filtres, bobines, chaîne, câble de patch…) ; thèmes Noir & or et Clair.
+- **Interface** (`Source/ui/Machine`, `Look`, `Pictos`) : écran noir, pages et banques, huit encodeurs, pupitre, vu-mètres ; pictos dessinés (schémas des filtres, bobines, chaîne, câble de patch…).
 - **Lissage** : coupure, profondeur d'enveloppe et pas de lecture en rampes à l'échantillon ; réglages continus glissés (~12 ms) pendant que ça joue.
 - **WTF?!** : dix réglages du moteur tirés au sort à chaque croche (LIVE) ou en boucle de huit (LOOP), glissés en 30 ms.
 
@@ -22,12 +22,12 @@
 - **Voix** : 8, mono ou stéréo, POLY / MONO / LEGATO, glisse, transposition (la touche rendue HQ de la note décalée), ADSR.
 - **Lecture** : SAMPLE ou ÉLASTIQUE (grains alignés par corrélation, WSOLA : vitesse et hauteur séparées) ; DÉPART, SENS, boucle déplacée et raccourcie (raccords lissés à puissance constante).
 - **Pitch extrême** : sinc de Kaiser à coupure qui suit la transposition ; copies de chaque enregistrement une, deux, trois octaves plus bas (demi-bande de 255 points, ~120 dB) lues dès que la voix monte d'une quinte et demie ; TRANSITOIRES GARDÉS (l'attaque, mesurée jusqu'à ce que l'enveloppe retombe de 9 dB, jouée à sa vitesse, le corps transposé ensuite) ; passe-haut de sécurité à 5 Hz sur les voix.
-- **ALIASING** (d'après l'échelle que décrit le manuel de l'Assimil8or, écrite à notre façon) : sinc qui suit la hauteur → sinc qui ne la suit plus → noyau court et doux → linéaire → drop-sample → au-delà, l'interpolation passe-haut (les images plus fortes que le son) ; BITS de 32 à 1, fractionnaires.
+- **ALIASING** : sinc qui suit la hauteur → sinc qui ne la suit plus → noyau court et doux → linéaire → drop-sample → au-delà, l'interpolation passe-haut (les images plus fortes que le son) ; BITS de 32 à 1, fractionnaires.
 - **Modulation de phase** : l'adresse de lecture poussée de ±INDICE échantillons (0 à 256) par un sinus sur la note × RAPPORT, par le sample (une deuxième tête à RAPPORT fois sa vitesse) ou par l'entrée.
 - **Filtres** (`Source/dsp/VAFilter`) : MOOG (échelle D'Angelo–Välimäki), MS-20 (Korg 35 en série, SÉPARATION), SEM (OTA), OSCAR (deux 12 dB écartés), WASP (CMOS), POLIVOKS (rails) ; ZDF, suréchantillonnés 1X / 2X / 4X (demi-bandes), réinjection FM, enveloppe, suivi du clavier, vélocité.
 - **Drive** : PRÉAMPLI, CONSOLE, BANDE (pré/désaccentuation exactes, bosse de tête, pleurage), suréchantillonné 4X.
 - **Effets**, dans cet ordre : SPECTRE (pics d'une FFT de 4096 points rendus par 1 à 33 oscillateurs), PITCH (deux voix Signalsmith, retards, réinjection, CRISTAUX : grains à l'envers), CHORUS / FLANGER / VIBRATO, CRUSH, ESPACE (FDN de 8 lignes de MIFM1, shimmer, gel).
-- **Mods** : 4, ONDE / PAS / HASARD / ENV / SUIVEUR, au tempo de l'hôte (sur sa grille) ou au leur, 8 routes chacun ; assignation façon IMPAKT / Torso.
+- **Mods** : 4, ONDE / PAS / HASARD / ENV / SUIVEUR, au tempo de l'hôte (sur sa grille) ou au leur, 8 routes chacun ; assignation en tournant le potard.
 - **Scènes** : 16, deux sous le fader (A, B) ; un réglage tenu d'un seul côté part de sa propre valeur.
 - **Multi-effet** : ÉCOUTE PAR LES EFFETS, l'entrée (une piste en insert) passe dans le filtre et la chaîne.
 - **Horloge MIDI** : 24 tops par noire, Start / Stop ; vers un port du Mac (fil à haute priorité) ou la sortie du plug-in (à l'échantillon), interne ou suivant l'hôte.
@@ -52,7 +52,7 @@
 - **Synthé test** intégré (deux dents de scie désaccordées, un sub, un filtre 24 dB, une dérive, un peu de bruit et de latence) pour tout essayer sans matériel.
 - **Instruments** dans `~/Music/REPLIKANT/<Nom>/` : `<Nom>.replikant` (JSON) et `Samples/*.wav` (24 bits, chunks `smpl` et `inst`). Le projet du DAW garde le chemin et le recharge.
 - **Exports** : dossier de WAV (note, justesse, boucle, zone dans chaque fichier) ou `.multisample` Bitwig, les samples enregistrés ou toutes les touches rendues.
-- **Mises à jour** depuis le plug-in (comme OXIde, IMPAKT et RackAttack Editor).
+- **Mises à jour** depuis le plug-in.
 
 ## Comment ça se branche
 
@@ -82,8 +82,8 @@ ctest --test-dir build --output-on-failure
 - `Source/core/` : le DSP sans JUCE (sinc, formants, boucles, hauteur, découpe, plan, WAV) ; `Tests/CoreTests.cpp` le vérifie, transposition comprise (écart des harmoniques avec la vraie note).
 - `Source/dsp/` : le DSP du player, sans JUCE (suréchantillonnage, filtres, drives, modulateurs, effets) ; `Tests/DspTests.cpp`.
 - `Source/engine/` : l'enregistreur (fil audio, sans allocation), le worker (découpe, assemblage, sauvegarde, rendu des touches en parallèle), l'instrument, le player (`Sound.h` : la table de tous ses réglages), le synthé test ; `Tests/EngineTests.cpp` fait une session entière sur le synthé test (et un pack chez un pote) ; `Tests/PlayerTests.cpp` mesure le player (repliement, échelle d'aliasing, décalage de la PM, transitoires, scènes, horloge, lissage, synthé, rééchantillonnage, CPU) ; `EngineTests` fait aussi une capture de cycles et lit des sons glissés.
-- `Source/ui/` : l'interface (écran, pupitre, encodeurs, pictos, deux thèmes) ; la cible `Snapshot` (hors build par défaut) dessine la fenêtre en PNG, chaque page, une capture, un rééchantillonnage et une capture de cycles.
+- `Source/ui/` : l'interface (écran, pupitre, encodeurs, pictos) ; la cible `Snapshot` (hors build par défaut) dessine la fenêtre en PNG, chaque page, une capture, un rééchantillonnage et une capture de cycles.
 - `ThirdParty/` : Signalsmith Stretch et Signalsmith Linear (licence MIT, textes à côté).
 - `Source/dsp/Space.*` : la réverbération de MIFM1 (MPL-2.0).
 - REPLIKANT est sous licence **GPL-3** (`LICENSE`).
-- `Resources/fonts/` : Space Grotesk et IBM Plex Mono, SIL Open Font License.
+- `Resources/fonts/` : Space Grotesk, SIL Open Font License.
