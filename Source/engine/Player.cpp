@@ -1157,6 +1157,9 @@ void Player::renderSynth (Voice& v, float* L, float* R, int n, const Chunk& c)
         }
         if (! stereo)
             xr = xl;
+        // a note at about -10 dB (both oscillators at their default levels): room for chords before the output
+        xl *= synthLevel;
+        xr *= synthLevel;
 
         const float fe = tick (v.flt, c.flt, false);
         if (c.filterOn)
@@ -1936,6 +1939,46 @@ void Player::render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi
         }
         runChain (L + pos, R + pos, m, c);
         pos = end;
+    }
+
+    // the guard at the door: nothing that isn't a number gets out (the engine is reset instead), nothing over +6 dB
+    // (a runaway stopped short; below, nothing is touched: the host does the rest)
+    {
+        bool sane = true;
+        for (int ch = 0; ch < 2 && sane; ++ch)
+        {
+            const auto* x = bus.getReadPointer (ch);
+            for (int i = 0; i < n; ++i)
+                if (! std::isfinite (x[i]) || std::abs (x[i]) > 1000.0f)
+                {
+                    sane = false;
+                    break;
+                }
+        }
+        if (! sane)
+        {
+            bus.clear (0, n);
+            for (auto& v : voices)
+                v.active = false;
+            for (auto& v : voices)
+                for (int ch = 0; ch < 2; ++ch)
+                {
+                    v.filter[ch].reset();
+                    v.os[ch].reset();
+                }
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                inFilter[ch].reset();
+                inOs[ch].reset();
+            }
+            resetEffects();
+            for (auto& w : wet)
+                w = 0.0f;
+            dcState[0][0] = dcState[0][1] = dcState[1][0] = dcState[1][1] = 0.0f;
+            rescues.fetch_add (1, std::memory_order_relaxed);
+        }
+        for (int ch = 0; ch < 2; ++ch)
+            juce::FloatVectorOperations::clip (bus.getWritePointer (ch), bus.getReadPointer (ch), -2.0f, 2.0f, n);
     }
 
     // out

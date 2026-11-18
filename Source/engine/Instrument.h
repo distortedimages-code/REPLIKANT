@@ -59,7 +59,8 @@ using InstrumentPtr = std::shared_ptr<const Instrument>;
 
 namespace instrumentio
 {
-    juce::File defaultRoot();                                       // ~/Music/REPLIKANT
+    juce::File defaultRoot();                                       // ~/Music/REPLIK8
+    juce::File movedFolder (const juce::File&);                     // an instrument's folder, wherever it is now
     juce::String safeName (const juce::String&);
     juce::String sampleFileName (const juce::String& instrument, const rk::Sample&);
 

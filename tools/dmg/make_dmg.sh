@@ -1,5 +1,5 @@
 #!/bin/bash
-# REPLIKANT's Mac disk image: an installer (AU, VST3 and the app, each one a choice) and,
+# REPLIK8's Mac disk image: an installer (AU, VST3 and the app, each one a choice) and,
 # beside it, the same three bundles with shortcuts to their folders for those who drag them by hand,
 # and a read-me with the Terminal commands.
 #   tools/dmg/make_dmg.sh <folder holding the three bundles> <output .dmg> <version>
@@ -14,14 +14,14 @@ VER="$3"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-for b in "REPLIKANT.component" "REPLIKANT.vst3" "REPLIKANT.app"; do
+for b in "REPLIK8.component" "REPLIK8.vst3" "REPLIK8.app"; do
     [ -d "$SRC/$b" ] || { echo "missing: $SRC/$b"; exit 1; }
 done
 
 mkdir -p "$WORK/root/au" "$WORK/root/vst3" "$WORK/root/app" "$WORK/pkgs" "$WORK/stage" "$WORK/res"
-ditto "$SRC/REPLIKANT.component" "$WORK/root/au/REPLIKANT.component"
-ditto "$SRC/REPLIKANT.vst3"      "$WORK/root/vst3/REPLIKANT.vst3"
-ditto "$SRC/REPLIKANT.app"       "$WORK/root/app/REPLIKANT.app"
+ditto "$SRC/REPLIK8.component" "$WORK/root/au/REPLIK8.component"
+ditto "$SRC/REPLIK8.vst3"      "$WORK/root/vst3/REPLIK8.vst3"
+ditto "$SRC/REPLIK8.app"       "$WORK/root/app/REPLIK8.app"
 
 # one package per bundle, none relocatable (an older copy elsewhere on the disk must not catch the install)
 pkg () {   # $1 root, $2 install location, [$3 scripts]
@@ -35,17 +35,17 @@ plistlib.dump(d, open(p, "wb"))' "$WORK/$1.plist"
 }
 pkg au   "/Library/Audio/Plug-Ins/Components" "$HERE/scripts-au"
 pkg vst3 "/Library/Audio/Plug-Ins/VST3"       "$HERE/scripts-vst3"
-pkg app  "/Applications"
+pkg app  "/Applications"                     "$HERE/scripts-app"
 
 sed "s/@VERSION@/$VER/g" "$HERE/distribution.xml" > "$WORK/distribution.xml"
 for f in welcome.html conclusion.html; do sed "s/@VERSION@/$VER/g" "$HERE/resources/$f" > "$WORK/res/$f"; done
 productbuild --distribution "$WORK/distribution.xml" --resources "$WORK/res" --package-path "$WORK/pkgs" \
-    "$WORK/stage/Installer REPLIKANT.pkg"
+    "$WORK/stage/Installer REPLIK8.pkg"
 
 # the disk image: the installer, the bundles (the same ones), the read-me; shortcuts and window in dmg_settings.py
-ditto "$SRC/REPLIKANT.component" "$WORK/stage/REPLIKANT.component"
-ditto "$SRC/REPLIKANT.vst3"      "$WORK/stage/REPLIKANT.vst3"
-ditto "$SRC/REPLIKANT.app"       "$WORK/stage/REPLIKANT.app"
+ditto "$SRC/REPLIK8.component" "$WORK/stage/REPLIK8.component"
+ditto "$SRC/REPLIK8.vst3"      "$WORK/stage/REPLIK8.vst3"
+ditto "$SRC/REPLIK8.app"       "$WORK/stage/REPLIK8.app"
 python3 -c 'import sys
 t = open(sys.argv[1], encoding="utf-8").read()
 t = t.replace("@COMMANDE@", open(sys.argv[2], encoding="utf-8").read().strip())
@@ -56,6 +56,6 @@ grep -q "auval -v aumf" "$WORK/stage/LISEZ-MOI.txt"
 tiffutil -cathidpicheck "$HERE/background.png" "$HERE/background@2x.png" -out "$WORK/background.tiff"
 
 rm -f "$OUT"
-python3 -m dmgbuild -s "$HERE/dmg_settings.py" -D stage="$WORK/stage" -D bg="$WORK/background.tiff" "REPLIKANT" "$OUT"
+python3 -m dmgbuild -s "$HERE/dmg_settings.py" -D stage="$WORK/stage" -D bg="$WORK/background.tiff" "REPLIK8" "$OUT"
 hdiutil verify "$OUT"
 echo "built $OUT"

@@ -1,0 +1,4 @@
+#!/bin/bash
+# REPLIK8's installer (the app): the app under its old name (REPLIKANT, until 0.3.0) goes.
+rm -rf "/Applications/REPLIKANT.app"
+exit 0

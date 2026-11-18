@@ -321,25 +321,46 @@ void encoder (juce::Graphics& g, juce::Point<float> c, float radius, float value
     knobInRelief (g, c, radius, value, bipolar, cap, modFrom, modTo, modColour, dim, lit);
 }
 
-void eye (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour outline, juce::Colour iris, float open)
+void badge (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour ink, juce::Colour face, juce::Colour band, juce::Colour bandInk)
 {
-    const float cx = r.getCentreX(), cy = r.getCentreY(), w = r.getWidth() * 0.5f, h = r.getHeight() * 0.5f * juce::jlimit (0.05f, 1.0f, open);
-    juce::Path lid;
-    lid.startNewSubPath (cx - w, cy);
-    lid.quadraticTo (cx, cy - h * 1.7f, cx + w, cy);
-    lid.quadraticTo (cx, cy + h * 1.7f, cx - w, cy);
-    lid.closeSubPath();
-    g.saveState();
-    g.reduceClipRegion (lid);
-    const float ri = r.getHeight() * 0.3f;
-    g.setColour (iris);
-    g.fillEllipse (cx - ri, cy - ri, ri * 2.0f, ri * 2.0f);
-    g.setColour (col::ink);
-    g.fillEllipse (cx - ri * 0.43f, cy - ri * 0.43f, ri * 0.86f, ri * 0.86f);
-    g.setColour (juce::Colours::white);
-    g.fillEllipse (cx + ri * 0.2f, cy - ri * 0.55f, ri * 0.36f, ri * 0.36f);
-    g.restoreState();
-    g.setColour (outline);
-    g.strokePath (lid, juce::PathStrokeType (r.getHeight() * 0.09f));
+    const float corner = r.getHeight() * 0.17f, line = juce::jmax (1.2f, r.getHeight() * 0.045f);
+    juce::Path frame;
+    frame.addRoundedRectangle (r, corner);
+    g.setColour (face);
+    g.fillPath (frame);
+    // the band, under the name
+    auto top = r, low = top.removeFromBottom (r.getHeight() * 0.38f);
+    {
+        juce::Graphics::ScopedSaveState s (g);
+        g.reduceClipRegion (frame);
+        g.setColour (band);
+        g.fillRect (low);
+        g.setColour (ink);
+        g.fillRect (low.getX(), low.getY() - line * 0.5f, low.getWidth(), line);
+    }
+    g.setColour (ink);
+    g.strokePath (frame, juce::PathStrokeType (line));
+    // REPLIK8, wide and heavy
+    {
+        const auto f = juce::Font (juce::FontOptions (groteskFace (700)).withHeight (top.getHeight() * 0.98f)).withExtraKerningFactor (0.02f);
+        juce::GlyphArrangement ga;
+        ga.addLineOfText (f, "REPLIK8", 0.0f, 0.0f);
+        juce::Path word;
+        ga.createPath (word);
+        const auto b = word.getBounds();
+        const float stretch = 1.22f;
+        const float scale = juce::jmin ((top.getWidth() - r.getHeight() * 0.5f) / (b.getWidth() * stretch), (top.getHeight() * 0.62f) / b.getHeight());
+        word.applyTransform (juce::AffineTransform::translation (-b.getCentreX(), -b.getCentreY())
+                                 .scaled (scale * stretch, scale)
+                                 .translated (top.getCentreX(), top.getCentreY() + line * 0.3f));
+        g.fillPath (word);
+    }
+    // SAMPLER, spaced out
+    {
+        const auto f = juce::Font (juce::FontOptions (groteskFace (500)).withHeight (low.getHeight() * 0.62f)).withExtraKerningFactor (0.55f);
+        g.setColour (bandInk);
+        g.setFont (f);
+        g.drawText ("SAMPLER", low.translated (low.getHeight() * 0.12f, line * 0.25f), juce::Justification::centred, false);
+    }
 }
 }

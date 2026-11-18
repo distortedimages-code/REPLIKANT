@@ -1,4 +1,4 @@
-# Builds and tests REPLIKANT on GitHub's Macs at each push: no Mac tools needed
+# Builds and tests REPLIK8 on GitHub's Macs at each push: no Mac tools needed
 # locally. The AU, VST3 and app are in the "Artifacts" of each run (Actions tab).
 name: build
 
@@ -22,27 +22,31 @@ jobs:
       - name: Package
         run: |
           ART=build/REPLIKANT_artefacts/Release
-          mkdir -p pkg out
-          for b in "AU/REPLIKANT.component" "VST3/REPLIKANT.vst3" "Standalone/REPLIKANT.app"; do
+          mkdir -p pkg zip out
+          for b in "AU/REPLIK8.component" "VST3/REPLIK8.vst3" "Standalone/REPLIK8.app"; do
             codesign --force --deep --sign - "$ART/$b"
             cp -R "$ART/$b" pkg/
           done
-          ditto -c -k pkg out/REPLIKANT-mac.zip
+          # the zip for the in-plugin updater: the bundles at its top, plus the same ones under the old name
+          # (REPLIKANT, until 0.3.0), which is what the updater of 0.3.0 and before looks for
+          ditto pkg zip
+          for e in component vst3 app; do ditto "pkg/REPLIK8.$e" "zip/REPLIKANT.$e"; done
+          ditto -c -k zip out/REPLIKANT-mac.zip
           # the disk image with its installer, as the release makes it (to catch problems before a release)
           VER=$(sed -n 's/^project(REPLIKANT VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
           python3 -m pip install --quiet --break-system-packages dmgbuild==1.6.7 || python3 -m pip install --quiet dmgbuild==1.6.7
-          tools/dmg/make_dmg.sh pkg out/REPLIKANT-mac.dmg "$VER"
+          tools/dmg/make_dmg.sh pkg out/REPLIK8-mac.dmg "$VER"
       - name: Validate the Audio Unit (auval, as Logic does)
         run: |
           mkdir -p ~/Library/Audio/Plug-Ins/Components
-          rm -rf ~/Library/Audio/Plug-Ins/Components/REPLIKANT.component
-          cp -R pkg/REPLIKANT.component ~/Library/Audio/Plug-Ins/Components/
+          rm -rf ~/Library/Audio/Plug-Ins/Components/REPLIK8.component
+          cp -R pkg/REPLIK8.component ~/Library/Audio/Plug-Ins/Components/
           killall -9 AudioComponentRegistrar 2>/dev/null || true
           sleep 2
           auval -v aumf Rplk Dimg
       - uses: actions/upload-artifact@v4
         with:
-          name: REPLIKANT-mac
+          name: REPLIK8-mac
           path: |
             out/REPLIKANT-mac.zip
-            out/REPLIKANT-mac.dmg
+            out/REPLIK8-mac.dmg

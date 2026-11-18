@@ -5,7 +5,7 @@ if(APPLE)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Universal binary")
 endif()
 
-project(REPLIKANT VERSION 0.3.0 LANGUAGES C CXX)
+project(REPLIKANT VERSION 0.3.1 LANGUAGES C CXX)
 
 # GitHub repository whose releases the plug-in checks for updates (public releases).
 set(RK_UPDATE_REPO "distortedimages-code/REPLIKANT" CACHE STRING "owner/repo checked for updates (empty = no update check)")
@@ -67,7 +67,7 @@ endif()
 # REPLIKANT: AU (music effect: audio in from the synth, MIDI in to play), VST3 and the app (standalone)
 juce_add_plugin(REPLIKANT
     COMPANY_NAME "distortedimages"
-    PRODUCT_NAME "REPLIKANT"
+    PRODUCT_NAME "REPLIK8"
     BUNDLE_ID com.distortedimages.replikant
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT TRUE
@@ -78,7 +78,7 @@ juce_add_plugin(REPLIKANT
     PLUGIN_MANUFACTURER_CODE Dimg
     PLUGIN_CODE Rplk
     MICROPHONE_PERMISSION_ENABLED TRUE
-    MICROPHONE_PERMISSION_TEXT "REPLIKANT enregistre ton synthé par l'entrée de ta carte son. Rien n'est envoyé nulle part."
+    MICROPHONE_PERMISSION_TEXT "REPLIK8 enregistre ton synthé par l'entrée de ta carte son. Rien n'est envoyé nulle part."
     AU_MAIN_TYPE kAudioUnitType_MusicEffect
     VST3_CATEGORIES Fx Sampler Instrument
     FORMATS AU VST3 Standalone)
@@ -209,12 +209,28 @@ if(RK_BUILD_TESTS)
         juce::juce_recommended_warning_flags)
     add_test(NAME UpdaterTests COMMAND UpdaterTests)
 
+    # The processor as a host runs it (on GitHub's Macs too)
+    juce_add_console_app(ProcessorTests PRODUCT_NAME "ProcessorTests")
+    juce_generate_juce_header(ProcessorTests)
+    target_sources(ProcessorTests PRIVATE Tests/ProcessorTests.cpp ${RK_APP_SOURCES})
+    target_compile_definitions(ProcessorTests PRIVATE ${RK_DEFINITIONS} JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1
+        JucePlugin_Name="REPLIK8" JucePlugin_Build_Standalone=0 RK_SNAPSHOT=1)
+    target_link_libraries(ProcessorTests PRIVATE
+        rk_core
+        RkFonts
+        RkNotes
+        juce::juce_audio_utils
+        juce::juce_audio_devices
+        juce::juce_cryptography
+        juce::juce_recommended_config_flags)
+    add_test(NAME ProcessorTests COMMAND ProcessorTests)
+
     # Not a test: the window drawn to a PNG (to look at it without a Mac)
     juce_add_console_app(Snapshot PRODUCT_NAME "Snapshot")
     juce_generate_juce_header(Snapshot)
     target_sources(Snapshot PRIVATE Tests/Snapshot.cpp ${RK_APP_SOURCES})
     target_compile_definitions(Snapshot PRIVATE ${RK_DEFINITIONS} JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1
-        JucePlugin_Name="REPLIKANT" JucePlugin_Build_Standalone=0 RK_SNAPSHOT=1)
+        JucePlugin_Name="REPLIK8" JucePlugin_Build_Standalone=0 RK_SNAPSHOT=1)
     target_link_libraries(Snapshot PRIVATE
         rk_core
         RkFonts

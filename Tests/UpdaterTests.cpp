@@ -12,7 +12,8 @@ static int failures = 0, checks = 0;
         if (! (cond)) { ++failures; std::printf ("FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond); } \
     } while (0)
 
-static const juce::String kComp = "REPLIKANT.component", kVst = "REPLIKANT.vst3", kApp = "REPLIKANT.app";
+static const juce::String kComp = "REPLIK8.component", kVst = "REPLIK8.vst3", kApp = "REPLIK8.app";
+static const juce::String kOldComp = "REPLIKANT.component", kOldVst = "REPLIKANT.vst3";
 
 static void testVersions()
 {
@@ -79,7 +80,7 @@ static void testNews()
     CHECK (Updater::parseReleases ("{ \"message\": \"rate limit\" }", Updater::assetName).empty());
 
     const auto notes = juce::String::fromUTF8 (
-        "**REPLIKANT 0.5.10** : la mesure guidée ne bloque plus sur un faux changement de volume.\n\n"
+        "**REPLIK8 0.5.10** : la mesure guidée ne bloque plus sur un faux changement de volume.\n\n"
         "- **Plus de pause « Le son a changé de volume »** quand personne n'a touché la machine. À la fin...\n"
         "- **Chaque partie commence dans le silence** : un long relâchement...\n"
         "- Tout ce qu'apportait la 0.5.9 reste : le simulateur réglé sur une vraie machine.\n\n"
@@ -221,7 +222,7 @@ static void testElevated()
         CHECK (payloadOf (au) == "new 0.3.1");
         CHECK (payloadOf (vst) == "new 0.3.1");
         CHECK (entries (components) == 1 && entries (vst3) == 1);   // nothing left behind
-        CHECK (ran.contains ("/Components/REPLIKANT.component") && ! ran.contains ("VST3"));
+        CHECK (ran.contains ("/Components/REPLIK8.component") && ! ran.contains ("VST3"));
     }
    #endif
 
@@ -231,7 +232,7 @@ static void testElevated()
         juce::StringArray installed;
         const auto r = Updater::installBundles (zip, { au, vst }, "0.3.1", unzip, installed,
                                                 [] (const juce::String&) { return false; }, protectedFolder);
-        CHECK (r.failed() && r.getErrorMessage().contains ("REPLIKANT.component"));
+        CHECK (r.failed() && r.getErrorMessage().contains ("REPLIK8.component"));
         CHECK (installed.size() == 1);
         CHECK (payloadOf (au) == "old");
         CHECK (entries (components) == 1);
@@ -245,6 +246,25 @@ static void testElevated()
         CHECK (r.failed() && installed.size() == 1);
         CHECK (payloadOf (au) == "old");
     }
+
+    // installed under its old name (until 0.3.0): REPLIK8's bundle takes its place, the old one goes, in a folder
+    // it can write in and in a protected one
+   #if ! JUCE_WINDOWS
+    {
+        dir.deleteRecursively();
+        const auto oldAu = components.getChildFile (kOldComp), oldVst = vst3.getChildFile (kOldVst);
+        makeBundle (oldAu, "0.3.0", "old");
+        makeBundle (oldVst, "0.3.0", "old");
+        const auto zip = makeZip (dir, "0.3.1", { kComp, kVst, kApp, kOldComp, kOldVst });
+        juce::StringArray installed;
+        const auto r = Updater::installBundles (zip, { oldAu, oldVst }, "0.3.1", unzip, installed, shell, protectedFolder);
+        CHECK (r.wasOk());
+        CHECK (installed.size() == 2);
+        CHECK (payloadOf (components.getChildFile (kComp)) == "new 0.3.1" && payloadOf (vst3.getChildFile (kVst)) == "new 0.3.1");
+        CHECK (! oldAu.exists() && ! oldVst.exists());
+        CHECK (entries (components) == 1 && entries (vst3) == 1);
+    }
+   #endif
 
     // paths with spaces and quotes survive the shell
     CHECK (Updater::shellQuote ("/a b/it's") == "'/a b/it'\\''s'");

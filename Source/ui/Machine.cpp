@@ -164,6 +164,14 @@ public:
         dragPos = -1;
         if (fxShown)
             for (int i = 0; i < Player::numStages; ++i)
+                if (fxSwitches[i].contains (e.position))
+                {
+                    toggleStage (proc().player.fxOrder()[(size_t) i]);
+                    repaint();
+                    return;
+                }
+        if (fxShown)
+            for (int i = 0; i < Player::numStages; ++i)
                 if (fxBoxes[i].contains (e.position))
                 {
                     dragPos = i;
@@ -193,13 +201,11 @@ public:
         {
             // a click: that effect's bank (the drive lives on the filter's page)
             const int st = order[(size_t) from];
-            const int banks[Player::numStages] = { -1, 0, 2, 3, 4, 5 };
-            if (banks[st] >= 0)
-            {
-                m.bankOf[juce::String ("fx") + juce::String (m.mode)] = banks[st];
-                m.layoutEncoders();
-            }
-            repaint();
+            const int banks[Player::numStages] = { 0, 1, 3, 4, 5, 6 };
+            m.bankOf[juce::String ("fx") + juce::String (m.mode)] = banks[st];
+            m.focus = nullptr;
+            m.layoutEncoders();
+            m.repaint();
             return;
         }
         // a drag: the stage moved to where it was let go
@@ -215,9 +221,26 @@ public:
         repaint();
     }
 
+    // an effect on, or passed by (the drive back on its last model)
+    void toggleStage (int st)
+    {
+        auto& pr = proc();
+        if (st == 0)
+        {
+            const int model = (int) P (pr, snd::dModel);
+            if (model > 0)
+                lastDriveModel = model;
+            setSound (pr, snd::dModel, model > 0 ? 0.0f : (float) lastDriveModel);
+            return;
+        }
+        const int ids[Player::numStages] = { -1, snd::spOn, snd::piOn, snd::chOn, snd::crOn, snd::rvOn };
+        setSound (pr, ids[st], P (pr, ids[st]) > 0.5f ? 0.0f : 1.0f);
+    }
+
 private:
     Machine& m;
-    juce::Rectangle<float> fxBoxes[Player::numStages], fxRow;
+    int lastDriveModel = 1;
+    juce::Rectangle<float> fxBoxes[Player::numStages], fxSwitches[Player::numStages], fxRow;
     bool fxShown = false;
     int dragPos = -1;
     float dragX = 0.0f;
@@ -824,13 +847,13 @@ private:
             const int ons[6] = { (int) P (p, snd::dModel) > 0, P (p, snd::spOn) > 0.5f, P (p, snd::piOn) > 0.5f, P (p, snd::chOn) > 0.5f,
                                  P (p, snd::crOn) > 0.5f, P (p, snd::rvOn) > 0.5f };
             const char* names[6] = { "drive", "spectre", "pitch", "chorus", "crush", "espace" };
-            const int bankStage[6] = { 1, 1, 2, 3, 4, 5 };
-            const int shownStage = bankStage[juce::jlimit (0, 5, m.bankOf[juce::String ("fx") + juce::String (m.mode)])];
+            const int bankStage[7] = { 0, 1, 1, 2, 3, 4, 5 };
+            const int shownStage = bankStage[juce::jlimit (0, 6, m.bankOf[juce::String ("fx") + juce::String (m.mode)])];
             const auto order = p.player.fxOrder();
             fxShown = true;
-            fxRow = r.withSizeKeepingCentre (r.getWidth(), 62.0f).translated (0.0f, -8.0f);
+            fxRow = r.withSizeKeepingCentre (r.getWidth(), 80.0f).translated (0.0f, -8.0f);
             const float w = (fxRow.getWidth() - 5.0f * 10.0f) / 6.0f;
-            text (g, "entrée → … → sortie · glisse pour changer l'ordre"_fr, r.removeFromBottom (18.0f), mono (10.0f), col::screenDim, juce::Justification::centred, true);
+            text (g, "entrée → … → sortie · glisse pour changer l'ordre · l'interrupteur coupe l'effet"_fr, r.removeFromBottom (18.0f), mono (10.0f), col::screenDim, juce::Justification::centred, true);
             for (int pos = 0; pos < 6; ++pos)
             {
                 const int st = order[(size_t) pos];
@@ -849,6 +872,13 @@ private:
                 g.drawRoundedRectangle (box, 6.0f, st == shownStage ? 2.0f : 1.5f);
                 auto inBox = box.reduced (4.0f, 6.0f);
                 const auto ink = ons[st] ? col::screen : col::screenDim;
+                // its switch: on, or passed by
+                auto sw = inBox.removeFromTop (14.0f).withSizeKeepingCentre (26.0f, 14.0f);
+                fxSwitches[pos] = sw.expanded (6.0f, 4.0f);
+                g.setColour (ons[st] ? col::screen : col::screenLine);
+                g.fillRoundedRectangle (sw, 7.0f);
+                g.setColour (ons[st] ? col::sYellow : col::screenDim);
+                g.fillEllipse (juce::Rectangle<float> (10.0f, 10.0f).withCentre ({ ons[st] ? sw.getRight() - 7.0f : sw.getX() + 7.0f, sw.getCentreY() }));
                 picto (g, stagePicto (st, (int) P (p, snd::dModel)), inBox.removeFromTop (inBox.getHeight() - 16.0f).withSizeKeepingCentre (26.0f, 26.0f), ink, 1.5f);
                 text (g, names[st], inBox, mono (10.0f, 500), ink, juce::Justification::centred);
             }
@@ -1487,7 +1517,7 @@ public:
                 o.monitor = o.monitor == 2 ? 1 : 2;
                 m.proc.settingsChanged();
                 m.showMessage (o.monitor == 2 ? "L'entrée passe par les effets : ce que tu entends est ce qui sera enregistré."_fr
-                                              : "L'entrée est entendue directement : seul ce que joue REPLIKANT sera enregistré."_fr);
+                                              : "L'entrée est entendue directement : seul ce que joue REPLIK8 sera enregistré."_fr);
             }
             repaint();
             return;
@@ -1708,13 +1738,15 @@ void Machine::buildPages()
     };
     auto fxPage = [&]
     {
+        // (each effect's on and off: the switch on its block, in the chain on the screen)
         Page pg { "fx", "fx", {} };
-        pg.banks.push_back ({ "spectre", { S (snd::spOn), S (snd::spVoices), S (snd::spSlice), S (snd::spBlur), S (snd::spGlide), S (snd::spCentre), S (snd::spWidth), S (snd::spMix) } });
+        pg.banks.push_back ({ "drive", { S (snd::dModel), S (snd::dAmt), S (snd::dTone), S (snd::dMix) } });
+        pg.banks.push_back ({ "spectre", { S (snd::spVoices), S (snd::spSlice), S (snd::spBlur), S (snd::spGlide), S (snd::spCentre), S (snd::spWidth), S (snd::spMix) } });
         pg.banks.push_back ({ "spectre +", { S (snd::spOct), S (snd::spWave), S (snd::spFreeze), S (snd::spFeedback) } });
-        pg.banks.push_back ({ "pitch", { S (snd::piOn), S (snd::piA), S (snd::piB), S (snd::piDetune), S (snd::piDelay), S (snd::piLevelB), S (snd::piFeedback), S (snd::piMix) } });
-        pg.banks.push_back ({ "chorus", { S (snd::chOn), S (snd::chMode), S (snd::chRate), S (snd::chDepth), S (snd::chFeedback), S (snd::chTone), S (snd::chMix), S (snd::piCrystals, "Cristaux") } });
-        pg.banks.push_back ({ "crush", { S (snd::crOn), S (snd::crBits), S (snd::crRate), S (snd::crJitter), S (snd::crTone), S (snd::crMix) } });
-        pg.banks.push_back ({ "espace", { S (snd::rvOn), S (snd::rvSize), S (snd::rvDecay), S (snd::rvTone), S (snd::rvShimmer), S (snd::rvMod), S (snd::rvMix) } });
+        pg.banks.push_back ({ "pitch", { S (snd::piA), S (snd::piB), S (snd::piDetune), S (snd::piDelay), S (snd::piLevelB), S (snd::piFeedback), S (snd::piMix) } });
+        pg.banks.push_back ({ "chorus", { S (snd::chMode), S (snd::chRate), S (snd::chDepth), S (snd::chFeedback), S (snd::chTone), S (snd::chMix), S (snd::piCrystals, "Cristaux") } });
+        pg.banks.push_back ({ "crush", { S (snd::crBits), S (snd::crRate), S (snd::crJitter), S (snd::crTone), S (snd::crMix) } });
+        pg.banks.push_back ({ "espace", { S (snd::rvSize), S (snd::rvDecay), S (snd::rvTone), S (snd::rvShimmer), S (snd::rvMod), S (snd::rvMix) } });
         return pg;
     };
     auto modsPage = [&]
@@ -1779,7 +1811,7 @@ void Machine::buildPages()
             else if (v - 2 < midiDevices.size()) proc.setClockDestination (midiDevices[v - 2].identifier, midiDevices[v - 2].name);
         }));
         auto monitor = choiceCtl ("Écoute"_fr, { "non", "directe", "par les effets" }, [&o] { return o.monitor; }, [this, &o] (int v) { o.monitor = v; proc.settingsChanged(); });
-        monitor.tip = "L'audio qui arrive (le synthé, ou la piste où REPLIKANT est en insert) : coupé, tel quel, ou passé dans le filtre et les effets (multi-effet, avec les mods)."_fr;
+        monitor.tip = "L'audio qui arrive (le synthé, ou la piste où REPLIK8 est en insert) : coupé, tel quel, ou passé dans le filtre et les effets (multi-effet, avec les mods)."_fr;
         b.ctls.push_back (monitor);
         b.ctls.push_back (choiceCtl ("Clavier vers", { "replikant", "synthé"_fr }, [&o] { return o.thru ? 1 : 0; }, [this, &o] (int v) { o.thru = v == 1; proc.settingsChanged(); }));
         pg.banks.push_back (std::move (b));
@@ -2226,13 +2258,11 @@ void Machine::paint (juce::Graphics& g)
     }
     ledMeter (g, inMeter.toFloat(), proc.isSampling() || proc.options.monitor > 0 ? proc.inputLevel() : 0.0f, "in");
     ledMeter (g, outMeter.toFloat(), proc.player.outLevel.load(), "out");
-    // the name and its eye (closing now and then, red while a capture runs)
+    // the name (its band lit while a capture runs)
     auto l = logo.toFloat();
-    const double t = juce::Time::getMillisecondCounterHiRes();
-    const bool blink = std::fmod (t, 6400.0) < 140.0;
-    eye (g, l.removeFromLeft (38.0f).withSizeKeepingCentre (38.0f, 20.0f), col::ink, proc.isSampling() ? col::red : col::accent, blink ? 0.08f : 1.0f);
+    badge (g, l.removeFromLeft (138.0f).withSizeKeepingCentre (138.0f, 40.0f), col::ink, col::body,
+           proc.isSampling() || proc.player.resampleState() == Player::Resample::recording ? col::red : col::accent, col::ink);
     l.removeFromLeft (10.0f);
-    text (g, "replikant", l.removeFromLeft (112.0f), grotesk (19.0f, 500), col::ink);
     text (g, Updater::currentVersion(), l, mono (11.0f), col::ink2, juce::Justification::centredLeft, true);
     // the instrument's name in its black window
     g.setColour (col::screen);
@@ -2425,7 +2455,7 @@ void Machine::toggleSampling()
 
 void Machine::openInstrument()
 {
-    chooser = std::make_unique<juce::FileChooser> ("Ouvrir un instrument REPLIKANT, un pack (zip) ou un son"_fr, proc.instrumentsRoot(), "*.replikant;*.zip;*.wav;*.aif;*.aiff;*.flac");
+    chooser = std::make_unique<juce::FileChooser> ("Ouvrir un instrument REPLIK8, un pack (zip) ou un son"_fr, proc.instrumentsRoot(), "*.replikant;*.zip;*.wav;*.aif;*.aiff;*.flac");
     chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                           [this] (const juce::FileChooser& fc)
     {
@@ -2440,7 +2470,7 @@ void Machine::exportMenu (juce::PopupMenu& m)
     const bool has = proc.getInstrument() != nullptr && ! proc.getInstrument()->samples.empty();
     m.addItem (5, "Enregistrer le pack (zip) sous..."_fr, has);
     m.addItem (1, "Exporter les samples en WAV"_fr, has);
-    m.addItem (2, "Exporter toutes les touches en WAV (rendu REPLIKANT)"_fr, has);
+    m.addItem (2, "Exporter toutes les touches en WAV (rendu REPLIK8)"_fr, has);
     m.addItem (3, "Exporter en Bitwig .multisample"_fr, has);
     m.addItem (4, "Exporter toutes les touches en .multisample"_fr, has);
     m.addItem (6, "Ouvrir le dossier de l'instrument"_fr);

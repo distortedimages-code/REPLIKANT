@@ -1,11 +1,12 @@
 # Publishing a version, as for IMPAKT: raise VERSION in CMakeLists.txt, write RELEASE_NOTES.md, merge into main.
-# RELEASE_NOTES.md: first line "**REPLIKANT X.Y.Z** : what it brings.", then one "- **Short title** details"
+# RELEASE_NOTES.md: first line "**REPLIK8 X.Y.Z** : what it brings.", then one "- **Short title** details"
 # per point. The editor's update window shows that line and the titles (Updater::summarise).
 # On that push, when there is no release v<VERSION> yet, this builds and tests on a Mac and publishes the release
 # v<VERSION> (GitHub creates the tag on that commit) with
-#   REPLIKANT-mac.dmg           for people (the site links to it): an installer (.pkg) and the bundles to drag,
-#                                       with the Terminal commands,
-#   REPLIKANT-mac.zip + .sha256 for the in-plugin updater: installed plug-ins then offer the update.
+#   REPLIK8-mac.dmg             for people (the site links to it): an installer (.pkg) and the bundles to drag,
+#                                       with the Terminal commands; REPLIKANT-mac.dmg, the same, for old links,
+#   REPLIKANT-mac.zip + .sha256 for the in-plugin updater: installed plug-ins then offer the update (the asset
+#                                       keeps the old name, which the updater of 0.3.0 and before looks for).
 # Any other push to main (same VERSION) stops at the check. Actions > release > Run workflow does the same by hand;
 # with "brouillon" ticked, the release stays a draft to look at before publishing it.
 name: release
@@ -71,23 +72,27 @@ jobs:
       - name: Package
         run: |
           ART=build/REPLIKANT_artefacts/Release
-          mkdir -p pkg out
-          for b in "AU/REPLIKANT.component" "VST3/REPLIKANT.vst3" "Standalone/REPLIKANT.app"; do
+          mkdir -p pkg zip out
+          for b in "AU/REPLIK8.component" "VST3/REPLIK8.vst3" "Standalone/REPLIK8.app"; do
             codesign --force --deep --sign - "$ART/$b"
             cp -R "$ART/$b" pkg/
           done
-          # the three bundles at the top of the zip, as the in-plugin updater expects
-          ditto -c -k pkg out/REPLIKANT-mac.zip
+          # the zip for the in-plugin updater: the bundles at its top, plus the same ones under the old name
+          # (REPLIKANT, until 0.3.0), which is what the updater of 0.3.0 and before looks for
+          ditto pkg zip
+          for e in component vst3 app; do ditto "pkg/REPLIK8.$e" "zip/REPLIKANT.$e"; done
+          ditto -c -k zip out/REPLIKANT-mac.zip
           (cd out && shasum -a 256 REPLIKANT-mac.zip > REPLIKANT-mac.zip.sha256)
           # the disk image people download from the site
           python3 -m pip install --quiet --break-system-packages dmgbuild==1.6.7 || python3 -m pip install --quiet dmgbuild==1.6.7
-          tools/dmg/make_dmg.sh pkg out/REPLIKANT-mac.dmg "$VERSION"
+          tools/dmg/make_dmg.sh pkg out/REPLIK8-mac.dmg "$VERSION"
+          cp out/REPLIK8-mac.dmg out/REPLIKANT-mac.dmg
 
       - name: Validate the Audio Unit (auval, as Logic does)
         run: |
           mkdir -p ~/Library/Audio/Plug-Ins/Components
-          rm -rf ~/Library/Audio/Plug-Ins/Components/REPLIKANT.component
-          cp -R pkg/REPLIKANT.component ~/Library/Audio/Plug-Ins/Components/
+          rm -rf ~/Library/Audio/Plug-Ins/Components/REPLIK8.component
+          cp -R pkg/REPLIK8.component ~/Library/Audio/Plug-Ins/Components/
           killall -9 AudioComponentRegistrar 2>/dev/null || true
           sleep 2
           auval -v aumf Rplk Dimg
@@ -97,6 +102,6 @@ jobs:
           DRAFT: ${{ github.event_name == 'workflow_dispatch' && inputs.brouillon && '--draft' || '' }}
         run: |
           NOTES=RELEASE_NOTES.md
-          [ -f "$NOTES" ] || { echo "REPLIKANT $VERSION" > /tmp/notes.md; NOTES=/tmp/notes.md; }
-          gh release create "v$VERSION" out/REPLIKANT-mac.dmg out/REPLIKANT-mac.zip out/REPLIKANT-mac.zip.sha256 \
-            --target "$GITHUB_SHA" --title "REPLIKANT $VERSION" --notes-file "$NOTES" $DRAFT
+          [ -f "$NOTES" ] || { echo "REPLIK8 $VERSION" > /tmp/notes.md; NOTES=/tmp/notes.md; }
+          gh release create "v$VERSION" out/REPLIK8-mac.dmg out/REPLIKANT-mac.dmg out/REPLIKANT-mac.zip out/REPLIKANT-mac.zip.sha256 \
+            --target "$GITHUB_SHA" --title "REPLIK8 $VERSION" --notes-file "$NOTES" $DRAFT

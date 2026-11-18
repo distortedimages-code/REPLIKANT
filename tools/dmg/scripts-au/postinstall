@@ -1,10 +1,15 @@
 #!/bin/bash
-# REPLIKANT's installer (AU): an older copy in the user's own Components folder would hide this
-# one, so it goes; then the Audio Unit cache is refreshed so that hosts see the new version at once.
+# REPLIK8's installer (AU): an older copy in the user's own Components folder would hide this one, and the bundle
+# under its old name (REPLIKANT, until 0.3.0) would be the same plug-in twice: both go; then the Audio Unit cache
+# is refreshed so that hosts see the new version at once.
+rm -rf "/Library/Audio/Plug-Ins/Components/REPLIKANT.component"
 USER_NOW=$(stat -f%Su /dev/console 2>/dev/null || true)
 if [ -n "$USER_NOW" ] && [ "$USER_NOW" != "root" ]; then
     HOME_NOW=$(dscl . -read "/Users/$USER_NOW" NFSHomeDirectory 2>/dev/null | awk '{print $2}')
-    [ -n "$HOME_NOW" ] && rm -rf "$HOME_NOW/Library/Audio/Plug-Ins/Components/REPLIKANT.component"
+    if [ -n "$HOME_NOW" ]; then
+        rm -rf "$HOME_NOW/Library/Audio/Plug-Ins/Components/REPLIK8.component"
+        rm -rf "$HOME_NOW/Library/Audio/Plug-Ins/Components/REPLIKANT.component"
+    fi
 fi
 killall -9 AudioComponentRegistrar >/dev/null 2>&1 || true
 exit 0

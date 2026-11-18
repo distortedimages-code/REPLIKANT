@@ -33,6 +33,7 @@ namespace te
         float defaultNorm = 0.0f;
         int steps = 0;                                   // > 1: that many values (a choice, a whole number)
         bool bipolar = false;
+        bool toggle = false;                             // on or off: drawn as a switch, not a knob
         std::function<void()> begin, end;                // the gesture (a host records automation between them)
         std::function<void()> changed;                   // after it was set
         juce::String tip;

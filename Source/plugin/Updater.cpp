@@ -32,7 +32,7 @@ namespace
     {
         int statusCode = 0;
         auto options = juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
-                           .withExtraHeaders ("Accept: application/vnd.github+json\r\nUser-Agent: REPLIKANT/" + Updater::currentVersion())
+                           .withExtraHeaders ("Accept: application/vnd.github+json\r\nUser-Agent: REPLIK8/" + Updater::currentVersion())
                            .withConnectionTimeoutMs (timeoutMs)
                            .withNumRedirectsToFollow (8)
                            .withStatusCode (&statusCode);
@@ -81,7 +81,7 @@ namespace
     {
         const auto literal = [] (const juce::String& t) { return "\"" + t.replace ("\\", "\\\\").replace ("\"", "\\\"") + "\""; };
         const auto apple = "do shell script " + literal (shellScript) + " with prompt "
-                           + literal ("REPLIKANT a besoin de ton mot de passe pour se mettre à jour dans le dossier des plug-ins."_fr)
+                           + literal ("REPLIK8 a besoin de ton mot de passe pour se mettre à jour dans le dossier des plug-ins."_fr)
                            + " with administrator privileges";
         juce::ChildProcess p;
         if (! p.start (juce::StringArray { "/usr/bin/osascript", "-e", apple }))
@@ -303,7 +303,7 @@ void Updater::install()
             {
                 const auto targets = installedBundles();
                 if (targets.isEmpty())
-                    err = "REPLIKANT n'est pas dans les dossiers habituels : installe cette version à la main."_fr;
+                    err = "REPLIK8 n'est pas dans les dossiers habituels : installe cette version à la main."_fr;
                 else
                 {
                     const auto r = installBundles (tmp, targets, rel.version, dittoExtract, installed, runAsAdministrator);
@@ -355,7 +355,7 @@ std::vector<Updater::Release> Updater::parseReleases (const juce::String& json, 
     return out;
 }
 
-// "**REPLIKANT 0.2.0** : ..." then "- **Plus de pause** quand..." lines: the headline,
+// "**REPLIK8 0.3.1** : ..." then "- **Plus de pause** quand..." lines: the headline,
 // and the bold start of each point (or its first words)
 Updater::News Updater::summarise (const juce::String& version, const juce::String& notes)
 {
@@ -398,7 +398,7 @@ Updater::News Updater::summarise (const juce::String& version, const juce::Strin
         }
         else if (n.headline.isEmpty())
         {
-            // past the "REPLIKANT 0.2.0 :" that opens it
+            // past the "REPLIK8 0.3.1 :" that opens it
             auto h = line.containsChar (':') && line.upToFirstOccurrenceOf (":", false, false).contains (version)
                          ? line.fromFirstOccurrenceOf (":", false, false) : line;
             h = plain (h);
@@ -455,19 +455,23 @@ juce::Array<juce::File> Updater::installedBundles()
     juce::Array<juce::File> r;
     auto add = [&r] (const juce::File& f) { if (f.isDirectory() && ! r.contains (f)) r.add (f); };
 
+    // (under its name, or under the one it had until 0.3.0: those are replaced by REPLIK8's)
     const auto home = juce::File::getSpecialLocation (juce::File::userHomeDirectory);
-    const juce::String n (productName);
-    for (const auto& base : { home, juce::File ("/") })
+    for (const juce::String n : { productName, legacyName })
     {
-        add (base.getChildFile ("Library/Audio/Plug-Ins/Components/" + n + ".component"));
-        add (base.getChildFile ("Library/Audio/Plug-Ins/VST3/" + n + ".vst3"));
+        for (const auto& base : { home, juce::File ("/") })
+        {
+            add (base.getChildFile ("Library/Audio/Plug-Ins/Components/" + n + ".component"));
+            add (base.getChildFile ("Library/Audio/Plug-Ins/VST3/" + n + ".vst3"));
+        }
+        add (home.getChildFile ("Applications/" + n + ".app"));
+        add (juce::File ("/Applications/" + n + ".app"));
     }
-    add (home.getChildFile ("Applications/" + n + ".app"));
-    add (juce::File ("/Applications/" + n + ".app"));
 
     // the running copy, wherever it is
     const auto self = juce::File::getSpecialLocation (juce::File::currentApplicationFile);
-    if (self.hasFileExtension ("component;vst3;app") && self.getFileNameWithoutExtension() == productName)
+    const auto selfName = self.getFileNameWithoutExtension();
+    if (self.hasFileExtension ("component;vst3;app") && (selfName == productName || selfName == legacyName))
         add (self);
     return r;
 }
@@ -487,12 +491,15 @@ juce::Result Updater::installBundles (const juce::File& zip, const juce::Array<j
 
     // bundles waiting for the administrator step: the checked new bundle, where it goes, and the
     // temporary folder to clear afterwards
-    struct Pending { juce::File fresh, dest, staging; };
+    struct Pending { juce::File fresh, dest, staging, legacy; };
     std::vector<Pending> pending;
 
-    for (const auto& dest : targets)
+    for (const auto& installedNow : targets)
     {
-        const auto parent = dest.getParentDirectory();
+        // a bundle under the old name becomes REPLIK8's, in the same folder (the old one goes once the new one is in)
+        const auto parent = installedNow.getParentDirectory();
+        const bool renamed = installedNow.getFileNameWithoutExtension() == legacyName;
+        const auto dest = renamed ? parent.getChildFile (juce::String (productName) + installedNow.getFileExtension()) : installedNow;
         const auto name = dest.getFileName();
 
         // unpacked next to the bundle when the folder can be written in, otherwise in a
@@ -512,7 +519,8 @@ juce::Result Updater::installBundles (const juce::File& zip, const juce::Array<j
                 continue;
             }
             staging = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                          .getChildFile ("replikant-update-" + stamp).getChildFile (dest.getFileExtension().substring (1));
+                          .getChildFile ("replikant-update-" + stamp)
+                          .getChildFile (dest.getFileExtension().substring (1) + "-" + juce::String ((int) pending.size()));
             staging.deleteRecursively();
             if (! staging.createDirectory())
             {
@@ -541,7 +549,7 @@ juce::Result Updater::installBundles (const juce::File& zip, const juce::Array<j
 
         if (! direct)
         {
-            pending.push_back ({ fresh, dest, staging });
+            pending.push_back ({ fresh, dest, staging, renamed ? installedNow : juce::File() });
             continue;
         }
 
@@ -563,6 +571,8 @@ juce::Result Updater::installBundles (const juce::File& zip, const juce::Array<j
         }
 
         old.deleteRecursively();
+        if (renamed)
+            installedNow.deleteRecursively();
         cleanup();
         installed.add (dest.getFullPathName());
     }
@@ -580,7 +590,8 @@ juce::Result Updater::installBundles (const juce::File& zip, const juce::Array<j
             script.add ("if [ -e " + q (p.dest) + " ]; then /bin/mv " + q (p.dest) + " " + q (old) + "; fi; "
                         "if [ ! -e " + q (p.dest) + " ] && /bin/mv " + q (p.fresh) + " " + q (p.dest) + "; then "
                         "/bin/rm -rf " + q (old) + "; /usr/bin/xattr -dr com.apple.quarantine " + q (p.dest) + " 2>/dev/null; "
-                        "else [ ! -e " + q (old) + " ] || { /bin/rm -rf " + q (p.dest) + "; /bin/mv " + q (old) + " " + q (p.dest) + "; }; fi");
+                        + (p.legacy != juce::File() ? "/bin/rm -rf " + q (p.legacy) + "; " : juce::String())
+                        + "else [ ! -e " + q (old) + " ] || { /bin/rm -rf " + q (p.dest) + "; /bin/mv " + q (old) + " " + q (p.dest) + "; }; fi");
         }
         script.add ("true");
         const bool ran = elevate (script.joinIntoString ("; "));

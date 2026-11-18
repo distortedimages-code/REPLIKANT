@@ -249,7 +249,7 @@ static void testPhaseModulation()
 
     // its rate: the sine sits on the note (C3, 261.6 Hz) times RAPPORT
     std::vector<float> offsets;
-    for (int i = 2000; i < 2000 + 24000; ++i)
+    for (int i = 2000; i < juce::jmin (2000 + 24000, (int) out.size()); ++i)      // (no further than it played)
         offsets.push_back ((float) ((double) out[(size_t) i] * len - (double) i));
     int first = -1, last = -1, crossings = 0;
     for (size_t i = 1; i < offsets.size(); ++i)
@@ -913,7 +913,8 @@ static void testSynth()
         double diff = 0.0;
         for (size_t i = 4800; i < left.size(); ++i)
             diff += std::abs (left[i] - right[i]);
-        CHECK (diff / (double) (left.size() - 4800) > 0.05 && rms (left, 4800, left.size()) > 0.1, "unison: left and right apart by %.3f",
+        CHECK (diff / (double) (left.size() - 4800) > 0.05 * Player::synthLevel && rms (left, 4800, left.size()) > 0.1 * Player::synthLevel,
+               "unison: left and right apart by %.3f",
                diff / (double) (left.size() - 4800));
     }
     {
@@ -945,7 +946,7 @@ static void testSynth()
             Player p;
             synthPlayer (p);
             p.set (snd::crOn, 1.0f);
-            p.set (snd::crBits, 3.0f);
+            p.set (snd::crBits, 5.0f);
             p.set (snd::crMix, 1.0f);
             p.set (snd::rvOn, 1.0f);
             p.set (snd::rvMix, 0.6f);
@@ -982,7 +983,7 @@ static void testSynth()
         for (size_t i = 60 * 256 + 2400; i < 60 * 256 + 12000; ++i)
             before = std::max (before, std::abs (b[i] - b[i - 1]));
         std::printf ("  chain reordered: %.3f apart, steps %.3f at the change (%.3f either side)\n", diff / (double) (a.size() - 25000), stepAtChange, before);
-        CHECK (diff / (double) (a.size() - 25000) > 0.005 && stepAtChange <= before * 1.05f, "reorder: %.4f apart, step %.3f against %.3f",
+        CHECK (diff / (double) (a.size() - 25000) > 0.005 * Player::synthLevel && stepAtChange <= before * 1.05f, "reorder: %.4f apart, step %.3f against %.3f",
                diff / (double) (a.size() - 25000), stepAtChange, before);
         Player q;
         q.setFxOrder ({ 0, 0, 1, 2, 3, 4 });
@@ -1103,9 +1104,145 @@ static void testResample()
     }
 }
 
+// the sound REPLIK8 opens with (every setting at its default), played as a host would: one note, then a chord, at
+// the usual rates and block sizes; nothing may blow up
+static void testDefaultSound()
+{
+    for (double rate : { 44100.0, 48000.0, 96000.0 })
+        for (int block : { 64, 512, 1024 })
+        {
+            Player p;
+            p.prepare (rate, block);
+            juce::AudioBuffer<float> buf (2, block);
+            const int total = (int) (2.0 * rate);
+            float peak = 0.0f, single = 0.0f;
+            double energy = 0.0;
+            bool finite = true;
+            int frames = 0;
+            for (int pos = 0; pos < total; pos += block)
+            {
+                if (pos == (int) (0.75 * rate) / block * block)
+                    single = peak;
+                juce::MidiBuffer midi;
+                if (pos == 0)
+                    midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+                if (pos <= (int) (0.8 * rate) && pos + block > (int) (0.8 * rate))
+                    for (int n : { 48, 55, 64 })
+                        midi.addEvent (juce::MidiMessage::noteOn (1, n, (juce::uint8) 110), 0);
+                buf.clear();
+                p.render (buf, midi, {}, nullptr, 0, false);
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int i = 0; i < block; ++i)
+                    {
+                        const float x = buf.getSample (ch, i);
+                        finite = finite && std::isfinite (x);
+                        peak = std::max (peak, std::abs (x));
+                        energy += (double) x * x;
+                    }
+                frames += block;
+            }
+            const double rms = std::sqrt (energy / (2.0 * frames));
+            CHECK (finite && single > 0.15f && single < 0.4f && peak < 1.2f && rms > 0.05 && rms < 0.35,
+                   "default sound at %.0f Hz, blocks of %d: a note %.2f, then a chord: peak %.2f, rms %.3f%s",
+                   rate, block, single, peak, rms, finite ? "" : ", not finite");
+            if (block == 512)
+                std::printf ("  default sound at %.0f Hz: a note %.2f, with a chord: peak %.2f, rms %.3f\n", rate, single, peak, rms);
+        }
+}
+
+static void probe()
+{
+    const double rate = 48000.0;
+    const int block = 1024;
+    Player p;
+    p.prepare (rate, block);
+    if (auto* e = std::getenv ("RK_PROBE_SET"))
+    {
+        auto parts = juce::StringArray::fromTokens (e, ",", "");
+        for (int i = 0; i + 1 < parts.size(); i += 2)
+            p.set (parts[i].getIntValue(), parts[i + 1].getFloatValue());
+    }
+    juce::AudioBuffer<float> buf (2, block);
+    std::vector<float> L;
+    for (int pos = 0; pos < (int) rate; pos += block)
+    {
+        juce::MidiBuffer midi;
+        if (pos == 0) midi.addEvent (juce::MidiMessage::noteOn (1, 43, (juce::uint8) 100), 0);
+        buf.clear();
+        p.render (buf, midi, {}, nullptr, 0, false);
+        for (int i = 0; i < block; ++i) L.push_back (buf.getSample (0, i));
+    }
+    float mn = 1e9f, mx = -1e9f; double dc = 0;
+    for (size_t i = L.size() / 2; i < L.size(); ++i) { mn = std::min (mn, L[i]); mx = std::max (mx, L[i]); dc += L[i]; }
+    dc /= (double) (L.size() / 2);
+    std::printf ("min %.3f max %.3f dc %.3f\n", mn, mx, dc);
+    for (int i = 24000; i < 24000 + 48; ++i) std::printf ("%.3f ", L[(size_t) i]);
+    std::printf ("\n");
+}
+
+// the guard: something not a number (fed through the input, the filter on) never reaches the output, and the
+// engine plays again right after
+static void testGuard()
+{
+    Player p;
+    p.prepare (48000.0, 512);
+    p.set (snd::fModel, 1.0f);
+    juce::AudioBuffer<float> buf (2, 512);
+    std::vector<float> in (512, 0.0f);
+    in[100] = std::numeric_limits<float>::quiet_NaN();
+    const float* chans[2] = { in.data(), in.data() };
+    bool clean = true;
+    float after = 0.0f;
+    for (int b = 0; b < 40; ++b)
+    {
+        juce::MidiBuffer midi;
+        if (b == 5)
+            midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+        buf.clear();
+        p.render (buf, midi, {}, b == 2 ? chans : nullptr, b == 2 ? 2 : 0, b == 2);
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i < 512; ++i)
+            {
+                clean = clean && std::isfinite (buf.getSample (ch, i)) && std::abs (buf.getSample (ch, i)) <= 2.0f;
+                if (b > 10)
+                    after = std::max (after, std::abs (buf.getSample (ch, i)));
+            }
+    }
+    CHECK (clean && after > 0.1f, "guard: clean %d, rescued %d, then playing %.2f", (int) clean, p.rescues.load(), after);
+}
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI gui;
+    if (std::getenv ("RK_PROBE") != nullptr) { probe(); return 0; }
+    if (std::getenv ("RK_MEMCHECK") != nullptr)
+    {
+        // (under valgrind: a short default sound, then the phase modulation)
+        const juce::String which (std::getenv ("RK_MEMCHECK"));
+        if (which.contains ("d")) testDefaultSound();
+        if (which.contains ("g")) testGuard();
+        if (which.contains ("r")) testResample();
+        if (which.contains ("a")) { testAntiAliasing(); testAliasingScale(); }
+        Player p;
+        p.prepare (44100.0, 512);
+        juce::AudioBuffer<float> buf (2, 512);
+        for (int b = 0; b < 40; ++b)
+        {
+            juce::MidiBuffer midi;
+            if (b == 0)
+                midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+            buf.clear();
+            p.render (buf, midi, {}, nullptr, 0, false);
+        }
+        testPhaseModulation();
+        std::printf ("%d checks, %d failed\n", checks, failures);
+        return 0;
+    }
+    if (std::getenv ("RK_SKIP_NEW") == nullptr)
+    {
+        testDefaultSound();
+        testGuard();
+    }
     testResample();
     testAntiAliasing();
     testAliasingScale();

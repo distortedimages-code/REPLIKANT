@@ -75,8 +75,8 @@ namespace te
     void encoder (juce::Graphics&, juce::Point<float> centre, float radius, float value, bool bipolar, juce::Colour cap,
                   juce::Colour notch, float modFrom = 0.0f, float modTo = 0.0f, juce::Colour modColour = {}, bool dim = false,
                   juce::Colour lit = juce::Colour());      // (none: the theme's)
-    // the eye (a Voight-Kampff's): its outline, the iris
-    void eye (juce::Graphics&, juce::Rectangle<float>, juce::Colour outline, juce::Colour iris, float open = 1.0f);
+    // the name: REPLIK8 over a band that says SAMPLER, in a rounded frame
+    void badge (juce::Graphics&, juce::Rectangle<float>, juce::Colour ink, juce::Colour face, juce::Colour band, juce::Colour bandInk);
 
     //========================================================================== pictos (Pictos.cpp)
     // small drawings in thin lines, in one colour: what a mode, a page, a filter, a drive or an effect is

@@ -105,6 +105,10 @@ public:
     void releaseNeutral()            { neutral = false; }
     bool loopsOnNoteOn = true;       // looping: a note played takes over (the loop fades out)
 
+    // the output's guard: how many times the engine had to be reset (something not a number came out)
+    std::atomic<int> rescues { 0 };
+    static constexpr float synthLevel = 0.25f;        // the SYNTHÉ's voices, before the filter
+
     //========================================================================== for the editor
     std::array<std::atomic<float>, snd::numMods> modValue {};   // what each sends (after its depth)
     std::array<std::atomic<int>, snd::numMods> modStep {};

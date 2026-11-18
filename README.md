@@ -1,6 +1,6 @@
-# REPLIKANT
+# REPLIK8
 
-**REPLIKANT** : l'autosampleur de tes synthés, un synthé à cycles et un sampler. Plug-in AU / VST3 et appli pour Mac. Il capture tes synthés (chaque note jouée en MIDI et enregistrée, bouclée, accordée ; ou leurs cycles, pendant qu'un CC balaie un bouton ; ou ce qui sort de tes effets) et en fait des instruments : le SYNTHÉ lit des banques de cycles, le SAMPLER joue un multisample ou n'importe quel son glissé sur la fenêtre. Les deux passent dans des filtres analogiques modélisés, un drive, cinq effets dans l'ordre que tu veux, quatre modulateurs et seize scènes. REPLIKANT sert aussi de multi-effet en insert. Exports en dossier de WAV, en `.multisample` Bitwig ou en pack zip à partager.
+**REPLIK8** (anciennement REPLIKANT) : l'autosampleur de tes synthés, un synthé à cycles et un sampler. Plug-in AU / VST3 et appli pour Mac. Il capture tes synthés (chaque note jouée en MIDI et enregistrée, bouclée, accordée ; ou leurs cycles, pendant qu'un CC balaie un bouton ; ou ce qui sort de tes effets) et en fait des instruments : le SYNTHÉ lit des banques de cycles, le SAMPLER joue un multisample ou n'importe quel son glissé sur la fenêtre. Les deux passent dans des filtres analogiques modélisés, un drive, cinq effets dans l'ordre que tu veux (chaque bloc a son interrupteur), quatre modulateurs et seize scènes. REPLIK8 sert aussi de multi-effet en insert. Exports en dossier de WAV, en `.multisample` Bitwig ou en pack zip à partager.
 
 **Page de téléchargement** : https://distortedimages-code.github.io/REPLIKANT/
 
@@ -50,25 +50,25 @@
 - **Sample** : la forme d'onde, la partie tenue, le note-off, la boucle et son fondu, la tête de lecture, et le raccord tel qu'il s'entend (fin de boucle puis début).
 - **Jeu** : couches et round robin, boucles, enveloppe, sensibilité à la vélocité dans une couche, pitch bend, pédale de sustain. *Clavier vers synthé* pour comparer avec l'original.
 - **Synthé test** intégré (deux dents de scie désaccordées, un sub, un filtre 24 dB, une dérive, un peu de bruit et de latence) pour tout essayer sans matériel.
-- **Instruments** dans `~/Music/REPLIKANT/<Nom>/` : `<Nom>.replikant` (JSON) et `Samples/*.wav` (24 bits, chunks `smpl` et `inst`). Le projet du DAW garde le chemin et le recharge.
+- **Instruments** dans `~/Music/REPLIK8/<Nom>/` (l'ancien dossier `~/Music/REPLIKANT` y est déplacé tout seul) : `<Nom>.replikant` (JSON) et `Samples/*.wav` (24 bits, chunks `smpl` et `inst`). Le projet du DAW garde le chemin et le recharge.
 - **Exports** : dossier de WAV (note, justesse, boucle, zone dans chaque fichier) ou `.multisample` Bitwig, les samples enregistrés ou toutes les touches rendues.
 - **Mises à jour** depuis le plug-in.
 
 ## Comment ça se branche
 
 - **Appli** : FICHIER › Réglages audio et MIDI, puis CAPTURE › SOURCE : Son = entrée, Sortie MIDI = le port du synthé. 96 kHz dans la carte son pour transposer très bas.
-- **En multi-effet** : REPLIKANT en insert sur n'importe quelle piste, RÉGLAGES › ÉCOUTE = PAR LES EFFETS (ou, dans CAPTURE › RÉÉCHANTILLONNER, ENTRÉE : PAR LES EFFETS).
-- **Logic** : REPLIKANT en effet audio sur une piste qui reçoit le synthé (type `aumf`, « effet contrôlé par MIDI ») ; pour jouer, dans le slot d'instrument (effets contrôlés par MIDI).
+- **En multi-effet** : REPLIK8 en insert sur n'importe quelle piste, RÉGLAGES › ÉCOUTE = PAR LES EFFETS (ou, dans CAPTURE › RÉÉCHANTILLONNER, ENTRÉE : PAR LES EFFETS).
+- **Logic** : REPLIK8 en effet audio sur une piste qui reçoit le synthé (type `aumf`, « effet contrôlé par MIDI ») ; pour jouer, dans le slot d'instrument (effets contrôlés par MIDI).
 - **Bitwig / Reaper / Cubase** : sur une piste qui reçoit l'audio du synthé ; les notes de la piste jouent l'instrument.
 - **Live** : l'enregistrement marche sur une piste audio ; Live n'envoyant pas de notes aux effets audio, on joue l'export (Sampler) ou l'appli.
 
 ## Installer
 
-Télécharge `REPLIKANT-mac.dmg` (lien sur la page) : l'installeur (AU, VST3, appli), ou glisser chaque élément sur le raccourci de son dossier puis coller la commande Terminal qui débloque l'AU et le VST3 et fait valider l'AU (`auval -v aumf Rplk Dimg`).
+Télécharge `REPLIK8-mac.dmg` (lien sur la page) : l'installeur (AU, VST3, appli), ou glisser chaque élément sur le raccourci de son dossier puis coller la commande Terminal qui débloque l'AU et le VST3 et fait valider l'AU (`auval -v aumf Rplk Dimg`).
 
 ## Publier une version
 
-1. Monter `VERSION` dans `CMakeLists.txt` (`project(REPLIKANT VERSION x.y.z …)`) et écrire `RELEASE_NOTES.md` (première ligne `**REPLIKANT X.Y.Z** : …`, puis `- **Titre court** détails`).
+1. Monter `VERSION` dans `CMakeLists.txt` (`project(REPLIKANT VERSION x.y.z …)`) et écrire `RELEASE_NOTES.md` (première ligne `**REPLIK8 X.Y.Z** : …`, puis `- **Titre court** détails`).
 2. Fusionner dans `main` : le workflow **release** construit, teste sur un Mac et publie le `.dmg`, le `.zip` et son contrôle. Les plug-ins installés proposent la mise à jour.
 
 ## Développer
@@ -85,5 +85,5 @@ ctest --test-dir build --output-on-failure
 - `Source/ui/` : l'interface (écran, pupitre, encodeurs, pictos) ; la cible `Snapshot` (hors build par défaut) dessine la fenêtre en PNG, chaque page, une capture, un rééchantillonnage et une capture de cycles.
 - `ThirdParty/` : Signalsmith Stretch et Signalsmith Linear (licence MIT, textes à côté).
 - `Source/dsp/Space.*` : la réverbération de MIFM1 (MPL-2.0).
-- REPLIKANT est sous licence **GPL-3** (`LICENSE`).
+- REPLIK8 est sous licence **GPL-3** (`LICENSE`).
 - `Resources/fonts/` : Space Grotesk, SIL Open Font License.

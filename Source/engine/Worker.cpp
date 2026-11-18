@@ -2,7 +2,7 @@
 #include "../core/Transpose.h"
 #include "../ui/Text.h"
 
-Worker::Worker (Recorder& r) : juce::Thread ("REPLIKANT worker"), recorder (r)
+Worker::Worker (Recorder& r) : juce::Thread ("REPLIK8 worker"), recorder (r)
 {
     startThread (juce::Thread::Priority::normal);
 }
@@ -167,7 +167,7 @@ void Worker::renderKeys (Instrument& ins, const std::function<bool()>& cancelled
     std::atomic<int> next { 0 }, done { 0 };
     const int threads = juce::jlimit (1, 12, juce::SystemStats::getNumCpus() - 1);
     {
-        juce::ThreadPool pool (juce::ThreadPoolOptions{}.withThreadName ("REPLIKANT render").withNumberOfThreads (threads));
+        juce::ThreadPool pool (juce::ThreadPoolOptions{}.withThreadName ("REPLIK8 render").withNumberOfThreads (threads));
         for (int t = 0; t < threads; ++t)
             pool.addJob ([&]
             {

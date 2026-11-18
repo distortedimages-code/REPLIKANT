@@ -959,7 +959,7 @@ void ReplikantProcessor::setStateInformation (const void* data, int size)
     scenesFromVar (juce::JSON::parse (xml->getStringAttribute ("scenes")));
     fxOrderFromVar (juce::JSON::parse (xml->getStringAttribute ("fxOrder")));
     settingsChanged();
-    const juce::File f (xml->getStringAttribute ("instrument"));
+    const auto f = instrumentio::movedFolder (juce::File (xml->getStringAttribute ("instrument")));
     if (xml->hasAttribute ("instrument"))
     {
         if (f.isDirectory())

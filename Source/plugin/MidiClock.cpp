@@ -2,7 +2,7 @@
 
 #include <thread>
 
-MidiClock::MidiClock() : juce::Thread ("REPLIKANT clock")
+MidiClock::MidiClock() : juce::Thread ("REPLIK8 clock")
 {
     startThread (juce::Thread::Priority::highest);
 }

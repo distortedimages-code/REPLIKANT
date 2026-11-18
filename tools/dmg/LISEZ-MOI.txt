@@ -1,9 +1,9 @@
-REPLIKANT — installation sur Mac
-================================
+REPLIK8 — installation sur Mac
+==============================
 
 Quitte d'abord ton logiciel de musique (Live, Logic, Bitwig…).
 
-LE PLUS SIMPLE : double-clique sur « Installer REPLIKANT ».
+LE PLUS SIMPLE : double-clique sur « Installer REPLIK8 ».
   Si macOS refuse de l'ouvrir, colle plutôt cette commande dans le Terminal
   (Cmd + Espace, tape « Terminal », Entrée), puis ton mot de passe :
 
@@ -16,8 +16,10 @@ LE PLUS SIMPLE : double-clique sur « Installer REPLIKANT ».
 
 @COMMANDE@
 
-  Quand le Terminal écrit « REPLIKANT est prêt. », rouvre ton logiciel.
+  Quand le Terminal écrit « REPLIK8 est prêt. », rouvre ton logiciel.
   Dans Live, s'il n'apparaît pas : Réglages > Plug-ins > Réanalyser.
+
+(REPLIKANT, son ancien nom, est retiré au passage.)
 
 Ensuite, les mises à jour se font depuis le plug-in (bouton « Mettre à jour » en haut).
 Le mode d'emploi : https://distortedimages-code.github.io/REPLIKANT/

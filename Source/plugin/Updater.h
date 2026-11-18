@@ -81,7 +81,8 @@ public:
     static juce::String shellQuote (const juce::String& s);   // 'like this', for /bin/sh
     static juce::Array<juce::File> installedBundles();         // where it is installed on this Mac
 
-    static constexpr const char* productName = "REPLIKANT";
+    static constexpr const char* productName = "REPLIK8";
+    static constexpr const char* legacyName = "REPLIKANT";          // its name until 0.3.0: such bundles are replaced by REPLIK8's
     static constexpr const char* bundleId = "com.distortedimages.replikant";
     static constexpr const char* assetName = "REPLIKANT-mac.zip";   // what the updater downloads
 

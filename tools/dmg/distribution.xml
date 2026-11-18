@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
-    <title>REPLIKANT @VERSION@</title>
+    <title>REPLIK8 @VERSION@</title>
     <welcome file="welcome.html" mime-type="text/html"/>
     <conclusion file="conclusion.html" mime-type="text/html"/>
     <options customize="allow" require-scripts="false" hostArchitectures="arm64,x86_64"/>
@@ -17,7 +17,7 @@
     <choice id="vst3" title="VST3" description="Pour Live, Bitwig, Cubase, Studio One, Reaper… : /Library/Audio/Plug-Ins/VST3">
         <pkg-ref id="com.distortedimages.replikant.vst3"/>
     </choice>
-    <choice id="app" title="Appli" description="REPLIKANT tout seul, sans logiciel de musique : /Applications">
+    <choice id="app" title="Appli" description="REPLIK8 tout seul, sans logiciel de musique : /Applications">
         <pkg-ref id="com.distortedimages.replikant.app"/>
     </choice>
     <pkg-ref id="com.distortedimages.replikant.au" version="@VERSION@" onConclusion="none">au.pkg</pkg-ref>

@@ -19,6 +19,7 @@ Ctl soundCtl (ReplikantProcessor& p, int id, const char* label, std::function<bo
     if (d.kind == snd::Kind::choice || d.kind == snd::Kind::toggle || d.kind == snd::Kind::integer)
         c.steps = (int) std::lround (d.hi - d.lo) + 1;
     c.bipolar = d.kind != snd::Kind::choice && d.lo < 0.0f && d.hi > 0.0f;
+    c.toggle = d.kind == snd::Kind::toggle;
     c.begin = [param] { param->beginChangeGesture(); };
     c.end = [param] { param->endChangeGesture(); };
     return c;
@@ -164,8 +165,28 @@ void Encoder::paint (juce::Graphics& g)
         }
     }
     const bool sceneEdit = armedScene() >= 0;
-    encoder (g, knob.getCentre(), radius, value, ctl->bipolar, sceneEdit ? col::violet : col::cap (index),
-             sceneEdit ? juce::Colours::white : col::notch (index), modFrom, modTo, modColour, ! on);
+    if (ctl->toggle)
+    {
+        // a switch: the slot, its lever to the right when on
+        const bool isOn = value > 0.5f;
+        auto slot = juce::Rectangle<float> (radius * 1.7f, radius * 0.9f).withCentre (knob.getCentre());
+        const float rr = slot.getHeight() * 0.5f;
+        g.setColour (col::keyShadow.withMultipliedAlpha (on ? 0.6f : 0.3f));
+        g.fillRoundedRectangle (slot.translated (0.0f, 2.0f), rr);
+        g.setColour (sceneEdit ? col::violet : (isOn ? col::keyOn : col::well));
+        g.fillRoundedRectangle (slot, rr);
+        g.setColour (col::keyLine);
+        g.drawRoundedRectangle (slot.reduced (0.5f), rr, 1.0f);
+        const auto lever = juce::Rectangle<float> (slot.getHeight() - 6.0f, slot.getHeight() - 6.0f)
+                               .withCentre ({ isOn ? slot.getRight() - rr : slot.getX() + rr, slot.getCentreY() });
+        g.setColour (on ? col::ink : col::ink3);
+        g.fillEllipse (lever);
+        g.setColour (col::keyShadow.withAlpha (0.5f));
+        g.drawEllipse (lever, 1.0f);
+    }
+    else
+        encoder (g, knob.getCentre(), radius, value, ctl->bipolar, sceneEdit ? col::violet : col::cap (index),
+                 sceneEdit ? juce::Colours::white : col::notch (index), modFrom, modTo, modColour, ! on);
     // its value, then what moves it: the mods' colours, the scenes holding it
     juce::String v = valueText (*ctl, arm);
     text (g, v, r.removeFromTop (22.0f), mono (15.0f, 500), on ? col::deckInk : col::deckInk.withAlpha (0.45f), juce::Justification::centred);

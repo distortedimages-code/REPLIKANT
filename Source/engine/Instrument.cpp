@@ -287,7 +287,28 @@ namespace
 
 juce::File defaultRoot()
 {
-    return juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("REPLIKANT");
+    // ~/Music/REPLIK8; the folder of before (REPLIKANT, until 0.3.0) renamed the first time, if it can be
+    const auto music = juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+    const auto now = music.getChildFile ("REPLIK8"), before = music.getChildFile ("REPLIKANT");
+    if (! now.exists() && before.isDirectory() && ! before.moveFileTo (now))
+        return before;
+    return now;
+}
+
+juce::File movedFolder (const juce::File& f)
+{
+    // a path saved in a project before the instruments' folder was renamed
+    if (f.isDirectory())
+        return f;
+    const auto music = juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+    const auto before = music.getChildFile ("REPLIKANT");
+    if (f.isAChildOf (before))
+    {
+        const auto moved = defaultRoot().getChildFile (f.getRelativePathFrom (before));
+        if (moved.isDirectory())
+            return moved;
+    }
+    return f;
 }
 
 juce::String safeName (const juce::String& n)
@@ -658,7 +679,7 @@ juce::File importPack (const juce::File& zip, const juce::File& root, juce::Stri
     juce::ZipFile z (zip);
     if (z.getNumEntries() == 0)
     {
-        error = "Ce n'est pas un pack REPLIKANT : "_fr + zip.getFileName();
+        error = "Ce n'est pas un pack REPLIK8 : "_fr + zip.getFileName();
         return {};
     }
     const auto temp = juce::File::getSpecialLocation (juce::File::tempDirectory)
@@ -669,7 +690,7 @@ juce::File importPack (const juce::File& zip, const juce::File& root, juce::Stri
     if (r.failed() || found.isEmpty())
     {
         temp.deleteRecursively();
-        error = r.failed() ? r.getErrorMessage() : "Pas d'instrument REPLIKANT dans "_fr + zip.getFileName();
+        error = r.failed() ? r.getErrorMessage() : "Pas d'instrument REPLIK8 dans "_fr + zip.getFileName();
         return {};
     }
     const auto desc = found.getFirst();
@@ -699,7 +720,7 @@ std::shared_ptr<Instrument> load (const juce::File& where, juce::String& error)
         auto found = where.findChildFiles (juce::File::findFiles, false, "*.replikant");
         if (found.isEmpty())
         {
-            error = "Pas d'instrument REPLIKANT dans " + where.getFullPathName();
+            error = "Pas d'instrument REPLIK8 dans " + where.getFullPathName();
             return nullptr;
         }
         desc = found.getFirst();
@@ -802,10 +823,10 @@ juce::Result exportBitwig (const Instrument& ins, const juce::File& file, bool a
 
     juce::XmlElement xml ("multisample");
     xml.setAttribute ("name", ins.name);
-    xml.createNewChildElement ("generator")->addTextElement ("REPLIKANT");
+    xml.createNewChildElement ("generator")->addTextElement ("REPLIK8");
     xml.createNewChildElement ("category")->addTextElement ("Synth");
-    xml.createNewChildElement ("creator")->addTextElement ("REPLIKANT");
-    xml.createNewChildElement ("description")->addTextElement ("Autosampled with REPLIKANT");
+    xml.createNewChildElement ("creator")->addTextElement ("REPLIK8");
+    xml.createNewChildElement ("description")->addTextElement ("Autosampled with REPLIK8");
     xml.createNewChildElement ("keywords");
     const bool roundRobin = ins.session.roundRobins > 1;
 

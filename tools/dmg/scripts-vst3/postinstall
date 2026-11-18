@@ -1,8 +1,13 @@
 #!/bin/bash
-# REPLIKANT's installer (VST3): an older copy in the user's own VST3 folder would hide this one.
+# REPLIK8's installer (VST3): an older copy in the user's own VST3 folder would hide this one; the bundle under its
+# old name (REPLIKANT, until 0.3.0) would be the same plug-in twice: both go.
+rm -rf "/Library/Audio/Plug-Ins/VST3/REPLIKANT.vst3"
 USER_NOW=$(stat -f%Su /dev/console 2>/dev/null || true)
 if [ -n "$USER_NOW" ] && [ "$USER_NOW" != "root" ]; then
     HOME_NOW=$(dscl . -read "/Users/$USER_NOW" NFSHomeDirectory 2>/dev/null | awk '{print $2}')
-    [ -n "$HOME_NOW" ] && rm -rf "$HOME_NOW/Library/Audio/Plug-Ins/VST3/REPLIKANT.vst3"
+    if [ -n "$HOME_NOW" ]; then
+        rm -rf "$HOME_NOW/Library/Audio/Plug-Ins/VST3/REPLIK8.vst3"
+        rm -rf "$HOME_NOW/Library/Audio/Plug-Ins/VST3/REPLIKANT.vst3"
+    fi
 fi
 exit 0
