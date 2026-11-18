@@ -79,6 +79,17 @@ bool Worker::startSession (const juce::String& name, const rk::Session& s, const
     return true;
 }
 
+bool Worker::startCycleSession (const juce::String& name, const rk::Session& s, const Recorder::Plan& plan, double sr,
+                                int channels, const juce::File& folder, std::shared_ptr<const Instrument> base)
+{
+    if (! startSession (name, s, plan, sr, channels, folder))
+        return false;
+    std::lock_guard<std::mutex> l (taskLock);
+    session.cycles = true;
+    session.base = std::move (base);
+    return true;
+}
+
 void Worker::stopSession()
 {
     recorder.stop();
@@ -317,6 +328,35 @@ void Worker::processJob (int jobIndex, int64_t noteOn, int64_t noteOff, int64_t 
         return;
     }
     session.silentInARow = 0;
+    if (session.cycles)
+    {
+        // one cycle, where the take holds steady (past its attack, before its release)
+        const auto mono = rk::mixDown (r.sample.audio);
+        const double hz = 440.0 * std::pow (2.0, ((double) job.note - 69.0) / 12.0
+                                                  + (r.sample.pitchConfident ? (double) (r.sample.root - job.note) / 12.0 + r.sample.detuneCents / 1200.0 : 0.0));
+        const double period = session.sampleRate / hz;
+        const int held = r.sample.noteOff > 0 ? r.sample.noteOff : (int) mono.size();
+        const int at = juce::jmax (0, juce::jmin ((int) (held * 0.6), held - (int) (period * 6.0) - 8));
+        auto cycle = dsp::extractCycle (mono.data(), (int) mono.size(), at, period);
+        if (cycle.empty())      // a sub an octave down: the sound repeats every two periods
+            cycle = dsp::extractCycle (mono.data(), (int) mono.size(), juce::jmax (0, at - (int) (period * 6.0)), period * 2.0);
+        auto last = std::make_shared<rk::Sample> (std::move (r.sample));
+        if (cycle.empty())
+        {
+            setStatus ([&] (Status& st) { st.warning = "Pas de cycle net sur la prise "_fr + juce::String (jobIndex + 1) + " : le son ne se répète pas (bruit, attaque trop longue ?)."_fr; });
+            return;
+        }
+        session.cycleList.push_back (std::move (cycle));
+        setStatus ([&] (Status& st)
+        {
+            st.recorded.push_back (job);
+            st.done = jobIndex + 1;
+            st.progress = (float) (jobIndex + 1) / (float) juce::jmax (1, st.total);
+            st.last = last;
+            st.text = "CYCLE "_fr + juce::String ((int) session.cycleList.size()) + " / " + juce::String (st.total);
+        });
+        return;
+    }
     session.latencies.push_back (r.latency);
     if (session.settings.align == rk::Align::fixedLatency)
         session.raws.push_back (std::move (raw));
@@ -339,6 +379,11 @@ void Worker::processJob (int jobIndex, int64_t noteOn, int64_t noteOff, int64_t 
 void Worker::finishSession (bool aborted)
 {
     sampling = false;
+    if (session.cycles)
+    {
+        finishCycles (aborted);
+        return;
+    }
     if (session.samples.empty())
     {
         setStatus ([aborted] (Status& st) { st.sampling = false; st.busy = false; st.progress = -1.0f; st.text = aborted ? "SESSION ARRÊTÉE"_fr : "AUCUN SAMPLE"; });
@@ -385,4 +430,42 @@ void Worker::finishSession (bool aborted)
         st.progress = -1.0f;
     });
     renderAndPublish (ins, true);
+}
+
+void Worker::finishCycles (bool aborted)
+{
+    auto list = std::move (session.cycleList);
+    auto base = std::move (session.base);
+    session.active = false;
+    session.cycles = false;
+    if (list.size() < 2)
+    {
+        setStatus ([aborted] (Status& st) { st.sampling = false; st.busy = false; st.progress = -1.0f; st.text = aborted ? "SESSION ARRÊTÉE"_fr : "PAS ASSEZ DE CYCLES"; });
+        return;
+    }
+    // the bank (each cycle brought to the same peak: a table plays evenly), kept with the instrument
+    auto ins = base != nullptr ? std::make_shared<Instrument> (*base) : std::make_shared<Instrument>();
+    if (base == nullptr)
+    {
+        ins->name = session.name;
+        ins->session = session.settings;
+        ins->sampleRate = session.sampleRate;
+        ins->rebuildIndex();
+    }
+    ins->cycles = std::make_shared<const dsp::CycleBank> (list, true);
+    const auto folder = base != nullptr && base->folder.isDirectory() ? base->folder : session.folder;
+    const auto res = instrumentio::save (*ins, folder);
+    const int count = (int) list.size();
+    setStatus ([&] (Status& st)
+    {
+        st.sampling = false;
+        st.text = (aborted ? "SESSION ARRÊTÉE · "_fr : "") + juce::String (count) + " CYCLES · ENREGISTRÉS"_fr;
+        if (res.failed())
+            st.warning = res.getErrorMessage();
+        st.busy = false;
+        st.progress = -1.0f;
+    });
+    // the samples and their keys as they were: published as it is
+    if (onInstrument)
+        onInstrument (ins);
 }

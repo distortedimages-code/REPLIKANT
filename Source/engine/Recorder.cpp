@@ -115,6 +115,7 @@ void Recorder::beginBlock (MidiSink& sink)
     {
         run = r;
         job = 0;
+        ccSentFor = -1;
         noteDown = false;
         env = 0.0f;
         envDecay = (float) std::exp (-1.0 / (0.015 * r->sampleRate));
@@ -165,6 +166,13 @@ void Recorder::beginBlock (MidiSink& sink)
             break;
 
         case Phase::gap:
+            if (R.plan.ccNumber >= 0 && ccSentFor != job && job < (int) R.plan.ccValues.size())
+            {
+                // the knob moved first: the synth settles during the pause
+                sink.send (juce::MidiMessage::controllerEvent (R.plan.channel, juce::jlimit (0, 127, R.plan.ccNumber),
+                                                               juce::jlimit (0, 127, R.plan.ccValues[(size_t) job])));
+                ccSentFor = job;
+            }
             if (phaseSamples >= R.pauseS && (quietSamples >= R.quietS / 2 || phaseSamples >= R.maxGapS))
             {
                 if (job >= (int) R.plan.jobs.size())

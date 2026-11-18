@@ -990,9 +990,123 @@ static void testSynth()
     }
 }
 
+// RÉÉCHANTILLONNER: the processed input recorded, then looped into the chain made neutral: what was heard goes on,
+// the same, without a click; the effects' settings can then be set to zero without a change; a note takes over
+static void testResample()
+{
+    Player p;
+    p.set (snd::engine, (float) snd::sampler);
+    plain (p);
+    p.set (snd::tempo, 120.0f);
+    p.set (snd::chOn, 1.0f);
+    p.set (snd::fModel, 1.0f);
+    p.set (snd::cutoff, 2500.0f);
+    const int block = 256, total = (int) (5.0 * sr);
+    std::vector<float> in ((size_t) total);
+    for (int i = 0; i < total; ++i)
+        in[(size_t) i] = 0.4f * (float) (std::sin (2.0 * pi * 220.0 * i / sr) * (0.6 + 0.4 * std::sin (2.0 * pi * 1.3 * i / sr)));
+    std::vector<float> out;
+    juce::AudioBuffer<float> buf (2, block);
+    int armedAt = -1, loopingAt = -1, idleAt = -1, takenAt = -1, releasedAt = -1;
+    const int noteAt = (int) (4.2 * sr);
+    rk::Channels rec;
+    for (int pos = 0; pos < total; pos += block)
+    {
+        if (armedAt < 0 && pos >= (int) (0.25 * sr))
+        {
+            CHECK (p.armResample (10.0, 1, false), "armed");
+            armedAt = pos;
+        }
+        juce::MidiBuffer midi;
+        if (noteAt >= pos && noteAt < pos + block)
+            midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), noteAt - pos);
+        const float* chans[2] = { in.data() + pos, in.data() + pos };
+        buf.clear();
+        p.render (buf, midi, {}, chans, 2, true);
+        for (int i = 0; i < block; ++i)
+            out.push_back (buf.getSample (0, i));
+        const auto st = p.resampleState();
+        if (loopingAt < 0 && st == Player::Resample::looping)
+            loopingAt = pos;
+        // the message thread: the recording taken, the effects set to zero, then the chain let go
+        if (loopingAt >= 0 && takenAt < 0 && pos > loopingAt + (int) (0.05 * sr) && p.resampleReady())
+        {
+            rec = p.takeResample();
+            p.set (snd::chOn, 0.0f);
+            p.set (snd::fModel, 0.0f);
+            takenAt = pos;
+        }
+        if (takenAt >= 0 && releasedAt < 0 && pos > takenAt + (int) (0.04 * sr))
+        {
+            p.releaseNeutral();
+            releasedAt = pos;
+        }
+        if (pos > noteAt && idleAt < 0 && st == Player::Resample::idle)
+            idleAt = pos;
+    }
+    const int target = (int) (2.0 * sr), fade = (int) (0.02 * sr), tail = (int) (0.01 * sr);
+    CHECK (rec.size() == 2 && (int) rec[0].size() == target, "one bar at 120: %d frames", rec.empty() ? 0 : (int) rec[0].size());
+    if (rec.size() != 2 || (int) rec[0].size() != target)
+        return;
+    // what was recorded is what was heard (past the start, crossfaded with what followed the end)
+    float worst = 0.0f;
+    for (int j = tail; j < target; ++j)
+        worst = std::max (worst, std::abs (rec[0][(size_t) j] - out[(size_t) (armedAt + j)]));
+    CHECK (worst < 1.0e-6f, "recorded as heard: off by %.2e", worst);
+    // past the handover, the loop as recorded: the chain neutral, then its settings at zero, then let go
+    const int t0 = armedAt + target;
+    worst = 0.0f;
+    for (int t = t0 + fade; t < noteAt; ++t)
+        worst = std::max (worst, std::abs (out[(size_t) t] - rec[0][(size_t) ((t - t0) % target)]));
+    CHECK (worst < 1.0e-6f, "the loop heard as it was recorded: off by %.2e", worst);
+    CHECK (releasedAt > 0 && releasedAt < noteAt, "let go while looping");
+    // no click: at the handover and where it loops, no step larger than the sound's own
+    auto maxStep = [&] (int from, int to)
+    {
+        float m = 0.0f;
+        for (int t = from + 1; t < to; ++t)
+            m = std::max (m, std::abs (out[(size_t) t] - out[(size_t) t - 1]));
+        return m;
+    };
+    const float own = maxStep (armedAt, t0 - 2000);
+    const float atHandover = maxStep (t0 - 200, t0 + fade + 200), atWrap = maxStep (t0 + target - 200, t0 + target + 200);
+    CHECK (atHandover < own * 1.3f && atWrap < own * 1.3f, "steps: %.4f at the handover, %.4f where it loops, %.4f its own", atHandover, atWrap, own);
+    std::printf ("  resample: steps %.4f at the handover, %.4f where it loops, %.4f its own; taken over in %.1f ms\n",
+                 atHandover, atWrap, own, (idleAt - noteAt) * 1000.0 / sr);
+    // a note takes over: the loop fades out (30 ms)
+    CHECK (idleAt > 0 && idleAt - noteAt < (int) (0.05 * sr), "a note stops the loop: after %.1f ms", (idleAt - noteAt) * 1000.0 / sr);
+
+    // synced: from the next bar of the transport
+    {
+        Player q;
+        q.set (snd::engine, (float) snd::sampler);
+        plain (q);
+        Player::Transport tr;
+        tr.playing = true;
+        tr.bpm = 120.0;
+        tr.ppq = 1.3;
+        CHECK (q.armResample (10.0, 1, true), "armed, synced");
+        int started = -1;
+        for (int pos = 0; pos < (int) (2.0 * sr); pos += block)
+        {
+            buf.clear();
+            const float* chans[2] = { in.data() + pos, in.data() + pos };
+            q.render (buf, {}, tr, chans, 2, true);
+            tr.ppq += block / sr * 2.0;
+            const int written = (int) std::llround (q.resampleSeconds() * sr);
+            if (started < 0 && written > 0)
+                started = pos + block - written;
+        }
+        const int expected = (int) std::llround ((4.0 - 1.3) * 0.5 * sr);
+        CHECK (std::abs (started - expected) <= 1, "synced: started at %d, the bar at %d", started, expected);
+        q.stopResample();
+    }
+}
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI gui;
+    testResample();
     testAntiAliasing();
     testAliasingScale();
     testPhaseModulation();

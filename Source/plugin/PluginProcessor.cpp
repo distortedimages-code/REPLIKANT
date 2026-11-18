@@ -311,6 +311,7 @@ InstrumentPtr ReplikantProcessor::getInstrument() const
 void ReplikantProcessor::timerCallback()
 {
     collectOldInstruments();
+    resampleTick();
     // the clock a session started stops with it
     if (clockStartedBySampling && ! isSampling())
     {
@@ -453,11 +454,66 @@ bool ReplikantProcessor::startSampling (juce::String& why)
         why = "La session n'a pas pu démarrer."_fr;
         return false;
     }
+    lastCaptureWasCycles = false;
     if (clockWithSampling && clock.getMode() == MidiClock::Mode::internal && ! clock.isRunning())
     {
         clock.setRunning (true);
         clockStartedBySampling = true;
     }
+    sendChangeMessage();
+    return true;
+}
+
+bool ReplikantProcessor::startCycles (juce::String& why)
+{
+    if (isSampling())
+    {
+        why = "Une session est en cours."_fr;
+        return false;
+    }
+    if (options.source != Source::testSynth && port.load() == nullptr && ! hostMidiOut.load())
+    {
+        why = "Choisis la sortie MIDI qui va au synthé (SOURCE > MIDI)."_fr;
+        return false;
+    }
+    if (options.source == Source::sidechain && (getBusCount (true) < 2 || ! getBus (true, 1)->isEnabled()))
+    {
+        why = "Le sidechain n'est pas branché : choisis-le dans ton DAW, ou prends l'entrée principale."_fr;
+        return false;
+    }
+    const auto& c = cycleOptions;
+    const int n = CycleOptions::countOf (c.count);
+    Recorder::Plan plan;
+    for (int i = 0; i < n; ++i)
+    {
+        const double u = n > 1 ? (double) i / (double) (n - 1) : 0.0;
+        rk::Job j { juce::jlimit (0, 127, c.note), 100, 0, i };
+        if (c.vary == 1)
+            j.velocity = juce::jlimit (1, 127, (int) std::lround (1.0 + u * 126.0));
+        plan.jobs.push_back (j);
+        if (c.vary == 0)
+            plan.ccValues.push_back ((int) std::lround (c.ccFrom + u * (c.ccTo - c.ccFrom)));
+    }
+    plan.ccNumber = c.vary == 0 ? juce::jlimit (0, 127, c.cc) : -1;
+    plan.hold = juce::jlimit (0.15, 4.0, c.hold);
+    plan.releaseMax = 0.25;
+    plan.pause = juce::jlimit (0.05, 4.0, c.settle);
+    plan.channel = juce::jlimit (1, 16, options.channel);
+    plan.program = options.program;
+    // the takes cut and measured as the notes are, without looking for loops
+    auto s = session;
+    s.loop = false;
+    s.normalise = rk::Normalise::off;
+    s.oneShot = false;
+    auto base = getInstrument();
+    const auto folder = base != nullptr && base->folder.isDirectory() ? base->folder : Worker::uniqueFolder (instrumentsRoot(), instrumentName);
+    const int channels = options.source == Source::testSynth ? 2 : juce::jmax (1, juce::jmin (2, getTotalNumInputChannels()));
+    if (! worker.startCycleSession (instrumentName, s, plan, sampleRate, channels, folder, base))
+    {
+        why = "La session n'a pas pu démarrer."_fr;
+        return false;
+    }
+    lastCaptureWasCycles = true;
     sendChangeMessage();
     return true;
 }
@@ -505,6 +561,99 @@ void ReplikantProcessor::openInstrument (const juce::File& f, bool withItsSound)
     });
 }
 
+//============================================================================== RÉÉCHANTILLONNER
+bool ReplikantProcessor::startResample (juce::String& why)
+{
+    if (isSampling())
+    {
+        why = "Une capture est en cours."_fr;
+        return false;
+    }
+    if (player.resampleState() == Player::Resample::looping)
+    {
+        why = "La boucle injectée tourne encore : joue une note ou arrête-la d'abord."_fr;
+        return false;
+    }
+    const int bars = ResampleOptions::barsOf (resampleOptions.length);
+    // room for its bars down to 40 bpm (the host's tempo isn't known here), two minutes at most; a minute when free
+    const double seconds = bars > 0 ? juce::jmin (120.0, bars * 4.0 * 60.0 / 40.0) : 60.0;
+    if (! player.armResample (seconds, bars, resampleOptions.synced))
+    {
+        why = "Un rééchantillonnage est déjà en cours."_fr;
+        return false;
+    }
+    return true;
+}
+
+void ReplikantProcessor::resampleTick()
+{
+    if (releaseNeutralIn > 0 && --releaseNeutralIn == 0)
+        player.releaseNeutral();
+    if (player.resampleReady())
+        injectResample (player.takeResample());
+}
+
+void ReplikantProcessor::injectResample (rk::Channels audio)
+{
+    if (audio.empty() || audio[0].size() < 64)
+        return;
+    const int length = (int) audio[0].size();
+    rk::Loop loop;
+    loop.start = 0;
+    loop.end = length;
+    const auto base = instrumentName.isNotEmpty() ? instrumentName : juce::String ("Son");
+    const auto name = base.endsWith (" rééch."_fr) ? base : base + " rééch."_fr;
+    auto ins = instrumentio::soundInstrument (std::move (audio), sampleRate, name, resampleOptions.root, 0.0f, false, loop);
+    // the sound, to play it as it was heard (the Player holds the chain neutral until these are in)
+    if (resampleOptions.resetFx)
+        for (int id : { (int) snd::fModel, (int) snd::dModel, (int) snd::spOn, (int) snd::piOn, (int) snd::chOn, (int) snd::crOn,
+                        (int) snd::rvOn, (int) snd::wtf })
+            setSoundParam (id, 0.0f);
+    setSoundParam (snd::engine, (float) snd::sampler);
+    setSoundParam (snd::playMode, 0.0f);
+    setSoundParam (snd::loops, 1.0f);
+    setSoundParam (snd::start, 0.0f);
+    setSoundParam (snd::speed, 1.0f);
+    setSoundParam (snd::loopStart, 0.0f);
+    setSoundParam (snd::loopSize, 1.0f);
+    setSoundParam (snd::loopXfade, 0.0f);
+    setSoundParam (snd::transpose, 0.0f);
+    setSoundParam (snd::fine, 0.0f);
+    releaseNeutralIn = 2;         // the settings taken by the Player first (next tick)
+    // the input was heard through the effects: it is the loop now
+    juce::String also;
+    if (options.monitor == 2)
+    {
+        options.monitor = 0;
+        monitorAudio = 0;
+        also = " · écoute de l'entrée coupée"_fr;
+    }
+    instrumentName = name;
+    session.renderKeys = false;
+    lastResample = name;
+    settingsChanged();
+    const auto folder = Worker::uniqueFolder (instrumentsRoot(), name);
+    worker.post ("RÉÉCHANTILLON"_fr, [this, ins, folder]
+    {
+        const auto r = instrumentio::save (*ins, folder);
+        if (r.failed())
+            juce::MessageManager::callAsync ([this, r] { if (onMessage) onMessage (r.getErrorMessage()); });
+        worker.renderAndPublish (ins, true);
+    });
+    if (onMessage)
+        onMessage ("Injecté dans le sampler : "_fr + juce::String ((double) length / sampleRate, 2) + " s sur "_fr
+                   + juce::String (rk::noteName (resampleOptions.root))
+                   + (resampleOptions.resetFx ? juce::String (", effets à zéro"_fr) : juce::String()) + also
+                   + ". Joue une note pour reprendre la main."_fr);
+    sendChangeMessage();
+}
+
+void ReplikantProcessor::setSoundParam (int id, float value)
+{
+    if (auto* param = params.getParameter (snd::def (id).id))
+        param->setValueNotifyingHost (param->convertTo0to1 (snd::legal (id, value)));
+}
+
 void ReplikantProcessor::importAny (const juce::File& f)
 {
     if (isSampling())
@@ -515,6 +664,39 @@ void ReplikantProcessor::importAny (const juce::File& f)
         return;
     }
     const auto root = instrumentsRoot();
+    if (instrumentio::isSound (f))
+    {
+        // a sound: an instrument of its own (saved, so it can be shared), played by the sampler
+        worker.post ("IMPORT", [this, f, root]
+        {
+            juce::String err;
+            auto ins = instrumentio::readSound (f, err);
+            if (ins != nullptr)
+            {
+                const auto r = instrumentio::save (*ins, Worker::uniqueFolder (root, ins->name));
+                if (r.failed())
+                    err = r.getErrorMessage();
+            }
+            if (ins == nullptr || err.isNotEmpty())
+            {
+                juce::MessageManager::callAsync ([this, err] { if (onMessage) onMessage (err); });
+                if (ins == nullptr)
+                    return;
+            }
+            juce::MessageManager::callAsync ([this, ins]
+            {
+                instrumentName = ins->name;
+                session.renderKeys = false;
+                setSoundParam (snd::engine, (float) snd::sampler);
+                settingsChanged();
+                if (onMessage)
+                    onMessage (ins->name + " · joué sur tout le clavier depuis "_fr + juce::String (rk::noteName (ins->samples[0].root))
+                               + (ins->samples[0].loop.valid() ? juce::String (" · bouclé"_fr) : juce::String()));
+            });
+            worker.renderAndPublish (ins, true);
+        });
+        return;
+    }
     worker.post ("IMPORT", [this, f, root]
     {
         juce::String err;
@@ -526,7 +708,7 @@ void ReplikantProcessor::importAny (const juce::File& f)
                 if (onMessage) onMessage (err);
                 return;
             }
-            if (onMessage) onMessage ("Importé : "_fr + name + " → " + folder.getFullPathName());
+            if (onMessage) onMessage ("Importé : "_fr + name + " → "_fr + folder.getFullPathName());
             openInstrument (folder, true);
         });
     });
@@ -710,6 +892,18 @@ void ReplikantProcessor::getStateInformation (juce::MemoryBlock& dest)
     xml.setAttribute ("program", options.program);
     xml.setAttribute ("monitor", options.monitor);
     xml.setAttribute ("thru", options.thru);
+    xml.setAttribute ("cyNote", cycleOptions.note);
+    xml.setAttribute ("cyCount", cycleOptions.count);
+    xml.setAttribute ("cyVary", cycleOptions.vary);
+    xml.setAttribute ("cyCc", cycleOptions.cc);
+    xml.setAttribute ("cyFrom", cycleOptions.ccFrom);
+    xml.setAttribute ("cyTo", cycleOptions.ccTo);
+    xml.setAttribute ("cyHold", cycleOptions.hold);
+    xml.setAttribute ("cySettle", cycleOptions.settle);
+    xml.setAttribute ("rsLength", resampleOptions.length);
+    xml.setAttribute ("rsSynced", resampleOptions.synced);
+    xml.setAttribute ("rsRoot", resampleOptions.root);
+    xml.setAttribute ("rsResetFx", resampleOptions.resetFx);
     if (auto ins = getInstrument(); ins != nullptr && ins->folder.isDirectory())
         xml.setAttribute ("instrument", ins->folder.getFullPathName());
     if (auto st = params.copyState().createXml())
@@ -733,6 +927,18 @@ void ReplikantProcessor::setStateInformation (const void* data, int size)
     options.program = juce::jlimit (-1, 127, xml->getIntAttribute ("program", options.program));
     options.monitor = juce::jlimit (0, 2, xml->getIntAttribute ("monitor", options.monitor));
     options.thru = xml->getBoolAttribute ("thru", options.thru);
+    cycleOptions.note = juce::jlimit (0, 127, xml->getIntAttribute ("cyNote", cycleOptions.note));
+    cycleOptions.count = juce::jlimit (0, 3, xml->getIntAttribute ("cyCount", cycleOptions.count));
+    cycleOptions.vary = juce::jlimit (0, 2, xml->getIntAttribute ("cyVary", cycleOptions.vary));
+    cycleOptions.cc = juce::jlimit (0, 127, xml->getIntAttribute ("cyCc", cycleOptions.cc));
+    cycleOptions.ccFrom = juce::jlimit (0, 127, xml->getIntAttribute ("cyFrom", cycleOptions.ccFrom));
+    cycleOptions.ccTo = juce::jlimit (0, 127, xml->getIntAttribute ("cyTo", cycleOptions.ccTo));
+    cycleOptions.hold = juce::jlimit (0.15, 4.0, xml->getDoubleAttribute ("cyHold", cycleOptions.hold));
+    cycleOptions.settle = juce::jlimit (0.05, 4.0, xml->getDoubleAttribute ("cySettle", cycleOptions.settle));
+    resampleOptions.length = juce::jlimit (0, 4, xml->getIntAttribute ("rsLength", resampleOptions.length));
+    resampleOptions.synced = xml->getBoolAttribute ("rsSynced", resampleOptions.synced);
+    resampleOptions.root = juce::jlimit (0, 127, xml->getIntAttribute ("rsRoot", resampleOptions.root));
+    resampleOptions.resetFx = xml->getBoolAttribute ("rsResetFx", resampleOptions.resetFx);
     if (auto* st = xml->getChildByName (params.state.getType()))
     {
         params.replaceState (juce::ValueTree::fromXml (*st));

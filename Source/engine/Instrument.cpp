@@ -430,6 +430,26 @@ namespace
             if (written.count (f.getFileName()) == 0)
                 f.deleteFile();
 
+        // the cycles (CAPTURE CYCLES): one wavetable, 2048 points a cycle, 32-bit float (Serum, Vital, Bitwig read it)
+        juce::var cyclesInfo;
+        if (ins.cycles != nullptr && ins.cycles->count() > 0)
+        {
+            const auto dir = folder.getChildFile ("Cycles");
+            const auto f = dir.getChildFile (safeName (ins.name) + " - cycles " + juce::String (dsp::CycleBank::size) + ".wav");
+            dir.createDirectory();
+            for (auto& old : dir.findChildFiles (juce::File::findFiles, false, "*.wav"))
+                if (old != f)
+                    old.deleteFile();
+            rk::Channels table { ins.cycles->flatten() };
+            if (! rk::writeWav (f.getFullPathName().toStdString(), table, 48000.0, 32, rk::WavInfo()))
+                return juce::Result::fail ("Impossible d'écrire "_fr + f.getFullPathName());
+            auto* c = new juce::DynamicObject();
+            c->setProperty ("file", "Cycles/" + f.getFileName());
+            c->setProperty ("size", dsp::CycleBank::size);
+            c->setProperty ("count", ins.cycles->count());
+            cyclesInfo = juce::var (c);
+        }
+
         const auto desc = folder.getChildFile (safeName (ins.name) + ".replikant");
         // the sound already there stays, unless one is given
         auto keep = sound;
@@ -444,6 +464,8 @@ namespace
         root->setProperty ("noiseDb", ins.noise.rmsDb());
         root->setProperty ("session", sessionToVar (ins.session));
         root->setProperty ("samples", list);
+        if (! cyclesInfo.isVoid())
+            root->setProperty ("cycles", cyclesInfo);
         if (! keep.isVoid())
             root->setProperty ("sound", keep);
         if (! desc.replaceWithText (juce::JSON::toString (juce::var (root))))
@@ -510,7 +532,125 @@ bool isImportable (const juce::File& f)
 {
     if (f.isDirectory())
         return ! f.findChildFiles (juce::File::findFiles, false, "*.replikant").isEmpty();
-    return f.hasFileExtension ("zip;replikant");
+    return f.hasFileExtension ("zip;replikant") || isSound (f);
+}
+
+bool isSound (const juce::File& f)
+{
+    return f.existsAsFile() && f.hasFileExtension ("wav;wave;aif;aiff;aifc;flac;ogg;mp3;m4a;caf");
+}
+
+std::shared_ptr<Instrument> soundInstrument (rk::Channels audio, double sampleRate, const juce::String& name,
+                                             int root, float detuneCents, bool pitchFound, rk::Loop loop)
+{
+    auto ins = std::make_shared<Instrument>();
+    ins->name = name;
+    ins->sampleRate = sampleRate;
+    auto& ss = ins->session;
+    ss.lowNote = ss.highNote = root;
+    ss.renderKeys = false;                      // varispeed: the classic sampler
+    ss.loop = loop.valid();
+    ss.tuning = rk::Tuning::snap;
+    ss.normalise = rk::Normalise::off;
+    rk::Sample x;
+    x.root = x.sent = juce::jlimit (0, 127, root);
+    x.velocity = 127;
+    x.keyLo = 0;
+    x.keyHi = 127;
+    x.velLo = 1;
+    x.velHi = 127;
+    x.sampleRate = sampleRate;
+    x.audio = std::move (audio);
+    x.loop = loop;
+    x.detuneCents = pitchFound ? detuneCents : 0.0f;
+    x.pitchConfident = pitchFound;
+    x.manualTune = true;                        // never measured again
+    x.peak = rk::peakOf (x.audio);
+    ins->samples.push_back (std::move (x));
+    ins->rebuildIndex();
+    return ins;
+}
+
+std::shared_ptr<Instrument> readSound (const juce::File& f, juce::String& error)
+{
+    constexpr double maxSeconds = 180.0;
+    rk::Channels audio;
+    double sr = 0.0;
+    rk::WavInfo info;
+    bool read = f.hasFileExtension ("wav;wave") && rk::readWav (f.getFullPathName().toStdString(), audio, sr, info) && ! audio.empty();
+    if (! read)
+    {
+        audio.clear();
+        info = {};
+        juce::AudioFormatManager formats;
+        formats.registerBasicFormats();
+        std::unique_ptr<juce::AudioFormatReader> r (formats.createReaderFor (f));
+        if (r == nullptr || r->lengthInSamples <= 0 || r->sampleRate <= 0.0)
+        {
+            error = "Je ne sais pas lire ce son : "_fr + f.getFileName();
+            return nullptr;
+        }
+        sr = r->sampleRate;
+        const int frames = (int) juce::jmin ((juce::int64) (maxSeconds * sr), r->lengthInSamples);
+        const int chans = juce::jlimit (1, 2, (int) r->numChannels);
+        juce::AudioBuffer<float> buf (chans, frames);
+        r->read (&buf, 0, frames, 0, true, chans > 1);
+        audio.assign ((size_t) chans, std::vector<float> ((size_t) frames));
+        for (int c = 0; c < chans; ++c)
+            std::copy (buf.getReadPointer (c), buf.getReadPointer (c) + frames, audio[(size_t) c].begin());
+        const auto unity = r->metadataValues.getValue ("MidiUnityNote", {});
+        if (unity.isNotEmpty())
+            info.root = juce::jlimit (0, 127, unity.getIntValue());
+        const auto ls = r->metadataValues.getValue ("Loop0Start", {}), le = r->metadataValues.getValue ("Loop0End", {});
+        if (ls.isNotEmpty() && le.isNotEmpty())
+        {
+            info.loop.start = ls.getIntValue();
+            info.loop.end = le.getIntValue() + 1;
+        }
+    }
+    if (audio.size() > 2)
+        audio.resize (2);
+    const int maxFrames = (int) (maxSeconds * sr);
+    for (auto& ch : audio)
+        if ((int) ch.size() > maxFrames)
+            ch.resize ((size_t) maxFrames);
+    const int length = audio.empty() ? 0 : (int) audio[0].size();
+    if (length < 16)
+    {
+        error = "Ce son est vide : "_fr + f.getFileName();
+        return nullptr;
+    }
+    if (info.loop.end > length || info.loop.start < 0 || info.loop.end - info.loop.start < 16)
+        info.loop = {};
+
+    // its note: the file's, its name's, its pitch's
+    int root = info.root;
+    float detune = info.root >= 0 ? info.detuneCents : 0.0f;
+    bool found = info.root >= 0 && std::abs (info.detuneCents) > 1.0e-3f;
+    if (root < 0)
+        for (auto& word : juce::StringArray::fromTokens (f.getFileNameWithoutExtension(), " _.()[]{}", ""))
+        {
+            const int n = rk::parseNote (word.toStdString());
+            if (n >= 0)
+                root = n;              // (the last one: "Pad 2 C3")
+        }
+    if (root < 0)
+    {
+        const auto mono = rk::mixDown (audio);
+        const int from = juce::jmin (length - 1, (int) (0.05 * sr));
+        const int to = juce::jmin (length, from + (int) (1.0 * sr));
+        const auto p = rk::detectPitchWide (mono, sr, 261.6255653, from, to);
+        if (p.ok && p.confidence > 0.7f)
+        {
+            const int semis = (int) std::lround (p.cents / 100.0);
+            root = 60 + semis;
+            detune = (float) (p.cents - 100.0 * semis);
+            found = true;
+        }
+        else
+            root = 60;
+    }
+    return soundInstrument (std::move (audio), sr, f.getFileNameWithoutExtension(), root, detune, found, info.loop);
 }
 
 juce::File importPack (const juce::File& zip, const juce::File& root, juce::String& error)
@@ -615,6 +755,25 @@ std::shared_ptr<Instrument> load (const juce::File& where, juce::String& error)
         s.peak = rk::peakOf (s.audio);
         ins->sampleRate = s.sampleRate;
         ins->samples.push_back (std::move (s));
+    }
+    // its cycles
+    if (const auto c = json["cycles"]; c.isObject())
+    {
+        const auto f = ins->folder.getChildFile (c["file"].toString());
+        rk::Channels table;
+        double tableRate = 0.0;
+        rk::WavInfo info;
+        const int size = (int) c.getProperty ("size", dsp::CycleBank::size);
+        if (f.isAChildOf (ins->folder) && size == dsp::CycleBank::size
+            && rk::readWav (f.getFullPathName().toStdString(), table, tableRate, info) && ! table.empty())
+        {
+            const int count = (int) table[0].size() / size;
+            std::vector<std::vector<float>> cycles;
+            for (int i = 0; i < count; ++i)
+                cycles.emplace_back (table[0].begin() + i * size, table[0].begin() + (i + 1) * size);
+            if (count > 0)
+                ins->cycles = std::make_shared<const dsp::CycleBank> (cycles, true);
+        }
     }
     ins->rebuildIndex();
     return ins;

@@ -17,6 +17,7 @@ public:
     void reset();
 
     float tuningCents = 7.0f;     // the whole synth is a little sharp
+    float brightness = 0.5f;      // CC 74: the filter two octaves down (0) to two up (1)
 
 private:
     struct Voice

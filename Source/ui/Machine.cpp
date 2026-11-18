@@ -84,6 +84,8 @@ static Picto pagePicto (const Machine::Page& pg)
     if (n == "attaque")   return Picto::onset;
     if (n == "niveau")    return Picto::vuMeter;
     if (n == "transpo")   return Picto::shift;
+    if (v == "resample")  return Picto::resample;
+    if (v == "cycleplan") return Picto::cycles;
     return Picto::none;
 }
 
@@ -237,6 +239,13 @@ private:
             tag = proc().isSampling() ? "capture en cours" : "capture";
             title = proc().instrumentName;
             sub = m.status.sampling ? m.status.text : juce::String ("notes : un multisample de ton synthé, joué dans le sampler"_fr);
+            if (m.captureKind == Machine::cyclesKind && ! m.status.sampling)
+                sub = "cycles : une banque pour les oscillateurs du synthé"_fr;
+            if (m.captureKind == Machine::resampleKind)
+            {
+                tag = proc().player.resampleState() == Player::Resample::recording ? "rééchantillonne"_fr : "rééchantillonner"_fr;
+                sub = "ce qui sort des effets, injecté dans le sampler"_fr;
+            }
         }
         else if (m.mode == Machine::synthMode)
         {
@@ -251,7 +260,11 @@ private:
             tag = "sampler";
             title = proc().instrumentName;
             if (ins != nullptr && ! ins->samples.empty())
-                sub << (int) ins->samples.size() << " samples · "_fr << (int) ins->keys.size() << " touches rendues";
+            {
+                const int ns = (int) ins->samples.size(), nk = (int) ins->keys.size();
+                sub << ns << (ns > 1 ? " samples · "_fr : " sample · "_fr)
+                    << (nk > 0 ? juce::String (nk) + " touches rendues" : juce::String ("joué en direct sur le clavier"_fr));
+            }
             else
                 sub = "aucun son : glisse un wav, ou capture ton synthé"_fr;
         }
@@ -263,11 +276,11 @@ private:
         if (proc().options.monitor == 2)
             sub = "entrée par les effets · "_fr + sub;
         auto f = mono (12.0f, 600);
-        const Picto icon = m.capture ? (proc().isSampling() ? Picto::record : Picto::jack)
+        const Picto icon = m.capture ? (proc().isSampling() ? Picto::record : (m.captureKind == Machine::resampleKind ? Picto::resample : Picto::jack))
                          : (m.mode == Machine::synthMode ? Picto::sine : (m.mode == Machine::samplerMode ? Picto::cassette : Picto::drum));
         const float tw = (float) juce::GlyphArrangement::getStringWidthInt (f, themed (tag)) + 14.0f + 20.0f;
         auto t = r.removeFromLeft (tw).reduced (0.0f, 1.0f);
-        g.setColour (proc().isSampling() ? col::sRed : col::sOrange);
+        g.setColour (proc().isSampling() || proc().player.resampleState() == Player::Resample::recording ? col::sRed : col::sOrange);
         g.fillRoundedRectangle (t, 4.0f);
         auto ti = t.reduced (7.0f, 0.0f);
         picto (g, icon, ti.removeFromLeft (15.0f).withSizeKeepingCentre (15.0f, 15.0f), col::screen, 1.4f);
@@ -428,7 +441,9 @@ private:
         {
             line (X (ls), col::sGreen, 2.5f);
             line (X (le), col::sGreen, 2.5f);
-            text (g, "boucle", { X (ls) + 5.0f, r.getY(), 80.0f, 14.0f }, mono (11.0f), col::sGreen);
+            // (under the start's name when they meet)
+            const bool meet = std::abs (X (ls) - X (start)) < 70.0f;
+            text (g, "boucle", { X (ls) + 5.0f, r.getY() + (meet ? 14.0f : 0.0f), 80.0f, 14.0f }, mono (11.0f), col::sGreen);
         }
         if (playing == lastSample)
         {
@@ -462,6 +477,16 @@ private:
     //------------------------------------------------------------------ CAPTURE: the plan, or the session going
     void paintCapture (juce::Graphics& g, juce::Rectangle<float> r)
     {
+        if (m.captureKind == Machine::resampleKind)
+        {
+            paintResample (g, r);
+            return;
+        }
+        if (m.captureKind == Machine::cyclesKind && ! m.status.sampling)
+        {
+            paintCyclePlan (g, r);
+            return;
+        }
         auto& s = proc().session;
         if (m.status.sampling)
         {
@@ -567,6 +592,93 @@ private:
         seg (s.hold, col::sOrange, "tenue " + seconds (s.hold), col::screen);
         seg (s.releaseMax, col::sOrange.withAlpha (0.35f), "relâche "_fr + seconds (s.releaseMax), col::screenText);
         seg (s.pause, col::screenLine, seconds (s.pause), col::screenDim);
+    }
+
+    //------------------------------------------------------------------ CAPTURE CYCLES: the takes and what moves
+    void paintCyclePlan (juce::Graphics& g, juce::Rectangle<float> r)
+    {
+        const auto& o = proc().cycleOptions;
+        const int n = ReplikantProcessor::CycleOptions::countOf (o.count);
+        const double each = o.hold + o.settle + 0.15;
+        juce::String head, line;
+        head << n << " cycles · "_fr << lower (rk::noteName (o.note));
+        if (o.vary == 0)
+            line << "cc " << o.cc << " de "_fr << o.ccFrom << " à "_fr << o.ccTo;
+        else if (o.vary == 1)
+            line << "vélocité de 1 à 127"_fr;
+        else
+            line << "tourne un bouton du synthé pendant la capture"_fr;
+        line << " · ≈ "_fr << juce::roundToInt (n * each) << " s";
+        auto top = r.removeFromTop (60.0f);
+        text (g, head, top.removeFromTop (34.0f), grotesk (24.0f, 300), col::screenText, juce::Justification::centredLeft, true);
+        text (g, line, top, mono (12.0f), col::screenDim);
+        r.removeFromTop (10.0f);
+        // one column a take, as high as what it sends
+        auto row = r.removeFromTop (juce::jmin (110.0f, r.getHeight() - 10.0f));
+        const float w = row.getWidth() / (float) n;
+        for (int i = 0; i < n; ++i)
+        {
+            const float u = n > 1 ? (float) i / (float) (n - 1) : 0.0f;
+            const float v = o.vary == 0 ? ((float) o.ccFrom + u * (float) (o.ccTo - o.ccFrom)) / 127.0f : (o.vary == 1 ? u : 0.5f);
+            auto col = juce::Rectangle<float> (row.getX() + (float) i * w, row.getY(), w, row.getHeight()).reduced (juce::jmin (3.0f, w * 0.2f), 0.0f);
+            g.setColour (col::screenLine);
+            g.fillRoundedRectangle (col, 2.0f);
+            g.setColour (col::sBlue.withAlpha (0.8f));
+            g.fillRoundedRectangle (col.withTop (col.getBottom() - col.getHeight() * juce::jmax (0.04f, v)), 2.0f);
+        }
+    }
+
+    //------------------------------------------------------------------ RÉÉCHANTILLONNER: the bars, as they fill
+    void paintResample (juce::Graphics& g, juce::Rectangle<float> r)
+    {
+        auto& o = proc().resampleOptions;
+        auto& pl = proc().player;
+        const auto st = pl.resampleState();
+        const int bars = ReplikantProcessor::ResampleOptions::barsOf (o.length);
+        juce::String head, line;
+        switch (st)
+        {
+            case Player::Resample::idle:
+                head = bars > 0 ? juce::String (bars) + (bars > 1 ? " mesures" : " mesure") : juce::String ("libre");
+                line = (bars > 0 && o.synced ? juce::String ("sur la mesure suivante quand le transport joue") : juce::String ("dès que tu lances"_fr))
+                       + " · rejoué sur "_fr + lower (rk::noteName (o.root)) + (o.resetFx ? " · effets à zéro ensuite"_fr : " · effets gardés"_fr);
+                break;
+            case Player::Resample::armed:     head = "en attente de la mesure"; line = "lance le transport, ou annule"; break;
+            case Player::Resample::recording: head = juce::String (pl.resampleSeconds(), 2) + " s"; line = "ce qui sort des effets, avant le volume"; break;
+            case Player::Resample::handing:   head = "injection"; line = "la boucle prend le relais"; break;
+            case Player::Resample::looping:   head = "boucle injectée"_fr; line = "joue une note pour reprendre la main · ou arrête-la"_fr; break;
+        }
+        auto top = r.removeFromTop (60.0f);
+        text (g, head, top.removeFromTop (34.0f), grotesk (24.0f, 300), col::screenText, juce::Justification::centredLeft, true);
+        text (g, line, top, mono (12.0f), col::screenDim);
+        r.removeFromTop (8.0f);
+        // the bars (free: one), filled as recorded
+        auto row = r.removeFromTop (juce::jmin (90.0f, r.getHeight() - 40.0f));
+        const int cells = bars > 0 ? bars : 1;
+        const float gap = 6.0f, w = (row.getWidth() - gap * (float) (cells - 1)) / (float) cells;
+        const float done = st == Player::Resample::recording ? pl.resampleProgress() * (float) cells
+                           : (st >= Player::Resample::handing ? (float) cells : 0.0f);
+        for (int i = 0; i < cells; ++i)
+        {
+            auto cell = juce::Rectangle<float> (row.getX() + (float) i * (w + gap), row.getY(), w, row.getHeight());
+            g.setColour (col::screenLine);
+            g.drawRoundedRectangle (cell.reduced (0.5f), 6.0f, 1.0f);
+            const float f = juce::jlimit (0.0f, 1.0f, done - (float) i);
+            if (f > 0.0f)
+            {
+                g.setColour ((st == Player::Resample::looping ? col::sBlue : col::sRed).withAlpha (0.75f));
+                g.fillRoundedRectangle (cell.withWidth (cell.getWidth() * f).reduced (2.0f), 5.0f);
+            }
+            text (g, juce::String (i + 1), cell.reduced (8.0f, 6.0f), mono (11.0f, 500), col::screenDim, juce::Justification::topLeft, true);
+        }
+        r.removeFromTop (14.0f);
+        // what goes in: the output
+        const float dbv = juce::Decibels::gainToDecibels (pl.outLevel.load(), -100.0f);
+        auto meter = r.removeFromTop (12.0f);
+        g.setColour (col::screenLine);
+        g.fillRoundedRectangle (meter, 3.0f);
+        g.setColour (dbv > -1.0f ? col::sRed : col::sGreen);
+        g.fillRoundedRectangle (meter.withWidth (meter.getWidth() * juce::jlimit (0.0f, 1.0f, (dbv + 60.0f) / 60.0f)), 3.0f);
     }
 
     //------------------------------------------------------------------ the right: what was touched, the page's picture
@@ -739,6 +851,50 @@ private:
                 const auto ink = ons[st] ? col::screen : col::screenDim;
                 picto (g, stagePicto (st, (int) P (p, snd::dModel)), inBox.removeFromTop (inBox.getHeight() - 16.0f).withSizeKeepingCentre (26.0f, 26.0f), ink, 1.5f);
                 text (g, names[st], inBox, mono (10.0f, 500), ink, juce::Justification::centred);
+            }
+        }
+        else if (viz == "cycleplan")
+        {
+            // the cycles already captured with the instrument, laid over each other (else the picture of it)
+            auto ins = p.getInstrument();
+            if (ins == nullptr || ins->cycles == nullptr || ins->cycles->count() == 0)
+            {
+                picto (g, Picto::cycles, r.withSizeKeepingCentre (64.0f, 64.0f), col::screenDim, 1.6f);
+                text (g, "pas encore de cycles capturés"_fr, r.removeFromBottom (16.0f), mono (10.0f), col::screenDim, juce::Justification::centred);
+            }
+            else
+            {
+                const auto& bank = *ins->cycles;
+                const int nc = bank.count();
+                for (int c = 0; c < nc; ++c)
+                {
+                    juce::Path path;
+                    const float* cy = bank.cycle (c);
+                    for (int i = 0; i <= 128; ++i)
+                    {
+                        const float x = r.getX() + r.getWidth() * (float) i / 128.0f;
+                        const float y = r.getCentreY() - r.getHeight() * 0.42f * cy[(i * dsp::CycleBank::size / 128) % dsp::CycleBank::size];
+                        if (i == 0) path.startNewSubPath (x, y); else path.lineTo (x, y);
+                    }
+                    stroke (path, col::sBlue.withAlpha (0.25f + 0.75f * (float) c / (float) juce::jmax (1, nc - 1)), 1.2f);
+                }
+                text (g, juce::String (nc) + " cycles capturés"_fr, r.removeFromBottom (16.0f), mono (10.0f), col::screenDim, juce::Justification::centredRight);
+            }
+        }
+        else if (viz == "resample")
+        {
+            // the way the sound goes: the effects, recorded, into the sampler, looped
+            const Picto steps[4] = { Picto::chain, Picto::record, Picto::cassette, Picto::loop };
+            const char* names[4] = { "effets", "enregistré", "sampler", "en boucle" };
+            const float w = r.getWidth() / 4.0f;
+            for (int i = 0; i < 4; ++i)
+            {
+                auto cell = juce::Rectangle<float> (r.getX() + (float) i * w, r.getY() + 10.0f, w, r.getHeight() - 20.0f);
+                picto (g, steps[i], cell.removeFromTop (cell.getHeight() - 22.0f).withSizeKeepingCentre (40.0f, 40.0f),
+                       i == 1 ? col::sRed : col::sBlue, 1.7f);
+                text (g, juce::String::fromUTF8 (names[i]), cell, mono (10.0f, 500), col::screenDim, juce::Justification::centred);
+                if (i < 3)
+                    text (g, "→"_fr, { cell.getRight() - 8.0f, r.getCentreY() - 20.0f, 16.0f, 16.0f }, mono (12.0f), col::screenGhost, juce::Justification::centred, true);
             }
         }
         else if (viz == "voices")
@@ -1237,11 +1393,13 @@ public:
         auto r = getLocalBounds().toFloat();
         layout();
         const char* names[3] = { "notes", "cycles", "rééchantillonner" };
-        const char* tips[3] = { "un multisample, joué dans le sampler", "une banque de cycles pour le synthé (bientôt)", "la sortie des effets, injectée dans le sampler (bientôt)" };
+        const char* tips[3] = { "un multisample, joué dans le sampler", "une banque de cycles pour les oscillateurs du synthé",
+                                "ce qui sort des effets, injecté dans le sampler sans coupure" };
+        const int kind = m.captureKind;
         for (int i = 0; i < 3; ++i)
         {
-            const bool on = i == 0;
-            const bool ready = i == 0;
+            const bool on = i == kind;
+            const bool ready = true;
             key (g, kinds[i], on ? KeyState::on : (ready ? KeyState::normal : KeyState::off), false, 10.0f);
             auto k = kinds[i].withTrimmedBottom (3.0f).reduced (14.0f, 8.0f);
             const Picto icons[3] = { Picto::keys, Picto::cycles, Picto::resample };
@@ -1252,6 +1410,11 @@ public:
             g.setColour (on ? col::keyOnInk.withAlpha (0.7f) : col::ink3);
             g.setFont (mono (11.0f));
             g.drawFittedText (themed (juce::String::fromUTF8 (tips[i])), k.toNearestInt(), juce::Justification::topLeft, 3, 0.9f);
+        }
+        if (kind == Machine::resampleKind)
+        {
+            paintResampleKeys (g);
+            return;
         }
         const bool sampling = m.proc.isSampling();
         key (g, test, sampling ? KeyState::off : KeyState::normal, false, 10.0f);
@@ -1265,13 +1428,70 @@ public:
             g.fillRect (t.getX(), t.getCentreY() - 7.0f, 14.0f, 14.0f);
         else
             g.fillEllipse (t.getX(), t.getCentreY() - 7.0f, 14.0f, 14.0f);
-        text (g, sampling ? "arrêter"_fr : "lancer la capture", t.withTrimmedLeft (24.0f), mono (15.0f, 600), sampling ? col::screenText : juce::Colours::white);
+        text (g, sampling ? "arrêter"_fr : (kind == Machine::cyclesKind ? "capturer les cycles" : "lancer la capture"), t.withTrimmedLeft (24.0f),
+              mono (15.0f, 600), sampling ? col::screenText : juce::Colours::white);
         juce::ignoreUnused (r);
+    }
+
+    // RÉÉCHANTILLONNER: what the input does (heard through the effects, or not), and the big key, as it goes
+    void paintResampleKeys (juce::Graphics& g)
+    {
+        const int mon = m.proc.options.monitor;
+        const char* monNames[3] = { "entrée : coupée", "entrée : directe", "entrée : par les effets" };
+        key (g, test, mon == 2 ? KeyState::on : KeyState::normal, false, 10.0f);
+        text (g, juce::String::fromUTF8 (monNames[juce::jlimit (0, 2, mon)]), test.withTrimmedBottom (3.0f), mono (12.0f, 500),
+              mon == 2 ? col::keyOnInk : col::ink, juce::Justification::centred);
+        const auto st = m.proc.player.resampleState();
+        const bool busy = st != Player::Resample::idle;
+        g.setColour (busy ? col::well : col::red);
+        g.fillRoundedRectangle (go, 12.0f);
+        if (st == Player::Resample::recording)
+        {
+            // the bars filling up
+            g.setColour (col::red.withAlpha (0.55f));
+            g.fillRoundedRectangle (go.withWidth (go.getWidth() * m.proc.player.resampleProgress()), 12.0f);
+        }
+        auto t = go.reduced (18.0f, 0.0f);
+        const bool blink = std::fmod (juce::Time::getMillisecondCounterHiRes(), 600.0) < 300.0;
+        juce::String label;
+        switch (st)
+        {
+            case Player::Resample::idle:      label = "rééchantillonner"_fr; break;
+            case Player::Resample::armed:     label = "en attente de la mesure · annuler"_fr; break;
+            case Player::Resample::recording: label = "enregistre · "_fr + juce::String (m.proc.player.resampleSeconds(), 1) + " s · arrêter"_fr; break;
+            case Player::Resample::handing:   label = "injection"; break;
+            case Player::Resample::looping:   label = "boucle injectée · arrêter"_fr; break;
+        }
+        picto (g, st == Player::Resample::looping ? Picto::loop : Picto::resample, t.removeFromLeft (22.0f).withSizeKeepingCentre (22.0f, 22.0f),
+               busy ? (st == Player::Resample::armed && blink ? col::sRed.withAlpha (0.4f) : col::sRed) : juce::Colours::white, 1.6f);
+        text (g, label, t.withTrimmedLeft (10.0f), mono (15.0f, 600), busy ? col::screenText : juce::Colours::white);
     }
 
     void mouseDown (const juce::MouseEvent& e) override
     {
         layout();
+        for (int i = 0; i < 3; ++i)
+            if (kinds[i].contains (e.position) && ! m.proc.isSampling())
+            {
+                m.setCaptureKind (i);
+                repaint();
+                return;
+            }
+        if (m.captureKind == Machine::resampleKind)
+        {
+            if (go.contains (e.position))
+                m.toggleResample();
+            else if (test.contains (e.position))
+            {
+                auto& o = m.proc.options;
+                o.monitor = o.monitor == 2 ? 1 : 2;
+                m.proc.settingsChanged();
+                m.showMessage (o.monitor == 2 ? "L'entrée passe par les effets : ce que tu entends est ce qui sera enregistré."_fr
+                                              : "L'entrée est entendue directement : seul ce que joue REPLIKANT sera enregistré."_fr);
+            }
+            repaint();
+            return;
+        }
         if (go.contains (e.position)) { m.toggleSampling(); repaint(); return; }
         if (test.contains (e.position) && ! m.proc.isSampling())
         {
@@ -1409,6 +1629,8 @@ Machine::Machine (ReplikantProcessor& p) : proc (p), updatePanel (p.updater)
     midiDevices = proc.midiOutputs();
     buildPages();
     buildCapturePages();
+    buildResamplePages();
+    buildCyclePages();
 
     proc.onMessage = [this] (const juce::String& msg) { showMessage (msg); };
     proc.addChangeListener (this);
@@ -1429,6 +1651,8 @@ Machine::Machine (ReplikantProcessor& p) : proc (p), updatePanel (p.updater)
     }
     for (int m = 0; m < 3; ++m)
         page[m] = juce::jlimit (0, juce::jmax (0, (int) pages[m].size() - 1), proc.settingsFile().getIntValue ("page" + juce::String (m), 0));
+    captureKind = juce::jlimit ((int) notesKind, (int) resampleKind, proc.settingsFile().getIntValue ("captureKind", notesKind));
+    shownResample = proc.lastResample;
     const int engine = (int) P (proc, snd::engine);
     mode = engine == snd::drum ? samplerMode : engine;
     showPage (page[mode]);
@@ -1447,8 +1671,18 @@ Machine::~Machine()
 }
 
 //==============================================================================
-std::vector<Machine::Page>& Machine::pagesShown()   { return capture ? capturePages : pages[mode]; }
-int& Machine::pageIndex()                         { return capture ? capturePage : page[mode]; }
+std::vector<Machine::Page>& Machine::pagesShown()
+{
+    if (! capture)
+        return pages[mode];
+    return captureKind == resampleKind ? resamplePages : (captureKind == cyclesKind ? cyclePages : capturePages);
+}
+int& Machine::pageIndex()
+{
+    if (! capture)
+        return page[mode];
+    return captureKind == resampleKind ? resamplePage : (captureKind == cyclesKind ? cyclePage : capturePage);
+}
 
 void Machine::buildPages()
 {
@@ -1768,6 +2002,110 @@ void Machine::buildCapturePages()
     }
 }
 
+// RÉÉCHANTILLONNER's settings: one page
+void Machine::buildResamplePages()
+{
+    auto& o = proc.resampleOptions;
+    auto idle = [this] { return proc.player.resampleState() == Player::Resample::idle; };
+    resamplePages.clear();
+    Page pg { "rééchantillonner"_fr, "resample", {} };
+    Bank b { "rééchantillonner"_fr, {} };
+    auto keep = [this] (Ctl c, std::function<bool()> when)
+    {
+        c.enabled = std::move (when);
+        c.changed = [this] { proc.settingsChanged(); };
+        return c;
+    };
+    b.ctls.push_back (keep (choiceCtl ("Longueur", { "1 mesure", "2 mesures", "4 mesures", "8 mesures", "libre" },
+                                        [&o] { return o.length; }, [&o] (int v) { o.length = v; }), idle));
+    b.ctls.back().tip = "Combien enregistrer : des mesures au tempo (la boucle tombe juste), ou libre jusqu'à ce que tu arrêtes (une minute au plus)."_fr;
+    b.ctls.push_back (keep (choiceCtl ("Départ"_fr, { "à la mesure"_fr, "tout de suite" }, [&o] { return o.synced ? 0 : 1; },
+                                        [&o] (int v) { o.synced = v == 0; }), idle));
+    b.ctls.back().tip = "À LA MESURE : quand le transport joue, l'enregistrement part sur la mesure suivante (sinon, tout de suite)."_fr;
+    b.ctls.push_back (keep (numberCtl ("Note", 0.0, 127.0, 1.0, [&o] { return (double) o.root; }, [&o] (double v) { o.root = (int) v; },
+                                       [] (double v) { return lower (rk::noteName ((int) v)); }), [] { return true; }));
+    b.ctls.back().tip = "La touche qui rejoue le son tel qu'il a été enregistré (les autres le transposent)."_fr;
+    b.ctls.push_back (keep (choiceCtl ("Effets", { "à zéro"_fr, "gardés"_fr }, [&o] { return o.resetFx ? 0 : 1; },
+                                        [&o] (int v) { o.resetFx = v == 0; }), [] { return true; }));
+    b.ctls.back().tip = "À ZÉRO : une fois injecté, le filtre, le drive, les effets et WTF?! sont coupés, pour ne pas traiter le son deux fois."_fr;
+    pg.banks.push_back (std::move (b));
+    resamplePages.push_back (std::move (pg));
+}
+
+// CAPTURE CYCLES's settings: the source (shared with the notes), then the takes
+void Machine::buildCyclePages()
+{
+    auto& o = proc.cycleOptions;
+    cyclePages.clear();
+    if (! capturePages.empty())
+        cyclePages.push_back (capturePages.front());          // the source and the MIDI out, the same
+    auto keep = [this] (Ctl c, std::function<bool()> when = nullptr)
+    {
+        c.enabled = when != nullptr ? std::move (when) : std::function<bool()> ([this] { return ! proc.isSampling(); });
+        c.changed = [this] { proc.settingsChanged(); };
+        return c;
+    };
+    Page pg { "cycles", "cycleplan", {} };
+    Bank b { "cycles", {} };
+    b.ctls.push_back (keep (numberCtl ("Note", 0.0, 127.0, 1.0, [&o] { return (double) o.note; }, [&o] (double v) { o.note = (int) v; },
+                                       [] (double v) { return lower (rk::noteName ((int) v)); })));
+    b.ctls.back().tip = "La note tenue à chaque prise. Grave, c'est mieux : plus de points par période (C1 par défaut)."_fr;
+    b.ctls.push_back (keep (choiceCtl ("Prises", { "8", "16", "32", "64" }, [&o] { return o.count; }, [&o] (int v) { o.count = v; })));
+    b.ctls.back().tip = "Combien de cycles dans la banque : un par prise."_fr;
+    b.ctls.push_back (keep (choiceCtl ("Ce qui bouge", { "un cc", "la vélocité"_fr, "à la main"_fr }, [&o] { return o.vary; }, [&o] (int v) { o.vary = v; })));
+    b.ctls.back().tip = "D'une prise à l'autre : un CC balayé (le filtre, une forme d'onde...), la vélocité de 1 à 127, ou rien, et tu tournes un bouton du synthé pendant la capture."_fr;
+    auto ccOn = [this] { return ! proc.isSampling() && proc.cycleOptions.vary == 0; };
+    b.ctls.push_back (keep (numberCtl ("Cc", 0.0, 127.0, 1.0, [&o] { return (double) o.cc; }, [&o] (double v) { o.cc = (int) v; },
+                                       [] (double v) { return juce::String ((int) v); }), ccOn));
+    b.ctls.back().tip = "Le numéro du CC envoyé avant chaque prise (74 : souvent la brillance, le filtre)."_fr;
+    b.ctls.push_back (keep (numberCtl ("De", 0.0, 127.0, 1.0, [&o] { return (double) o.ccFrom; }, [&o] (double v) { o.ccFrom = (int) v; },
+                                       [] (double v) { return juce::String ((int) v); }), ccOn));
+    b.ctls.push_back (keep (numberCtl ("À"_fr, 0.0, 127.0, 1.0, [&o] { return (double) o.ccTo; }, [&o] (double v) { o.ccTo = (int) v; },
+                                       [] (double v) { return juce::String ((int) v); }), ccOn));
+    b.ctls.push_back (keep (numberCtl ("Tenue", 0.15, 4.0, 0.05, [&o] { return o.hold; }, [&o] (double v) { o.hold = v; },
+                                       [] (double v) { return seconds (v); }, true)));
+    b.ctls.back().tip = "Combien de temps chaque note est tenue : le cycle est pris aux deux tiers, une fois l'attaque passée."_fr;
+    b.ctls.push_back (keep (numberCtl ("Pause", 0.05, 4.0, 0.05, [&o] { return o.settle; }, [&o] (double v) { o.settle = v; },
+                                       [] (double v) { return seconds (v); }, true)));
+    b.ctls.back().tip = "Le temps laissé au synthé pour suivre le CC avant la note."_fr;
+    pg.banks.push_back (std::move (b));
+    cyclePages.push_back (std::move (pg));
+}
+
+void Machine::setCaptureKind (int k)
+{
+    if (k == captureKind)
+        return;
+    captureKind = k;
+    proc.settingsFile().setValue ("captureKind", k);
+    focus = nullptr;
+    showPage (pageIndex());
+}
+
+void Machine::toggleResample()
+{
+    switch (proc.player.resampleState())
+    {
+        case Player::Resample::idle:
+        {
+            juce::String why;
+            if (! proc.startResample (why))
+                showMessage (why, true);
+            else if (proc.resampleOptions.synced)
+                showMessage ("Armé : l'enregistrement part sur la prochaine mesure si le transport joue, sinon tout de suite."_fr);
+            break;
+        }
+        case Player::Resample::armed:
+        case Player::Resample::recording:
+        case Player::Resample::looping:
+            proc.stopResample();
+            break;
+        case Player::Resample::handing:
+            break;
+    }
+    captureStrip->repaint();
+}
+
 //==============================================================================
 void Machine::showMode (int m)
 {
@@ -2081,7 +2419,7 @@ void Machine::toggleSampling()
     if (proc.options.source != ReplikantProcessor::Source::testSynth && proc.options.monitor == 0)
         showMessage ("L'écoute est coupée : tu n'entendras pas le synthé pendant la session."_fr, true);
     juce::String why;
-    if (! proc.startSampling (why))
+    if (! (captureKind == cyclesKind ? proc.startCycles (why) : proc.startSampling (why)))
         showMessage (why, true);
 }
 
@@ -2240,12 +2578,38 @@ void Machine::timerCallback()
     {
         wasSampling = false;
         auto ins = proc.getInstrument();
-        if (ins != nullptr && ! ins->samples.empty())
+        if (proc.lastCaptureWasCycles)
+        {
+            if (ins != nullptr && ins->cycles != nullptr)
+            {
+                // the cycles in the SYNTHÉ's osc A, to hear them at once
+                setSound (proc, snd::oaBank, 1.0f);
+                capture = false;
+                page[synthMode] = 0;
+                showMode (synthMode);
+                showMessage (juce::String (ins->cycles->count()) + " cycles capturés : dans l'osc A (CAPTURÉS), tourne POSITION pour les parcourir."_fr);
+            }
+        }
+        else if (ins != nullptr && ! ins->samples.empty())
         {
             capture = false;
             showMode (samplerMode);
         }
     }
+    // RÉÉCHANTILLONNER's instrument in: the sampler shown, to play and change it
+    if (proc.lastResample != shownResample)
+    {
+        shownResample = proc.lastResample;
+        if (shownResample.isNotEmpty())
+        {
+            capture = false;
+            mode = samplerMode;
+            focus = nullptr;
+            showPage (page[mode]);
+        }
+    }
+    if (capture && captureKind == resampleKind)
+        captureStrip->repaint();
     // the engine moved by the host (automation, a project loaded): the pages follow
     const int engine = (int) P (proc, snd::engine);
     if (! capture && engine != mode && engine != snd::drum)

@@ -84,6 +84,27 @@ public:
     // where a setting is now, modulated and moved by the scenes (0..1 of its range), or < 0 when nothing moves it
     float modulatedNorm (int id) const;
 
+    //========================================================================== RÉÉCHANTILLONNER
+    // What comes out of the chain (before the volume) recorded, then played back in place of what was playing: the
+    // live sound fades out as the recording comes in from its start (20 ms), the chain is then made neutral (filter,
+    // drive, effects, WTF?! off, their tails cleared, the voices stopped) and the recording goes on looping into it,
+    // as the input would: heard the same, nothing processed twice, no gap. Its end is crossfaded into its start with
+    // the 10 ms recorded past it, so it loops cleanly (in the sampler as well).
+    // The message thread arms it (the room made there), takes the recording once ready, sets the sound to match
+    // (effects at zero, the sampler) and then lets the chain go (releaseNeutral).
+    enum class Resample { idle = 0, armed, recording, handing, looping };
+    // bars: its length (0: until stopResample, or the room); synced: from the next bar when the transport plays
+    bool armResample (double maxSeconds, int bars, bool synced);    // message thread; false unless idle
+    void stopResample();             // armed: cancelled; recording: ends now; looping: fades out
+    Resample resampleState() const   { return (Resample) rsState.load(); }
+    float resampleProgress() const;  // while recording, 0..1
+    double resampleSeconds() const   { return (double) rsWritten.load() / sr; }
+    bool resampleReady() const       { return rsReady.load(); }
+    rk::Channels takeResample();     // message thread, once ready (the loop's length, crossfaded); clears ready
+    std::atomic<bool> neutral { false };            // the chain held neutral (set at the handover)
+    void releaseNeutral()            { neutral = false; }
+    bool loopsOnNoteOn = true;       // looping: a note played takes over (the loop fades out)
+
     //========================================================================== for the editor
     std::array<std::atomic<float>, snd::numMods> modValue {};   // what each sends (after its depth)
     std::array<std::atomic<int>, snd::numMods> modStep {};
@@ -254,6 +275,18 @@ private:
     int lastDriveModel = 1;
     float volumeGain = 1.0f;
     juce::AudioBuffer<float> bus, dry;
+
+    // RÉÉCHANTILLONNER
+    void resampleChunk (float* L, float* R, int n, const Chunk&);   // in the chain, before the volume
+    void loopIntoChain (float* L, float* R, int n);                   // looping: the recording as the input
+    void neutralise();
+    std::atomic<int> rsState { 0 };
+    std::atomic<bool> rsReady { false }, rsStop { false };
+    std::atomic<int> rsWritten { 0 };
+    std::array<std::vector<float>, 2> rsBuf;
+    int rsCapacity = 0, rsBars = 0, rsTarget = 0, rsTail = 0, rsFade = 0, rsFadePos = 0, rsRead = 0;
+    bool rsSynced = false, rsHeadDone = false, wasNeutral = false;
+    float rsGain = 1.0f;
     float dcState[2][2] {};              // the voices' safety high pass (DC, infrasound)
     int peakCounter = 0;
 };

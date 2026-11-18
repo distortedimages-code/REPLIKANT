@@ -33,6 +33,8 @@ struct Player::Chunk
     bool elastic = false, loops = true, oneShot = false, filterOn = false;
     dsp::FilterSettings fs;
     float cutoffOct = 7.0f, envOct = 0.0f;
+    double ppq = 0.0, bpm = 120.0;       // where the chunk starts (RÉÉCHANTILLONNER waits for a bar)
+    bool playing = false;
     const float* inL = nullptr;          // the audio input over this chunk (phase modulation)
     const float* inR = nullptr;
     int n = 0;
@@ -1342,6 +1344,18 @@ void Player::modulate (int offset, int n, const Transport& t, Chunk& c, bool atR
     }
 
     glidePrimed = true;
+    c.ppq = ppq;
+    c.bpm = bpm;
+    c.playing = t.playing;
+    // RÉÉCHANTILLONNER: the chain neutral, while the sound's settings are being set to match
+    const bool neutralNow = neutral.load (std::memory_order_relaxed);
+    if (neutralNow)
+        for (int id : { (int) snd::fModel, (int) snd::dModel, (int) snd::spOn, (int) snd::piOn, (int) snd::chOn, (int) snd::crOn,
+                        (int) snd::rvOn, (int) snd::wtf })
+            c.v[id] = 0.0f;
+    if (wasNeutral && ! neutralNow)
+        glidePrimed = false;        // let go: the settings as they are now, not glided to from before
+    wasNeutral = neutralNow;
     applyWtf (ppq, n, c);
     c.n = n;
     c.elastic = c.v[snd::playMode] > 0.5f;
@@ -1564,6 +1578,8 @@ void Player::runChain (float* L, float* R, int n, const Chunk& c)
         }
     }
 
+    resampleChunk (L, R, n, c);
+
     // volume, gliding; a new order of the stages taken through a dip of 10 ms down and 10 back up
     const float target = juce::Decibels::decibelsToGain (c.v[snd::volume], -100.0f);
     const float g0 = volumeGain;
@@ -1591,6 +1607,188 @@ void Player::runChain (float* L, float* R, int n, const Chunk& c)
     {
         orderNow = wanted;          // silent: the next chunk runs in the new order, coming back up
         orderPhase = 2;
+    }
+}
+
+//============================================================================== RÉÉCHANTILLONNER
+bool Player::armResample (double maxSeconds, int bars, bool synced)
+{
+    if (rsState.load() != (int) Resample::idle || sr <= 0.0)
+        return false;
+    rsReady = false;
+    rsStop = false;
+    rsWritten = 0;
+    rsTail = (int) (0.010 * sr);
+    rsFade = (int) (0.020 * sr);
+    rsCapacity = (int) (juce::jlimit (1.0, 600.0, maxSeconds) * sr) + rsTail;
+    for (auto& b : rsBuf)
+        b.assign ((size_t) rsCapacity, 0.0f);
+    rsBars = juce::jmax (0, bars);
+    rsSynced = synced;
+    rsTarget = 0;
+    rsHeadDone = false;
+    rsState = (int) Resample::armed;
+    return true;
+}
+
+void Player::stopResample()
+{
+    if (rsState.load() != (int) Resample::idle)
+        rsStop = true;
+}
+
+float Player::resampleProgress() const
+{
+    const int st = rsState.load();
+    if (st == (int) Resample::recording)
+    {
+        const int of = rsTarget > 0 ? rsTarget : rsCapacity - rsTail;
+        return of > 0 ? juce::jlimit (0.0f, 1.0f, (float) rsWritten.load() / (float) of) : 0.0f;
+    }
+    return st >= (int) Resample::handing ? 1.0f : 0.0f;
+}
+
+rk::Channels Player::takeResample()
+{
+    rk::Channels out;
+    if (! rsReady.load())
+        return out;
+    for (auto& b : rsBuf)
+        out.emplace_back (b.begin(), b.begin() + rsTarget);
+    rsReady = false;
+    return out;
+}
+
+void Player::neutralise()
+{
+    neutral = true;
+    resetEffects();
+    for (auto& w : wet)
+        w = 0.0f;
+    for (auto& v : voices)
+        v.active = false;
+    for (int ch = 0; ch < 2; ++ch)
+        inFilter[ch].reset();
+}
+
+void Player::resampleChunk (float* L, float* R, int n, const Chunk& c)
+{
+    int st = rsState.load (std::memory_order_relaxed);
+    if (st == (int) Resample::idle || st == (int) Resample::looping)
+        return;
+    int i = 0;
+    if (st == (int) Resample::armed)
+    {
+        if (rsStop.exchange (false))
+        {
+            rsState = (int) Resample::idle;
+            return;
+        }
+        const double bpm = c.bpm > 0.0 ? c.bpm : 120.0;
+        if (rsSynced && c.playing)
+        {
+            // from the next bar (4/4)
+            const double next = std::ceil (c.ppq / 4.0 - 1.0e-9) * 4.0;
+            i = (int) std::llround ((next - c.ppq) * 60.0 / bpm * sr);
+            if (i >= n)
+                return;
+            i = juce::jmax (0, i);
+        }
+        const int room = rsCapacity - rsTail;
+        rsTarget = rsBars > 0 ? juce::jlimit (1, room, (int) std::llround (rsBars * 4.0 * 60.0 / bpm * sr)) : 0;
+        rsWritten = 0;
+        st = (int) Resample::recording;
+        rsState = st;
+    }
+    int written = rsWritten.load (std::memory_order_relaxed);
+    bool postOnly = false;                       // the handover over in this chunk: the recording alone, after it
+    for (; i < n; ++i)
+    {
+        const float l = L[i], r = R[i];
+        // the recording (its last 10 ms during the handover: what follows the loop's end, crossfaded into its start)
+        if (st == (int) Resample::recording || (st == (int) Resample::handing && written < rsTarget + rsTail))
+        {
+            rsBuf[0][(size_t) written] = l;
+            rsBuf[1][(size_t) written] = r;
+            ++written;
+            if (st == (int) Resample::recording && written >= rsCapacity - rsTail)
+                rsStop = true;                   // (out of room)
+        }
+        if (st == (int) Resample::recording && ((rsTarget > 0 && written >= rsTarget) || rsStop.load (std::memory_order_relaxed)))
+        {
+            rsStop = false;
+            if (rsTarget <= 0 || written < rsTarget)
+                rsTarget = written;
+            if (rsTarget < rsTail * 2)
+            {
+                rsState = (int) Resample::idle;      // too short to be anything: dropped
+                rsWritten = 0;
+                return;
+            }
+            st = (int) Resample::handing;
+            rsState = st;
+            rsFadePos = 0;
+            rsRead = 0;
+            rsHeadDone = false;
+            continue;               // this frame is the loop's last, heard live; its start comes in on the next
+        }
+        if (st == (int) Resample::handing && ! rsHeadDone && written >= rsTarget + rsTail)
+        {
+            // the loop's start crossfaded from what followed its end (equal power)
+            for (int j = 0; j < rsTail; ++j)
+            {
+                const float u = ((float) j + 0.5f) / (float) rsTail * juce::MathConstants<float>::halfPi;
+                const float in = std::sin (u), out = std::cos (u);
+                for (auto& b : rsBuf)
+                    b[(size_t) j] = b[(size_t) (rsTarget + j)] * out + b[(size_t) j] * in;
+            }
+            rsHeadDone = true;
+            rsReady = true;
+        }
+        if (st == (int) Resample::handing || postOnly)
+        {
+            const float a = rsBuf[0][(size_t) rsRead], b = rsBuf[1][(size_t) rsRead];
+            rsRead = rsRead + 1 >= rsTarget ? 0 : rsRead + 1;
+            if (postOnly)
+            {
+                L[i] = a;
+                R[i] = b;
+                continue;
+            }
+            const float u = ((float) rsFadePos + 0.5f) / (float) rsFade * juce::MathConstants<float>::halfPi;
+            const float gNew = std::sin (u), gOld = std::cos (u);
+            L[i] = l * gOld + a * gNew;
+            R[i] = r * gOld + b * gNew;
+            if (++rsFadePos >= rsFade && rsHeadDone)
+            {
+                // the live sound gone: the chain made neutral, the recording carried on into it from the next chunk
+                neutralise();
+                postOnly = true;
+                rsGain = 1.0f;
+                rsState = (int) Resample::looping;
+                st = (int) Resample::looping;
+            }
+        }
+    }
+    rsWritten.store (written, std::memory_order_relaxed);
+}
+
+void Player::loopIntoChain (float* L, float* R, int n)
+{
+    const float step = 1.0f / (float) (0.03 * sr);
+    const bool stopping = rsStop.load (std::memory_order_relaxed);
+    for (int i = 0; i < n; ++i)
+    {
+        if (stopping)
+            rsGain = juce::jmax (0.0f, rsGain - step);
+        L[i] += rsBuf[0][(size_t) rsRead] * rsGain;
+        R[i] += rsBuf[1][(size_t) rsRead] * rsGain;
+        rsRead = rsRead + 1 >= rsTarget ? 0 : rsRead + 1;
+    }
+    if (stopping && rsGain <= 0.0f)
+    {
+        rsStop = false;
+        rsState = (int) Resample::idle;
     }
 }
 
@@ -1638,7 +1836,8 @@ void Player::render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi
         }
         else
             inputLevel = 0.0f;
-        bool sounding = inputThroughFx;
+        const int rs = rsState.load (std::memory_order_relaxed);
+        bool sounding = inputThroughFx || rs >= (int) Resample::recording;
         for (auto& v : voices)
             sounding = sounding || v.active;
         modulate (pos, end - pos, transport, c, ! sounding);
@@ -1649,6 +1848,8 @@ void Player::render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi
             if (juce::jlimit (0, n - 1, meta.samplePosition) > pos)
                 break;
             const auto m = meta.getMessage();
+            if (m.isNoteOn() && loopsOnNoteOn && rsState.load (std::memory_order_relaxed) == (int) Resample::looping)
+                rsStop = true;          // a note takes over from the loop
             if (m.isNoteOn())
                 noteOn (m.getNoteNumber(), m.getVelocity(), c);
             else if (m.isNoteOff())
@@ -1701,8 +1902,12 @@ void Player::render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi
             voiceLevel = std::sqrt (sum / (float) (2 * m)) * 1.41f;
         }
 
+        // RÉÉCHANTILLONNER: the recording in place of the input
+        const bool looping = rsState.load (std::memory_order_relaxed) == (int) Resample::looping;
+        if (looping)
+            loopIntoChain (L + pos, R + pos, m);
         // the input, in FX mode: through the filter (no envelope), then into the chain with the voices
-        if (inputThroughFx && input != nullptr && inputChannels > 0)
+        if (inputThroughFx && ! looping && input != nullptr && inputChannels > 0)
         {
             const float* a = input[0] + pos;
             const float* b = input[juce::jmin (1, inputChannels - 1)] + pos;

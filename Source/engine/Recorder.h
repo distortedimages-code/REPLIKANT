@@ -39,6 +39,9 @@ public:
         double hold = 3.0, releaseMax = 3.0, pause = 0.25;
         int channel = 1;         // 1..16
         int program = -1;        // program change sent first (-1 = none)
+        // CAPTURE CYCLES: a control change sent before each job's pause (a knob of the synth swept), -1 = none
+        int ccNumber = -1;
+        std::vector<int> ccValues;
     };
 
     enum class Phase { idle, program, noise, gap, hold, release };
@@ -96,6 +99,7 @@ private:
     int64_t noiseCount = 0, noiseFrom = 0;
     bool noteDown = false;
     int noteNumber = 0;
+    int ccSentFor = -1;
 
     std::atomic<bool> running { false }, abortRequested { false };
     std::atomic<int64_t> written { 0 };

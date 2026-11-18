@@ -65,6 +65,19 @@ public:
     // once it stops moving, the zones and the keys made again
     void retuneSample (int sampleIndex, int root, double cents);
     bool startSampling (juce::String& whyNot);
+    // CAPTURE CYCLES: one note held again and again while something of the synth moves (a CC swept, the velocity,
+    // or a knob by hand); a cycle from each take, the bank kept with the instrument (the SYNTHÉ's CAPTURÉS)
+    struct CycleOptions
+    {
+        int note = 36;               // low: more points to a period
+        int count = 1;               // 8, 16, 32, 64 takes
+        int vary = 0;                // 0 a CC swept, 1 the velocity, 2 by hand (nothing sent)
+        int cc = 74, ccFrom = 0, ccTo = 127;
+        double hold = 0.5, settle = 0.2;    // each take held; the pause before it (the synth settles)
+        static int countOf (int c)        { const int n[] = { 8, 16, 32, 64 }; return n[juce::jlimit (0, 3, c)]; }
+    } cycleOptions;
+    bool startCycles (juce::String& whyNot);
+    bool lastCaptureWasCycles = false;
     void stopSampling();
     bool isSampling() const                          { return worker.isSampling() || recorder.isRunning(); }
 
@@ -90,6 +103,20 @@ public:
     // the editor's keyboard
     void audition (int note, int velocity, bool on);
 
+    // RÉÉCHANTILLONNER: what comes out of the effects recorded, then injected into the SAMPLER as a looped instrument
+    // without a gap (the Player loops it meanwhile); the effects set to zero so nothing is processed twice
+    struct ResampleOptions
+    {
+        int length = 1;              // 1, 2, 4, 8 bars, or free (until stopped)
+        bool synced = true;          // from the next bar when the transport plays
+        int root = 60;               // the key it is played on as recorded
+        bool resetFx = true;         // filter, drive, effects and WTF?! to zero
+        static int barsOf (int length)    { const int b[] = { 1, 2, 4, 8, 0 }; return b[juce::jlimit (0, 4, length)]; }
+    } resampleOptions;
+    bool startResample (juce::String& whyNot);
+    void stopResample()                              { player.stopResample(); }
+    juce::String lastResample;                       // the instrument it made last
+
     // the MIDI clock
     MidiClock clock;
     bool clockWithSampling = false;               // a sampling session starts and stops it
@@ -101,6 +128,7 @@ public:
     juce::var soundToVar() const;
     void soundFromVar (const juce::var&);
     void resetSound();
+    void setSoundParam (int id, float value);         // a setting of the sound, as the host sees it
 
     Worker::Status status() const                    { return worker.getStatus(); }
     float inputLevel() const                         { return recorder.getMeter(); }
@@ -127,6 +155,9 @@ private:
     void fxOrderFromVar (const juce::var&);
     void scenesFromVar (const juce::var&);
     void saveGlobalSettings();
+    void resampleTick();                           // the recording ready: the instrument made, the sound matched
+    void injectResample (rk::Channels);
+    int releaseNeutralIn = 0;
     static juce::AudioProcessorValueTreeState::ParameterLayout layout();
 
     std::unique_ptr<juce::PropertiesFile> globalSettings;

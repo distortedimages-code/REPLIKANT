@@ -226,6 +226,86 @@ int main (int argc, char** argv)
     shoot ("15-sampler-filtre-wtf.png");
     for (int n : { 48, 55 })
         proc.audition (n, 0, false);
+    run (40);
+
+    // RÉÉCHANTILLONNER: the chord through the reverb, two seconds recorded, then the loop injected into the sampler
+    view->showCapture (true);
+    view->setCaptureKind (te::Machine::resampleKind);
+    run (10);
+    shoot ("21-reechantillonner.png");
+    set (snd::rvOn, 1.0f);
+    set (snd::chOn, 1.0f);
+    proc.resampleOptions.length = 0;
+    proc.resampleOptions.synced = false;
+    for (int n : { 48, 55, 60 })
+        proc.audition (n, 100, true);
+    run (60);
+    {
+        juce::String why;
+        if (! proc.startResample (why))
+            std::printf ("can't resample: %s\n", why.toRawUTF8());
+    }
+    run ((int) (1.2 * 48000 / 256));
+    shoot ("22-reechantillonne.png");
+    for (int i = 0; i < 2000 && proc.player.resampleState() != Player::Resample::looping; ++i)
+        run (4);
+    for (int n : { 48, 55, 60 })
+        proc.audition (n, 0, false);
+    for (int i = 0; i < 40 && proc.lastResample.isEmpty(); ++i)
+        run (8);
+    run (40);
+    std::printf ("resample: %s, %s\n", proc.lastResample.toRawUTF8(),
+                 proc.player.resampleState() == Player::Resample::looping ? "looping" : "not looping");
+    shoot ("23-sampler-reechantillon.png");
+    proc.stopResample();
+    run (20);
+
+    // CAPTURE CYCLES: the test synth's filter swept by CC 74, eight takes, then the synth plays them
+    view->showCapture (true);
+    view->setCaptureKind (te::Machine::cyclesKind);
+    view->showPage (1);
+    proc.cycleOptions.count = 0;
+    run (10);
+    shoot ("24-cycles-plan.png");
+    {
+        juce::String why;
+        if (! proc.startCycles (why))
+            std::printf ("can't capture cycles: %s\n", why.toRawUTF8());
+        int cb = 0;
+        bool shot = false;
+        while (proc.isSampling() && cb < 200000)
+        {
+            buf.clear();
+            midi.clear();
+            proc.processBlock (buf, midi);
+            if (++cb % 40 == 0)
+                pump (2);
+            if (! shot && proc.status().done >= 4)
+            {
+                view->refreshNow();
+                pump (100);
+                shoot ("25-cycles-en-cours.png");
+                shot = true;
+            }
+        }
+        for (int i = 0; i < 100; ++i)
+        {
+            pump (50);
+            auto ins = proc.getInstrument();
+            if (ins != nullptr && ins->cycles != nullptr && ! proc.status().busy)
+                break;
+        }
+        view->refreshNow();
+        for (int n : { 48, 55, 60 })
+            proc.audition (n, 100, true);
+        run (60);
+        shoot ("26-synthe-cycles-captures.png");
+        for (int n : { 48, 55, 60 })
+            proc.audition (n, 0, false);
+        run (20);
+        auto ins = proc.getInstrument();
+        std::printf ("cycles: %d\n", ins != nullptr && ins->cycles != nullptr ? ins->cycles->count() : 0);
+    }
 
     // the project keeps the sound: settings, routes, steps, scenes
     {

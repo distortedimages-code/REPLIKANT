@@ -269,6 +269,127 @@ int main()
                "what can be dropped");
     }
 
+    // CAPTURE CYCLES: one low note held eight times while CC 74 opens the test synth's filter: eight cycles, darker
+    // to brighter, kept with the instrument (a wavetable beside it) and read back
+    {
+        {
+            std::lock_guard<std::mutex> l (lock);
+            got = nullptr;
+        }
+        rk::Session cs;
+        cs.loop = false;
+        cs.normalise = rk::Normalise::off;
+        Recorder::Plan cp;
+        for (int i = 0; i < 8; ++i)
+        {
+            cp.jobs.push_back ({ 36, 100, 0, i });
+            cp.ccValues.push_back (i * 127 / 7);
+        }
+        cp.ccNumber = 74;
+        cp.hold = 0.5;
+        cp.releaseMax = 0.25;
+        cp.pause = 0.15;
+        const auto cf = Worker::uniqueFolder (home, "Cycles test");
+        CHECK (worker.startCycleSession ("Cycles test", cs, cp, sr, 2, cf, nullptr), "cycles: start");
+        int cb = 0;
+        while (rec.isRunning() && cb < 20000)
+        {
+            rec.beginBlock (sink);
+            synth.render (buf.getArrayOfWritePointers(), 2, 256);
+            const float* in[2] = { buf.getReadPointer (0), buf.getReadPointer (1) };
+            rec.capture (in, 2, 256);
+            if (++cb % 20 == 0)
+                juce::Thread::sleep (1);
+        }
+        std::shared_ptr<Instrument> ci;
+        for (int i = 0; i < 400 && ci == nullptr; ++i)
+        {
+            juce::Thread::sleep (25);
+            std::lock_guard<std::mutex> l (lock);
+            if (got != nullptr && got->cycles != nullptr)
+                ci = got;
+        }
+        CHECK (ci != nullptr && ci->cycles->count() == 8, "cycles: %d (%s)", ci != nullptr ? ci->cycles->count() : -1,
+               worker.getStatus().warning.toRawUTF8());
+        if (ci != nullptr && ci->cycles->count() == 8)
+        {
+            // brighter as the CC goes up: more of the cycle's energy in its fast moves
+            auto roughness = [] (const float* c)
+            {
+                double d = 0.0, e = 0.0;
+                for (int i = 0; i < dsp::CycleBank::size; ++i)
+                {
+                    const double a = c[i], b = c[(i + 1) % dsp::CycleBank::size];
+                    d += (b - a) * (b - a);
+                    e += a * a;
+                }
+                return d / std::max (1.0e-12, e);
+            };
+            const double r0 = roughness (ci->cycles->cycle (0)), r7 = roughness (ci->cycles->cycle (7));
+            CHECK (r7 > r0 * 4.0, "cycles brighter with the CC: %.2e -> %.2e", r0, r7);
+            std::printf ("  cycles: 8, roughness %.2e -> %.2e\n", r0, r7);
+            juce::String err;
+            auto back = instrumentio::load (cf, err);
+            CHECK (back != nullptr && back->cycles != nullptr && back->cycles->count() == 8, "cycles saved and read: %s", err.toRawUTF8());
+            CHECK (cf.getChildFile ("Cycles").findChildFiles (juce::File::findFiles, false, "*.wav").size() == 1, "the wavetable beside it");
+            if (back != nullptr && back->cycles != nullptr && back->cycles->count() == 8)
+            {
+                float worst = 0.0f;
+                for (int i = 0; i < dsp::CycleBank::size; ++i)
+                    worst = std::max (worst, std::abs (back->cycles->cycle (5)[i] - ci->cycles->cycle (5)[i]));
+                CHECK (worst < 1.0e-5f, "the same cycles: off by %.2e", worst);
+            }
+        }
+    }
+
+    // a sound dropped: its note from its name, else from its pitch; read through JUCE when it isn't a WAV
+    {
+        auto write = [&] (const juce::File& f, double hz, bool aiff)
+        {
+            f.deleteFile();
+            juce::AudioBuffer<float> b (2, (int) sr);
+            for (int i = 0; i < b.getNumSamples(); ++i)
+            {
+                const float x = 0.5f * (float) std::sin (2.0 * juce::MathConstants<double>::pi * hz * i / sr);
+                b.setSample (0, i, x);
+                b.setSample (1, i, x);
+            }
+            std::unique_ptr<juce::AudioFormat> fmt;
+            if (aiff) fmt = std::make_unique<juce::AiffAudioFormat>(); else fmt = std::make_unique<juce::WavAudioFormat>();
+            std::unique_ptr<juce::OutputStream> out (f.createOutputStream().release());
+            std::unique_ptr<juce::AudioFormatWriter> w (fmt->createWriterFor (out.get(), sr, 2, 24, {}, 0));
+            if (w != nullptr)
+            {
+                out.release();
+                w->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+            }
+        };
+        const auto named = home.getChildFile ("Basse A2.wav");
+        const auto plain = home.getChildFile ("son.aiff");
+        write (named, 110.0, false);
+        write (plain, 330.0, true);
+        CHECK (instrumentio::isImportable (named) && instrumentio::isImportable (plain), "sounds can be dropped");
+        juce::String err;
+        auto a = instrumentio::readSound (named, err);
+        CHECK (a != nullptr && a->samples.size() == 1 && a->samples[0].root == 57 && a->samples[0].keyLo == 0 && a->samples[0].keyHi == 127
+                   && ! a->session.renderKeys && a->name == "Basse A2", "named: %s", err.toRawUTF8());
+        auto b = instrumentio::readSound (plain, err);
+        CHECK (b != nullptr && b->samples[0].root == 64 && b->samples[0].pitchConfident && std::abs (b->samples[0].detuneCents - 2.0f) < 3.0f
+                   && b->samples[0].length() == (int) sr && b->samples[0].channels() == 2,
+               "pitch found: %d %.1f c", b != nullptr ? b->samples[0].root : -1, b != nullptr ? b->samples[0].detuneCents : 0.0f);
+        if (b != nullptr)
+        {
+            // played: E3 on its key, an octave up on E4
+            CHECK (std::abs (b->shiftFor (0, 64) + 0.02) < 0.03 && std::abs (b->shiftFor (0, 76) - 11.98) < 0.03, "shift %.3f", b->shiftFor (0, 76));
+            const auto where = Worker::uniqueFolder (home, b->name);
+            CHECK (instrumentio::save (*b, where).wasOk(), "saved");
+            auto back = instrumentio::load (where, err);
+            CHECK (back != nullptr && back->samples.size() == 1 && back->samples[0].root == 64 && back->samples[0].keyLo == 0
+                       && back->samples[0].keyHi == 127 && ! back->session.renderKeys, "loaded back: %s", err.toRawUTF8());
+        }
+        CHECK (instrumentio::readSound (home.getChildFile ("nothing.wav"), err) == nullptr && err.isNotEmpty(), "missing");
+    }
+
     std::printf ("%d checks, %d failed\n", checks, failures);
     worker.onInstrument = nullptr;
     return failures == 0 ? 0 : 1;

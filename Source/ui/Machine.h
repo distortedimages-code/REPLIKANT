@@ -44,6 +44,9 @@ namespace te
         enum Mode { synthMode = 0, drumMode = 1, samplerMode = 2 };
         void showMode (int mode);                  // sets the engine (what plays) and shows its pages
         void showCapture (bool);
+        enum CaptureKind { notesKind = 0, cyclesKind = 1, resampleKind = 2 };
+        void setCaptureKind (int);
+        int captureKindShown() const               { return captureKind; }
         void showPage (int page);                  // in the mode shown; the same page again: its next bank
         int modeShown() const                      { return mode; }
         bool captureShown() const                  { return capture; }
@@ -95,8 +98,13 @@ namespace te
         Arming arm;
         int mode = synthMode;
         bool capture = false;
-        std::vector<Page> pages[3], capturePages;
-        int page[3] {}, capturePage = 0;
+        std::vector<Page> pages[3], capturePages, resamplePages, cyclePages;
+        int page[3] {}, capturePage = 0, resamplePage = 0, cyclePage = 0;
+        void buildCyclePages();
+        int captureKind = notesKind;
+        juce::String shownResample;                // the last instrument RÉÉCHANTILLONNER made, as shown
+        void buildResamplePages();
+        void toggleResample();
         std::map<juce::String, int> bankOf;        // page name (per mode) -> bank shown
         const Ctl* focus = nullptr;
         juce::String focusName;

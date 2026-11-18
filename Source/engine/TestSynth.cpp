@@ -53,6 +53,8 @@ void TestSynth::handle (const juce::MidiMessage& m)
                 v.stageA = v.stageF = 2;
             }
     }
+    else if (m.isController() && m.getControllerNumber() == 74)
+        brightness = (float) m.getControllerValue() / 127.0f;
     else if (m.isAllNotesOff() || m.isAllSoundOff())
     {
         for (auto& v : voices)
@@ -128,7 +130,8 @@ void TestSynth::render (float* const* out, int numChannels, int n)
 
             // filter: a fixed cutoff that opens with the envelope and the velocity (little keyboard tracking)
             const float cutoff = juce::jlimit (60.0f, (float) sr * 0.2f,
-                                              500.0f + 4500.0f * v.fenv * (0.35f + 0.65f * v.vel) + (float) hz * 0.5f);
+                                              (500.0f + 4500.0f * v.fenv * (0.35f + 0.65f * v.vel) + (float) hz * 0.5f)
+                                                  * std::exp2 ((brightness - 0.5f) * 4.0f));
             const float g = std::tan (juce::MathConstants<float>::pi * cutoff / (float) sr);
             const float k = 0.7f;   // resonance
             // two state-variable stages (24 dB/oct), trapezoidal (Simper)

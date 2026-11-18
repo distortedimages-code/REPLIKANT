@@ -41,6 +41,10 @@ public:
     // message thread
     bool startSession (const juce::String& name, const rk::Session&, const Recorder::Plan&, double sampleRate,
                        int channels, const juce::File& folder);
+    // CAPTURE CYCLES: each take gives one cycle (where it holds steady), the bank joins `base` (a copy of it, saved
+    // in its folder) or a new instrument of its own
+    bool startCycleSession (const juce::String& name, const rk::Session&, const Recorder::Plan&, double sampleRate,
+                            int channels, const juce::File& folder, std::shared_ptr<const Instrument> base);
     void stopSession();
     // renders the keys of `ins` (as its session says) and publishes it, first as it is, then with its keys
     void renderAndPublish (std::shared_ptr<Instrument> ins, bool publishFirst = true);
@@ -92,7 +96,11 @@ private:
         int64_t noteOn = -1, noteOff = -1;
         int silentInARow = 0;
         double startedAt = 0.0;
+        bool cycles = false;
+        std::shared_ptr<const Instrument> base;
+        std::vector<std::vector<float>> cycleList;
     } session;
+    void finishCycles (bool aborted);
     std::atomic<bool> sampling { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Worker)

@@ -84,6 +84,15 @@ namespace instrumentio
     juce::Result exportPack (const Instrument&, const juce::var& sound, const juce::File& zip);
     // unpacks a pack into `root` (a folder of its own, its name made unique); returns that folder
     juce::File importPack (const juce::File& zip, const juce::File& root, juce::String& error);
-    // what can be dropped on the window: a pack, a .replikant, a folder holding one
+    // what can be dropped on the window: a pack, a .replikant, a folder holding one, a sound
     bool isImportable (const juce::File&);
+
+    // a sound alone (wav, aiff, flac, mp3...): an instrument of one sample on every key, played in varispeed like a
+    // classic sampler. Its note: the file's (smpl), its name's ("Bass C2.wav"), else its pitch when it has a clear
+    // one, else C3. Three minutes at most.
+    bool isSound (const juce::File&);
+    std::shared_ptr<Instrument> readSound (const juce::File&, juce::String& error);
+    // the same from audio already in hand (RÉÉCHANTILLONNER): looped over the whole when `looped`
+    std::shared_ptr<Instrument> soundInstrument (rk::Channels audio, double sampleRate, const juce::String& name,
+                                                 int root, float detuneCents, bool pitchFound, rk::Loop loop);
 }
