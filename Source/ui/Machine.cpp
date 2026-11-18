@@ -68,22 +68,24 @@ static Picto pagePicto (const Machine::Page& pg)
     const auto& n = pg.name;
     if (v == "osc")       return n.endsWith ("b") ? Picto::saw : Picto::cycles;
     if (v == "voices")    return Picto::voices;
+    if (v == "orbite")    return Picto::orbit;
+    if (v == "mix")       return Picto::mixer;
     if (v == "filter")    return Picto::filterBox;
     if (v == "adsr")      return Picto::envelope;
     if (v == "fx")        return Picto::chain;
     if (v.startsWith ("mod")) return Picto::cable;
-    if (v == "scenes")    return Picto::sliders;
+    if (v == "scenes" || v == "settings") return Picto::sliders;
     if (v == "lecture")   return Picto::playhead;
     if (v == "loop")      return Picto::loop;
     if (v == "pitch")     return Picto::fork;
     // the capture's
     if (n == "source")    return Picto::jack;
     if (n == "notes")     return Picto::keys;
-    if (n == juce::String ("durées"_fr)) return Picto::clock;
-    if (n == "boucles")   return Picto::loop;
-    if (n == "attaque")   return Picto::onset;
-    if (n == "niveau")    return Picto::vuMeter;
-    if (n == "transpo")   return Picto::shift;
+    if (n == "timing")    return Picto::clock;
+    if (n == "loops")     return Picto::loop;
+    if (n == "attack")    return Picto::onset;
+    if (n == "level")     return Picto::vuMeter;
+    if (n == "transpose") return Picto::shift;
     if (v == "resample")  return Picto::resample;
     if (v == "cycleplan") return Picto::cycles;
     return Picto::none;
@@ -140,8 +142,17 @@ public:
         in.removeFromTop (8.0f);
         auto panel = in.removeFromRight (392.0f);
         in.removeFromRight (14.0f);
+        tunerShown = false;
+        const auto& shownPages = m.pagesShown();
+        const auto vizNow = m.pageIndex() >= 0 && m.pageIndex() < (int) shownPages.size() ? shownPages[(size_t) m.pageIndex()].viz : juce::String();
         if (m.capture)
             paintCapture (g, in);
+        else if (vizNow == "orbite")
+            paintOrbite (g, in);
+        else if (vizNow == "mix")
+            paintMixer (g, in);
+        else if (vizNow == "pitch" && m.mode == Machine::samplerMode)
+            paintTuner (g, in);
         else if (m.mode == Machine::synthMode)
             paintSynth (g, in);
         else if (m.mode == Machine::samplerMode)
@@ -162,6 +173,16 @@ public:
     void mouseDown (const juce::MouseEvent& e) override
     {
         dragPos = -1;
+        tuning = 0;
+        if (tunerShown && (tunerBand.contains (e.position) || tunerFine.contains (e.position)))
+        {
+            // the dial: dragged sideways (the fine band, or shift: by the cent; alt: whole semitones)
+            tuning = tunerFine.contains (e.position) ? 2 : 1;
+            tuneFrom = P (proc(), snd::tune);
+            if (auto* t = proc().params.getParameter (snd::def (snd::tune).id))
+                t->beginChangeGesture();
+            return;
+        }
         if (fxShown)
             for (int i = 0; i < Player::numStages; ++i)
                 if (fxSwitches[i].contains (e.position))
@@ -182,6 +203,15 @@ public:
     }
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (tuning > 0)
+        {
+            const float perPixel = e.mods.isShiftDown() || tuning == 2 ? 0.01f : 0.12f;
+            float v = tuneFrom + (float) e.getDistanceFromDragStartX() * perPixel;
+            if (e.mods.isAltDown())
+                v = std::round (v);
+            setTune (v);
+            return;
+        }
         if (dragPos >= 0)
         {
             dragX = e.position.x;
@@ -192,6 +222,13 @@ public:
     }
     void mouseUp (const juce::MouseEvent& e) override
     {
+        if (tuning > 0)
+        {
+            tuning = 0;
+            if (auto* t = proc().params.getParameter (snd::def (snd::tune).id))
+                t->endChangeGesture();
+            return;
+        }
         if (dragPos < 0)
             return;
         const int from = dragPos;
@@ -221,6 +258,110 @@ public:
         repaint();
     }
 
+    void mouseDoubleClick (const juce::MouseEvent& e) override
+    {
+        if (tunerShown && (tunerBand.contains (e.position) || tunerFine.contains (e.position)))
+            setTune (0.0f);
+    }
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
+    {
+        if (! (tunerShown && (tunerBand.contains (e.position) || tunerFine.contains (e.position))))
+            return;
+        // a notch: a semitone (the fine band, or shift: a cent)
+        const float d = (std::abs (w.deltaY) > 0.0f ? w.deltaY : -w.deltaX) * (w.isReversed ? -1.0f : 1.0f);
+        const float step = e.mods.isShiftDown() || tunerFine.contains (e.position) ? 0.01f : 1.0f;
+        const float now = P (proc(), snd::tune);
+        setTune (step >= 1.0f ? std::round (now) + (d > 0.0f ? 1.0f : -1.0f) : now + (d > 0.0f ? step : -step));
+    }
+    void setTune (float v)
+    {
+        if (auto* t = dynamic_cast<juce::RangedAudioParameter*> (proc().params.getParameter (snd::def (snd::tune).id)))
+            t->setValueNotifyingHost (t->convertTo0to1 (juce::jlimit (-96.0f, 96.0f, v)));
+        repaint();
+    }
+
+    //------------------------------------------------------------------ SAMPLER: the tuning dial (-96..+96 semitones)
+    void paintTuner (juce::Graphics& g, juce::Rectangle<float> r)
+    {
+        tunerShown = true;
+        const float v = liveValue (proc(), snd::tune);
+        // the readout: the value, and what it makes in octaves, semitones, cents
+        auto top = r.removeFromTop (64.0f);
+        text (g, juce::String::fromUTF8 (snd::text (snd::tune, v).c_str()), top.removeFromTop (44.0f), grotesk (40.0f, 300), col::screenText,
+              juce::Justification::centredLeft);
+        {
+            const float a = std::abs (v);
+            const int oct = (int) (a / 12.0f), semi = (int) std::fmod (a, 12.0f);
+            const int cents = juce::roundToInt ((a - std::floor (a)) * 100.0f);
+            juce::String line = juce::String (v < 0.0f ? "-" : "+") + juce::String (oct) + " oct " + juce::String (semi) + " st " + juce::String (cents) + " ct"
+                              + " · x" + juce::String (std::exp2 (v / 12.0f), v > 24.0f ? 1 : 3);
+            if (proc().player.modulatedNorm (snd::tune) >= 0.0f)
+                line << " · modulated";
+            text (g, line, top, mono (11.0f), col::screenDim, juce::Justification::centredLeft);
+        }
+        text (g, "drag · shift or lower band: fine · alt: semitones · double-click: 0"_fr, r.removeFromBottom (16.0f), mono (10.0f), col::screenGhost,
+              juce::Justification::centredRight);
+        r.removeFromBottom (6.0f);
+
+        // the band: -96..+96, a tick a semitone, a long one an octave (its number), the needle
+        tunerFine = r.removeFromBottom (44.0f);
+        r.removeFromBottom (10.0f);
+        tunerBand = r.withSizeKeepingCentre (r.getWidth(), juce::jmin (r.getHeight(), 92.0f));
+        auto band = tunerBand;
+        g.setColour (col::screenLine.withAlpha (0.45f));
+        g.fillRoundedRectangle (band, 8.0f);
+        g.setColour (col::screenLine);
+        g.drawRoundedRectangle (band, 8.0f, 1.0f);
+        auto scale = band.reduced (18.0f, 10.0f);
+        auto xOf = [&scale] (float st) { return scale.getX() + scale.getWidth() * (st + 96.0f) / 192.0f; };
+        for (int st = -96; st <= 96; ++st)
+        {
+            const bool octave = st % 12 == 0, half = st % 6 == 0;
+            const float x = xOf ((float) st), h = octave ? scale.getHeight() * 0.55f : (half ? scale.getHeight() * 0.32f : scale.getHeight() * 0.18f);
+            g.setColour (octave ? col::screenText.withAlpha (0.8f) : col::screenDim.withAlpha (half ? 0.7f : 0.45f));
+            g.fillRect (x - (octave ? 0.75f : 0.5f), scale.getBottom() - h, octave ? 1.5f : 1.0f, h);
+            if (octave)
+                text (g, (st > 0 ? "+" : "") + juce::String (st / 12), { x - 16.0f, scale.getY() - 2.0f, 32.0f, 14.0f }, mono (11.0f, st == 0 ? 700 : 500),
+                      st == 0 ? col::screenText : col::screenDim, juce::Justification::centred);
+        }
+        text (g, "oct", { scale.getRight() - 30.0f, scale.getY() + 12.0f, 30.0f, 12.0f }, mono (9.0f), col::screenGhost, juce::Justification::centredRight);
+        {
+            const float x = xOf (v);
+            g.setColour (col::sRed.withAlpha (0.25f));
+            g.fillRect (x - 4.0f, band.getY() + 4.0f, 8.0f, band.getHeight() - 8.0f);
+            g.setColour (col::sRed);
+            g.fillRect (x - 1.0f, band.getY() + 4.0f, 2.0f, band.getHeight() - 8.0f);
+        }
+
+        // the fine band: a semitone each side of where it is, a tick every 5 cents; the needle stays, the band moves
+        g.setColour (col::screenLine.withAlpha (0.3f));
+        g.fillRoundedRectangle (tunerFine, 6.0f);
+        g.setColour (col::screenLine);
+        g.drawRoundedRectangle (tunerFine, 6.0f, 1.0f);
+        {
+            juce::Graphics::ScopedSaveState keep (g);
+            g.reduceClipRegion (tunerFine.toNearestInt());
+            const float cx = tunerFine.getCentreX(), pxPerCent = tunerFine.getWidth() / 240.0f;
+            const int c0 = (int) std::floor ((v - 1.3f) * 20.0f), c1 = (int) std::ceil ((v + 1.3f) * 20.0f);
+            for (int k = c0; k <= c1; ++k)                          // k: in steps of 5 cents
+            {
+                const float st = (float) k / 20.0f;
+                const float x = cx + (st - v) * 100.0f * pxPerCent;
+                const bool whole = k % 20 == 0, fifty = k % 10 == 0;
+                const float h = whole ? tunerFine.getHeight() * 0.6f : (fifty ? tunerFine.getHeight() * 0.4f : tunerFine.getHeight() * 0.22f);
+                g.setColour (whole ? col::screenText.withAlpha (0.85f) : col::screenDim.withAlpha (fifty ? 0.8f : 0.5f));
+                g.fillRect (x - 0.5f, tunerFine.getBottom() - 4.0f - h, whole ? 1.5f : 1.0f, h);
+                if (whole)
+                    text (g, (k > 0 ? "+" : "") + juce::String (k / 20), { x - 18.0f, tunerFine.getY() + 2.0f, 36.0f, 12.0f }, mono (10.0f, 600), col::screenText,
+                          juce::Justification::centred);
+                else if (fifty)
+                    text (g, "50", { x - 14.0f, tunerFine.getY() + 2.0f, 28.0f, 12.0f }, mono (9.0f), col::screenDim, juce::Justification::centred);
+            }
+            g.setColour (col::sRed);
+            g.fillRect (cx - 1.0f, tunerFine.getY() + 2.0f, 2.0f, tunerFine.getHeight() - 4.0f);
+        }
+    }
+
     // an effect on, or passed by (the drive back on its last model)
     void toggleStage (int st)
     {
@@ -244,6 +385,11 @@ private:
     bool fxShown = false;
     int dragPos = -1;
     float dragX = 0.0f;
+    // the tuning dial: where it was drawn, being turned (1 the band, 2 the fine band), from where
+    bool tunerShown = false;
+    juce::Rectangle<float> tunerBand, tunerFine;
+    int tuning = 0;
+    float tuneFrom = 0.0f;
     juce::Rectangle<float> stepsArea;
     int stepsMod = -1, stepsLen = 0;
     const rk::Sample* cachedSample = nullptr;
@@ -266,16 +412,16 @@ private:
                 sub = "cycles : une banque pour les oscillateurs du synthé"_fr;
             if (m.captureKind == Machine::resampleKind)
             {
-                tag = proc().player.resampleState() == Player::Resample::recording ? "rééchantillonne"_fr : "rééchantillonner"_fr;
+                tag = proc().player.resampleState() == Player::Resample::recording ? "resampling" : "resample";
                 sub = "ce qui sort des effets, injecté dans le sampler"_fr;
             }
         }
         else if (m.mode == Machine::synthMode)
         {
-            tag = "synthé"_fr;
+            tag = "synth";
             title = proc().instrumentName;
             const int bA = (int) P (proc(), snd::oaBank), bB = (int) P (proc(), snd::obBank);
-            sub << "osc a " << (bA == 1 ? "capturés"_fr : "basiques") << " · osc b "_fr << (bB == 1 ? "capturés"_fr : "basiques");
+            sub << "osc a " << (bA == 1 ? "captured" : "basic") << " · osc b "_fr << (bB == 1 ? "captured" : "basic");
             sub = juce::String::fromUTF8 (sub.toRawUTF8());
         }
         else if (m.mode == Machine::samplerMode)
@@ -286,7 +432,7 @@ private:
             {
                 const int ns = (int) ins->samples.size(), nk = (int) ins->keys.size();
                 sub << ns << (ns > 1 ? " samples · "_fr : " sample · "_fr)
-                    << (nk > 0 ? juce::String (nk) + " touches rendues" : juce::String ("joué en direct sur le clavier"_fr));
+                    << (nk > 0 ? juce::String (nk) + " keys rendered" : juce::String ("played live across the keys"));
             }
             else
                 sub = "aucun son : glisse un wav, ou capture ton synthé"_fr;
@@ -297,7 +443,7 @@ private:
             sub = "en 0.4";
         }
         if (proc().options.monitor == 2)
-            sub = "entrée par les effets · "_fr + sub;
+            sub = "input thru fx · "_fr + sub;
         auto f = mono (12.0f, 600);
         const Picto icon = m.capture ? (proc().isSampling() ? Picto::record : (m.captureKind == Machine::resampleKind ? Picto::resample : Picto::jack))
                          : (m.mode == Machine::synthMode ? Picto::sine : (m.mode == Machine::samplerMode ? Picto::cassette : Picto::drum));
@@ -370,8 +516,229 @@ private:
               grotesk (32.0f, 300), col::screenText, juce::Justification::centredRight, true);
         juce::String sub = (b ? "osc b" : "osc a") + juce::String (" · position "_fr) + juce::String (juce::roundToInt (pos * 100.0f)) + " %";
         if (proc().player.modulatedNorm (posId) >= 0.0f)
-            sub << " · modulée"_fr;
+            sub << " · modulated";
         text (g, sub, top, mono (11.0f), col::screenDim, juce::Justification::centredRight);
+    }
+
+    //------------------------------------------------------------------ ORBITE: its sound over two cycles, its orbits
+    dsp::OrbiteSettings orbiteSettings() const
+    {
+        auto& p = proc();
+        dsp::OrbiteSettings s;
+        s.algo = (int) P (p, snd::orAlgo);
+        s.shape = liveValue (p, snd::orShape);
+        s.sym = liveValue (p, snd::orSym);
+        s.wave[0] = (int) P (p, snd::s1Wave);
+        s.wave[1] = (int) P (p, snd::s2Wave);
+        s.symS[0] = liveValue (p, snd::s1Sym);
+        s.symS[1] = liveValue (p, snd::s2Sym);
+        s.ring[0] = liveValue (p, snd::s1Ring);
+        s.ring[1] = liveValue (p, snd::s2Ring);
+        s.sync[0] = P (p, snd::s1Sync) > 0.5f;
+        s.sync[1] = P (p, snd::s2Sync) > 0.5f;
+        s.phase2 = liveValue (p, snd::s2Phase);
+        return s;
+    }
+    // where satellite 2 has circled to (for the screen: from the clock, at ROTATION)
+    double orbiteTurn() const
+    {
+        return juce::Time::getMillisecondCounterHiRes() * 0.001 * (double) liveValue (proc(), snd::orOrbit);
+    }
+    // ORBITE's sound at x carrier cycles (the screen's own, without the anti-aliasing): its three parts too
+    static float orbiteAt (const dsp::OrbiteSettings& s, double r1, double r2, double turn, double x, float* parts = nullptr)
+    {
+        const double pc = x - std::floor (x);
+        auto frac = [] (double v) { return v - std::floor (v); };
+        const double p1 = frac (s.sync[0] ? pc * r1 : x * r1);
+        const double p2 = frac ((double) s.phase2 + turn + (s.sync[1] ? pc * r2 : x * r2));
+        const float a = dsp::Orbite::satelliteWave (p1, s.wave[0], s.symS[0]);
+        const float b = dsp::Orbite::satelliteWave (p2, s.wave[1], s.symS[1]);
+        const double pcEff = s.algo == 2 ? frac (pc + 1.5 * (double) s.ring[0] * (double) a) : pc;
+        const float c = dsp::Orbite::carrierWave (pcEff, s.shape, s.sym);
+        auto ring = [] (float v, float k) { return (1.0f - k) + k * v; };
+        if (parts != nullptr)
+        {
+            parts[0] = c;
+            parts[1] = a;
+            parts[2] = b;
+        }
+        switch (s.algo)
+        {
+            case 1:  return c * ring (a * ring (b, s.ring[1]), s.ring[0]);
+            case 2:  return c * ring (b, s.ring[1]);
+            default: return c * ring (a, s.ring[0]) * ring (b, s.ring[1]);
+        }
+    }
+
+    void paintOrbite (juce::Graphics& g, juce::Rectangle<float> r)
+    {
+        auto& p = proc();
+        const bool on = P (p, snd::orOn) > 0.5f;
+        const auto s = orbiteSettings();
+        const double r1 = liveValue (p, snd::s1Ratio), r2 = liveValue (p, snd::s2Ratio), turn = orbiteTurn();
+        const juce::Colour cC = on ? col::sOrange : col::screenGhost, c1 = on ? col::sBlue : col::screenGhost, c2 = on ? col::sViolet : col::screenGhost;
+        static const char* algos[] = { "parallel", "cascade", "fm", "loop" };
+
+        // the orbits, on the right: the carrier, satellite 1 on the inner orbit, satellite 2 circling on the outer
+        auto diag = r.removeFromRight (juce::jmin (r.getWidth() * 0.36f, r.getHeight() * 1.5f));
+        r.removeFromRight (12.0f);
+        {
+            const auto c = diag.getCentre().translated (0.0f, 10.0f);
+            const float R = juce::jmin (diag.getWidth() * 0.46f, diag.getHeight() * 0.62f);
+            auto orbitAt = [&] (float k, float angle) { return juce::Point<float> (c.x + std::cos (angle) * R * k, c.y + std::sin (angle) * R * k * 0.55f); };
+            auto ellipse = [&] (float k, juce::Colour col, bool dashed)
+            {
+                juce::Path o;
+                o.addEllipse (c.x - R * k, c.y - R * k * 0.55f, 2.0f * R * k, 2.0f * R * k * 0.55f);
+                g.setColour (col.withMultipliedAlpha (0.5f));
+                if (dashed)
+                {
+                    const float dash[] = { 4.0f, 5.0f };
+                    juce::PathStrokeType (1.2f).createDashedStroke (o, o, dash, 2);
+                    g.fillPath (o);
+                }
+                else
+                    g.strokePath (o, juce::PathStrokeType (1.2f));
+            };
+            ellipse (0.55f, c1, ! s.sync[0]);
+            ellipse (1.0f, c2, ! s.sync[1]);
+            const auto pos1 = orbitAt (0.55f, -2.4f);
+            const auto pos2 = orbitAt (1.0f, (float) (juce::MathConstants<double>::twoPi * ((double) s.phase2 + turn)) - 0.6f);
+            // the wiring
+            auto link = [&] (juce::Point<float> a, juce::Point<float> b, juce::Colour col, bool dashed)
+            {
+                juce::Path l;
+                l.startNewSubPath (a);
+                l.lineTo (b);
+                g.setColour (col.withMultipliedAlpha (0.8f));
+                if (dashed)
+                {
+                    const float dash[] = { 3.0f, 3.0f };
+                    juce::PathStrokeType (1.6f).createDashedStroke (l, l, dash, 2);
+                    g.fillPath (l);
+                }
+                else
+                    g.strokePath (l, juce::PathStrokeType (1.6f));
+            };
+            if (s.algo == 1)
+            {
+                link (pos2, pos1, c2, false);
+                link (pos1, c, c1, false);
+            }
+            else
+            {
+                link (pos1, c, c1, s.algo == 2);
+                link (pos2, c, c2, false);
+            }
+            if (s.algo == 3)
+            {
+                // the output back into the satellites
+                juce::Path back;
+                back.addCentredArc (c.x, c.y, R * 1.12f, R * 0.72f, 0.0f, 0.4f, 2.6f, true);
+                g.setColour (cC.withMultipliedAlpha (0.7f));
+                g.strokePath (back, juce::PathStrokeType (1.4f));
+            }
+            g.setColour (cC);
+            g.fillEllipse (juce::Rectangle<float> (26.0f, 26.0f).withCentre (c));
+            const float d1 = 8.0f + 10.0f * s.ring[0], d2 = 8.0f + 10.0f * s.ring[1];
+            g.setColour (c1);
+            g.fillEllipse (juce::Rectangle<float> (d1, d1).withCentre (pos1));
+            g.setColour (c2);
+            g.fillEllipse (juce::Rectangle<float> (d2, d2).withCentre (pos2));
+            text (g, "1", juce::Rectangle<float> (14.0f, 14.0f).withCentre (pos1.translated (0.0f, -d1)), mono (11.0f, 500), c1, juce::Justification::centred);
+            text (g, "2", juce::Rectangle<float> (14.0f, 14.0f).withCentre (pos2.translated (0.0f, -d2)), mono (11.0f, 500), c2, juce::Justification::centred);
+            if (s.algo == 2)
+                text (g, "fm", juce::Rectangle<float> (24.0f, 14.0f).withCentre ((pos1 + c) * 0.5f).translated (0.0f, -10.0f), mono (10.0f), c1, juce::Justification::centred);
+        }
+
+        // the readout
+        auto top = r.removeFromTop (60.0f);
+        text (g, juce::String::fromUTF8 (algos[juce::jlimit (0, 3, s.algo)]), top.removeFromTop (40.0f), grotesk (32.0f, 300),
+              on ? col::screenText : col::screenDim, juce::Justification::centredLeft);
+        juce::String sub;
+        if (! on)
+            sub = "off · switch it on: carrier or mixer";
+        else
+        {
+            sub << "sat 1 x" << juce::String (r1, 2) << " · sat 2 x"_fr << juce::String (r2, 2) << " · rotation "_fr
+                << juce::String::fromUTF8 (snd::text (snd::orOrbit, liveValue (p, snd::orOrbit)).c_str()).toLowerCase();
+        }
+        text (g, sub, top, mono (11.0f), on ? col::screenDim : col::sYellow, juce::Justification::centredLeft);
+
+        // two cycles of its sound, the carrier's ghost behind
+        auto w = r.reduced (4.0f, 10.0f);
+        const int pts = 360;
+        juce::Path out, carrier;
+        for (int i = 0; i <= pts; ++i)
+        {
+            const double x = 2.0 * (double) i / pts;
+            float parts[3];
+            const float y = orbiteAt (s, r1, r2, turn, x, parts);
+            const float px = w.getX() + w.getWidth() * (float) i / pts;
+            const auto py = w.getCentreY() - w.getHeight() * 0.45f * juce::jlimit (-1.0f, 1.0f, y);
+            const auto pc = w.getCentreY() - w.getHeight() * 0.45f * parts[0];
+            if (i == 0) { out.startNewSubPath (px, py); carrier.startNewSubPath (px, pc); }
+            else { out.lineTo (px, py); carrier.lineTo (px, pc); }
+        }
+        g.setColour (col::screenLine);
+        g.drawHorizontalLine ((int) w.getCentreY(), w.getX(), w.getRight());
+        g.setColour (col::screenGhost);
+        g.strokePath (carrier, juce::PathStrokeType (1.2f));
+        g.setColour (cC);
+        g.strokePath (out, juce::PathStrokeType (3.0f, juce::PathStrokeType::curved));
+    }
+
+    //------------------------------------------------------------------ the MIXEUR: a fader per source, into the filter
+    void paintMixer (juce::Graphics& g, juce::Rectangle<float> r)
+    {
+        auto& p = proc();
+        const bool sampler = m.mode == Machine::samplerMode;
+        const bool orbOn = P (p, snd::orOn) > 0.5f;
+        struct Ch { const char* name; int id; juce::Colour c; bool live; };
+        std::vector<Ch> chs;
+        if (sampler)
+            chs = { { "sample", snd::mxSample, col::sBlue, true }, { "orbite", snd::mxOrbite, col::sOrange, orbOn } };
+        else
+            chs = { { "osc a", snd::oaLevel, col::sBlue, true }, { "osc b", snd::obLevel, col::sGreen, true },
+                    { "sub", snd::subLevel, col::sYellow, true }, { "noise", snd::noiseLevel, col::screenText, true },
+                    { "orbite", snd::mxOrbite, col::sOrange, orbOn } };
+        // the filter it all goes into, on the right
+        auto into = r.removeFromRight (150.0f);
+        {
+            const int model = (int) P (p, snd::fModel);
+            picto (g, filterModelPicto (model), into.withSizeKeepingCentre (64.0f, 64.0f).translated (20.0f, 0.0f), model > 0 ? col::sBlue : col::screenDim, 1.6f);
+            text (g, model > 0 ? "filter" : "filter off", into.withSizeKeepingCentre (150.0f, 20.0f).translated (20.0f, 48.0f), mono (11.0f), col::screenDim,
+                  juce::Justification::centred);
+            juce::Path arrow;
+            const float y = into.getCentreY();
+            arrow.startNewSubPath (into.getX() - 6.0f, y);
+            arrow.lineTo (into.getX() + 40.0f, y);
+            g.setColour (col::screenDim);
+            g.strokePath (arrow, juce::PathStrokeType (1.5f));
+            juce::Path head;
+            head.addTriangle (into.getX() + 46.0f, y, into.getX() + 38.0f, y - 5.0f, into.getX() + 38.0f, y + 5.0f);
+            g.fillPath (head);
+        }
+        const float w = juce::jmin (120.0f, r.getWidth() / (float) chs.size());
+        for (size_t i = 0; i < chs.size(); ++i)
+        {
+            const auto& ch = chs[i];
+            auto strip = juce::Rectangle<float> (r.getX() + w * (float) i, r.getY(), w, r.getHeight()).reduced (10.0f, 0.0f);
+            const float level = liveNorm (p, ch.id);
+            const auto c = ch.live ? ch.c : col::screenGhost;
+            text (g, ch.live ? juce::String (juce::roundToInt (level * 100.0f)) + " %" : juce::String ("off"), strip.removeFromTop (20.0f), mono (12.0f, 500),
+                  ch.live ? col::screenText : col::screenDim, juce::Justification::centred);
+            text (g, juce::String::fromUTF8 (ch.name), strip.removeFromBottom (20.0f), mono (11.0f, 500), c, juce::Justification::centred);
+            auto track = strip.reduced (0.0f, 8.0f);
+            const auto rail = track.withSizeKeepingCentre (6.0f, track.getHeight());
+            g.setColour (col::screenLine);
+            g.fillRoundedRectangle (rail, 3.0f);
+            const float y = track.getBottom() - level * track.getHeight();
+            g.setColour (c.withMultipliedAlpha (0.35f));
+            g.fillRoundedRectangle (rail.withTop (y), 3.0f);
+            g.setColour (c);
+            g.fillRoundedRectangle (juce::Rectangle<float> (juce::jmin (46.0f, strip.getWidth()), 12.0f).withCentre ({ rail.getCentreX(), y }), 3.0f);
+        }
     }
 
     //------------------------------------------------------------------ SAMPLER: the sample, its start, its loop
@@ -459,7 +826,7 @@ private:
         auto line = [&] (float x, juce::Colour c, float t) { g.setColour (c); g.fillRect (x - t * 0.5f, w.getY(), t, w.getHeight()); };
         const double start = (double) liveValue (proc(), snd::start) * (len - 1);
         line (X (start), col::sOrange, 2.5f);
-        text (g, "début"_fr, { X (start) + 5.0f, r.getY(), 60.0f, 14.0f }, mono (11.0f), col::sOrange);
+        text (g, "start", { X (start) + 5.0f, r.getY(), 60.0f, 14.0f }, mono (11.0f), col::sOrange);
         if (ls >= 0)
         {
             line (X (ls), col::sGreen, 2.5f);
@@ -477,7 +844,7 @@ private:
         juce::String t;
         t << lower (rk::noteName (s.root)) << " · v"_fr << s.velocity << " · "_fr << seconds ((double) len / s.sampleRate);
         if (s.loop.valid())
-            t << " · boucle "_fr << seconds ((double) s.loop.length() / s.sampleRate);
+            t << " · loop "_fr << seconds ((double) s.loop.length() / s.sampleRate);
         t << " · "_fr << (int) std::lround (s.detuneCents) << " ct";
         text (g, t, info, mono (11.0f), col::screenDim);
     }
@@ -853,7 +1220,7 @@ private:
             fxShown = true;
             fxRow = r.withSizeKeepingCentre (r.getWidth(), 80.0f).translated (0.0f, -8.0f);
             const float w = (fxRow.getWidth() - 5.0f * 10.0f) / 6.0f;
-            text (g, "entrée → … → sortie · glisse pour changer l'ordre · l'interrupteur coupe l'effet"_fr, r.removeFromBottom (18.0f), mono (10.0f), col::screenDim, juce::Justification::centred, true);
+            text (g, "in → … → out · drag to reorder · the switch bypasses"_fr, r.removeFromBottom (18.0f), mono (10.0f), col::screenDim, juce::Justification::centred, true);
             for (int pos = 0; pos < 6; ++pos)
             {
                 const int st = order[(size_t) pos];
@@ -927,6 +1294,47 @@ private:
                     text (g, "→"_fr, { cell.getRight() - 8.0f, r.getCentreY() - 20.0f, 16.0f, 16.0f }, mono (12.0f), col::screenGhost, juce::Justification::centred, true);
             }
         }
+        else if (viz == "orbite")
+        {
+            // its three parts, one cycle each; the bank being set lit
+            const auto s = orbiteSettings();
+            const double r1 = liveValue (p, snd::s1Ratio), r2 = liveValue (p, snd::s2Ratio), turn = orbiteTurn();
+            const int bank = m.bankOf[juce::String ("orbite") + juce::String (m.mode)];
+            const char* names[3] = { "carrier", "sat 1", "sat 2" };
+            const juce::Colour cols[3] = { col::sOrange, col::sBlue, col::sViolet };
+            const float rowH = r.getHeight() / 3.0f;
+            for (int k = 0; k < 3; ++k)
+            {
+                auto row = juce::Rectangle<float> (r.getX(), r.getY() + rowH * (float) k, r.getWidth(), rowH).reduced (0.0f, 3.0f);
+                const bool lit = bank == k;
+                text (g, juce::String::fromUTF8 (names[k]), row.removeFromLeft (70.0f), mono (11.0f, lit ? 500 : 400), lit ? cols[k] : col::screenDim,
+                      juce::Justification::centredLeft);
+                juce::Path path;
+                for (int i = 0; i <= 120; ++i)
+                {
+                    float parts[3];
+                    orbiteAt (s, r1, r2, turn, (double) i / 120.0, parts);
+                    const float x = row.getX() + row.getWidth() * (float) i / 120.0f, y = row.getCentreY() - row.getHeight() * 0.42f * parts[k];
+                    if (i == 0) path.startNewSubPath (x, y); else path.lineTo (x, y);
+                }
+                stroke (path, lit ? cols[k] : col::screenGhost, lit ? 2.2f : 1.4f);
+            }
+        }
+        else if (viz == "mix")
+        {
+            // where the mix goes
+            const char* steps[] = { "sources", "mixer", "filter", "env", "fx" };
+            const float w = r.getWidth() / 5.0f;
+            for (int i = 0; i < 5; ++i)
+            {
+                auto cell = juce::Rectangle<float> (r.getX() + w * (float) i, r.getCentreY() - 18.0f, w - 14.0f, 36.0f);
+                g.setColour (i == 1 ? col::sOrange : col::screenLine);
+                g.drawRoundedRectangle (cell, 6.0f, i == 1 ? 1.8f : 1.0f);
+                text (g, juce::String::fromUTF8 (steps[i]), cell, mono (10.5f, i == 1 ? 500 : 400), i == 1 ? col::sOrange : col::screenDim, juce::Justification::centred);
+                if (i < 4)
+                    text (g, "→"_fr, { cell.getRight(), cell.getY(), 14.0f, cell.getHeight() }, mono (11.0f), col::screenGhost, juce::Justification::centred, true);
+            }
+        }
         else if (viz == "voices")
         {
             const int n = p.player.activeVoices.load(), poly = (int) P (p, snd::voices);
@@ -940,7 +1348,7 @@ private:
         }
         else if (viz.startsWith ("mod"))
         {
-            const int mi = juce::jlimit (0, snd::numMods - 1, m.bankOf["MODS" + juce::String (m.mode)]);
+            const int mi = juce::jlimit (0, snd::numMods - 1, m.bankOf["mods" + juce::String (m.mode)]);
             auto M = [&] (snd::ModSetting w) { return P (p, snd::modParam (mi, w)); };
             const auto type = (dsp::ModType) (int) M (snd::mType);
             const auto colour = col::modOnScreen (mi);
@@ -1086,7 +1494,7 @@ public:
     {
         auto r = getLocalBounds().toFloat();
         auto top = r.removeFromTop (24.0f);
-        text (g, "clavier · "_fr + lower (rk::noteName (whiteNote (0))) + " – "_fr + lower (rk::noteName (whiteNote (14))), top, mono (12.0f, 500), col::deckInk2);
+        text (g, "keys · "_fr + lower (rk::noteName (whiteNote (0))) + " – "_fr + lower (rk::noteName (whiteNote (14))), top, mono (12.0f, 500), col::deckInk2);
         octDown = top.removeFromRight (56.0f).reduced (0.0f, 1.0f);
         top.removeFromRight (6.0f);
         octUp = octDown;
@@ -1218,9 +1626,17 @@ public:
             g.fillRect (juce::Rectangle<float>::leftTopRightBottom (juce::jmin (c, c + w), bar.getY(), juce::jmax (c, c + w), bar.getBottom()));
         }
         const int a = (int) P (p, snd::sceneA) - 1, b = (int) P (p, snd::sceneB) - 1;
-        text (g, "scènes"_fr, sceneTitle, mono (12.0f, 600), col::ink);
-        text (g, "a " + juce::String (a + 1) + " → b "_fr + juce::String (b + 1) + " · "_fr + juce::String (juce::roundToInt (liveNorm (p, snd::xfade) * 100.0f)) + " %",
-              sceneTitle, mono (12.0f), col::ink2, juce::Justification::centredRight, true);
+        const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
+        if (assigning >= 0 && now > assignUntil)
+            assigning = -1;
+        const bool blink = assigning >= 0 && std::fmod (now, 0.5) < 0.3;
+        text (g, "scenes", sceneTitle, mono (12.0f, 600), col::ink);
+        if (assigning >= 0)
+            text (g, juce::String ("pick a scene for ") + (assigning == snd::sceneA ? "a" : "b"), sceneTitle, mono (12.0f, 600), col::red,
+                  juce::Justification::centredRight);
+        else
+            text (g, "a " + juce::String (a + 1) + " → b "_fr + juce::String (b + 1) + " · "_fr + juce::String (juce::roundToInt (liveNorm (p, snd::xfade) * 100.0f)) + " %",
+                  sceneTitle, mono (12.0f), col::ink2, juce::Justification::centredRight, true);
         for (int i = 0; i < snd::numScenes; ++i)
         {
             const bool armed = m.arm.scene == i, holds = p.player.sceneHolds (i);
@@ -1231,12 +1647,18 @@ public:
                 g.setColour (col::violet);
                 g.fillRoundedRectangle (k.reduced (1.0f), 5.0f);
             }
+            if (assigning >= 0)
+            {
+                // waiting for a scene: every pad offered
+                g.setColour (col::red.withAlpha (blink ? 0.55f : 0.3f));
+                g.drawRoundedRectangle (k.reduced (0.5f), 5.0f, 1.4f);
+            }
             text (g, juce::String (i + 1), k, mono (11.0f, holds ? 600 : 400), armed ? juce::Colours::white : (holds ? col::ink : col::ink3), juce::Justification::centred);
             if (i == a || i == b)
                 text (g, i == a ? "a" : "b", k.reduced (3.0f, 1.0f), mono (9.0f, 600), armed ? juce::Colours::white : col::violet, juce::Justification::topRight);
         }
-        key (g, aKey, KeyState::on, false, 8.0f);
-        key (g, bKey, KeyState::normal, false, 8.0f);
+        key (g, aKey, assigning == snd::sceneA ? (blink ? KeyState::accent : KeyState::normal) : KeyState::on, false, 8.0f);
+        key (g, bKey, assigning == snd::sceneB ? (blink ? KeyState::accent : KeyState::normal) : KeyState::normal, false, 8.0f);
         text (g, "a" + juce::String (a + 1), aKey.withTrimmedBottom (3.0f), mono (13.0f, 500), col::keyOnInk, juce::Justification::centred);
         text (g, "b" + juce::String (b + 1), bKey.withTrimmedBottom (3.0f), mono (13.0f, 500), col::ink, juce::Justification::centred);
         auto slot = fader.withSizeKeepingCentre (fader.getWidth(), 10.0f);
@@ -1271,6 +1693,15 @@ public:
         for (int i = 0; i < snd::numScenes; ++i)
             if (sceneKeys[i].contains (e.position))
             {
+                // A (or B) pressed just before: this pad becomes its scene
+                if (assigning >= 0 && ! e.mods.isPopupMenu())
+                {
+                    setSound (p, assigning, (float) (i + 1));
+                    assigning = -1;
+                    m.proc.settingsChanged();
+                    repaint();
+                    return;
+                }
                 if (e.mods.isPopupMenu())
                 {
                     juce::PopupMenu menu;
@@ -1283,10 +1714,21 @@ public:
                 m.armChanged();
                 return;
             }
+        // A or B: waits a few seconds for the pad that becomes its scene (again: no more waiting)
         auto pick = [&] (int id)
         {
-            const int now = (int) P (p, id);
-            setSound (p, id, (float) (m.arm.scene >= 0 ? m.arm.scene + 1 : now % snd::numScenes + 1));
+            if (m.arm.scene >= 0)
+            {
+                setSound (p, id, (float) (m.arm.scene + 1));     // a scene being set: it, at once
+                assigning = -1;
+            }
+            else if (assigning == id)
+                assigning = -1;
+            else
+            {
+                assigning = id;
+                assignUntil = juce::Time::getMillisecondCounterHiRes() * 0.001 + 4.0;
+            }
             repaint();
         };
         if (aKey.contains (e.position)) { pick (snd::sceneA); return; }
@@ -1321,6 +1763,8 @@ private:
     Machine& m;
     juce::Rectangle<float> modKeys[snd::numMods], sceneKeys[snd::numScenes], sceneTitle, aKey, bKey, fader;
     bool dragging = false;
+    int assigning = -1;                 // snd::sceneA or sceneB: waiting for a pad
+    double assignUntil = 0.0;
 
     void layout()
     {
@@ -1373,7 +1817,7 @@ public:
         key (g, modeKey, KeyState::on, false, 6.0f);
         key (g, backKey, KeyState::normal, false, 6.0f);
         text (g, loop ? "loop" : "live", modeKey.withTrimmedBottom (3.0f), mono (11.0f, 500), col::keyOnInk, juce::Justification::centred);
-        text (g, "retour", backKey.withTrimmedBottom (3.0f), mono (11.0f, 500), col::ink, juce::Justification::centred);
+        text (g, "back", backKey.withTrimmedBottom (3.0f), mono (11.0f, 500), col::ink, juce::Justification::centred);
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -1567,7 +2011,7 @@ Machine::Machine (ReplikantProcessor& p) : proc (p), updatePanel (p.updater)
     zoom = (float) proc.settingsFile().getDoubleValue ("zoom", 1.0);
 
     // the header
-    const char* modeNames[3] = { "synthé", "drum", "sampler" };
+    const char* modeNames[3] = { "synth", "drum", "sampler" };
     const juce::Colour none = juce::Colours::transparentBlack;
     for (int i = 0; i < 3; ++i)
     {
@@ -1593,7 +2037,7 @@ Machine::Machine (ReplikantProcessor& p) : proc (p), updatePanel (p.updater)
     playKey.onClick = [this] { proc.setClockRunning (! proc.clock.isRunning()); };
     playKey.setTooltip ("L'horloge MIDI interne : lance ou arrête (au tempo, vers la sortie choisie dans RÉGLAGES)."_fr);
     addAndMakeVisible (playKey);
-    fileKey.setButtonText ("fichier");
+    fileKey.setButtonText ("file");
     fileKey.onClick = [this] { showFileMenu(); };
     addAndMakeVisible (fileKey);
     packKey.setButtonText ("pack .zip");
@@ -1613,7 +2057,7 @@ Machine::Machine (ReplikantProcessor& p) : proc (p), updatePanel (p.updater)
             safe->packMaking = false;
             safe->packReady = zip;
             safe->packFor = signature;
-            safe->packKey.setButtonText (zip.existsAsFile() ? "glisse-moi" : "pack .zip");
+            safe->packKey.setButtonText (zip.existsAsFile() ? "drag me" : "pack .zip");
             if (zip.existsAsFile())
                 safe->showMessage ("Pack prêt : glisse-le vers le Finder, AirDrop ou un mail (il est aussi dans "_fr + zip.getParentDirectory().getFullPathName() + ")");
         });
@@ -1636,10 +2080,13 @@ Machine::Machine (ReplikantProcessor& p) : proc (p), updatePanel (p.updater)
 
     screen = std::make_unique<Screen> (*this);
     addAndMakeVisible (*screen);
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < numPageKeys; ++i)
     {
         pageKeys[i].onClick = [this, i] { showPage (i); };
         addAndMakeVisible (pageKeys[i]);
+    }
+    for (int i = 0; i < 8; ++i)
+    {
         encoders[i] = std::make_unique<Encoder> (i, arm);
         encoders[i]->onTouch = [this] (const Ctl& c) { touch (c); };
         addAndMakeVisible (*encoders[i]);
@@ -1726,27 +2173,51 @@ void Machine::buildPages()
     // the pages every mode shares: the filter, its envelope and the drive; the effects; the mods; the settings
     auto filterPage = [&]
     {
-        Page pg { "filtre", "filter", {} };
-        pg.banks.push_back ({ "filtre", { S (snd::fModel), disabledUnless (S (snd::fType), fOn), disabledUnless (S (snd::cutoff), fOn),
+        Page pg { "filter", "filter", {} };
+        pg.banks.push_back ({ "filter", { as (S (snd::fModel), Ctl::Look::display), disabledUnless (S (snd::fType), fOn), sep (disabledUnless (S (snd::cutoff), fOn)),
                                           disabledUnless (S (snd::reso), fOn), disabledUnless (S (snd::fDrive), fOn),
-                                          S (snd::sep, nullptr, [this] { const int md = (int) P (proc, snd::fModel); return md == 2 || md == 4; }),
-                                          disabledUnless (S (snd::fm), fOn), disabledUnless (S (snd::quality), fOn) } });
-        pg.banks.push_back ({ "env. filtre", { S (snd::fEnv), S (snd::fAttack), S (snd::fDecay), S (snd::fSustain), S (snd::fRelease),
-                                               S (snd::keyTrack), S (snd::velCutoff) } });
-        pg.banks.push_back ({ "drive", { S (snd::dModel), S (snd::dAmt), S (snd::dTone), S (snd::dMix) } });
+                                          sep (S (snd::sep, nullptr, [this] { const int md = (int) P (proc, snd::fModel); return md == 2 || md == 4; })),
+                                          disabledUnless (S (snd::fm), fOn), sep (disabledUnless (S (snd::quality), fOn)) } });
+        pg.banks.push_back ({ "filter env", { S (snd::fEnv), sep (S (snd::fAttack)), S (snd::fDecay), S (snd::fSustain), S (snd::fRelease),
+                                               sep (S (snd::keyTrack)), S (snd::velCutoff) } });
+        pg.banks.push_back ({ "drive", { S (snd::dModel), sep (S (snd::dAmt)), S (snd::dTone), sep (S (snd::dMix)) } });
         return pg;
     };
     auto fxPage = [&]
     {
         // (each effect's on and off: the switch on its block, in the chain on the screen)
         Page pg { "fx", "fx", {} };
-        pg.banks.push_back ({ "drive", { S (snd::dModel), S (snd::dAmt), S (snd::dTone), S (snd::dMix) } });
-        pg.banks.push_back ({ "spectre", { S (snd::spVoices), S (snd::spSlice), S (snd::spBlur), S (snd::spGlide), S (snd::spCentre), S (snd::spWidth), S (snd::spMix) } });
-        pg.banks.push_back ({ "spectre +", { S (snd::spOct), S (snd::spWave), S (snd::spFreeze), S (snd::spFeedback) } });
-        pg.banks.push_back ({ "pitch", { S (snd::piA), S (snd::piB), S (snd::piDetune), S (snd::piDelay), S (snd::piLevelB), S (snd::piFeedback), S (snd::piMix) } });
-        pg.banks.push_back ({ "chorus", { S (snd::chMode), S (snd::chRate), S (snd::chDepth), S (snd::chFeedback), S (snd::chTone), S (snd::chMix), S (snd::piCrystals, "Cristaux") } });
-        pg.banks.push_back ({ "crush", { S (snd::crBits), S (snd::crRate), S (snd::crJitter), S (snd::crTone), S (snd::crMix) } });
-        pg.banks.push_back ({ "espace", { S (snd::rvSize), S (snd::rvDecay), S (snd::rvTone), S (snd::rvShimmer), S (snd::rvMod), S (snd::rvMix) } });
+        pg.banks.push_back ({ "drive", { S (snd::dModel), sep (S (snd::dAmt)), S (snd::dTone), sep (S (snd::dMix)) } });
+        pg.banks.push_back ({ "spectre", { S (snd::spVoices), S (snd::spSlice), S (snd::spBlur), S (snd::spGlide), sep (S (snd::spCentre)), S (snd::spWidth), sep (S (snd::spMix)) } });
+        pg.banks.push_back ({ "spectre +", { S (snd::spOct), S (snd::spWave), sep (S (snd::spFreeze)), S (snd::spFeedback) } });
+        pg.banks.push_back ({ "pitch", { S (snd::piA), S (snd::piB), S (snd::piDetune), sep (S (snd::piDelay)), S (snd::piLevelB), S (snd::piFeedback), sep (S (snd::piMix)) } });
+        pg.banks.push_back ({ "chorus", { S (snd::chMode), sep (S (snd::chRate)), S (snd::chDepth), S (snd::chFeedback), S (snd::chTone), sep (S (snd::chMix)), sep (S (snd::piCrystals)) } });
+        pg.banks.push_back ({ "crush", { S (snd::crBits), S (snd::crRate), S (snd::crJitter), sep (S (snd::crTone)), sep (S (snd::crMix)) } });
+        pg.banks.push_back ({ "espace", { S (snd::rvSize), S (snd::rvDecay), S (snd::rvTone), sep (S (snd::rvShimmer)), S (snd::rvMod), sep (S (snd::rvMix)) } });
+        return pg;
+    };
+    // ORBITE: the carrier and how it's wired, then each satellite
+    auto orbitePage = [&]
+    {
+        auto fm = [this] { return (int) P (proc, snd::orAlgo) == 2; };
+        auto ring = [this] { return (int) P (proc, snd::orAlgo) != 2; };
+        Page pg { "orbite", "orbite", {} };
+        pg.banks.push_back ({ "carrier", { S (snd::orOn, "On"), S (snd::orAlgo), sep (S (snd::orShape)), S (snd::orSym), sep (S (snd::orOct)), S (snd::orSemi),
+                                            sep (S (snd::orOrbit)), S (snd::orTrack) } });
+        pg.banks.push_back ({ "sat 1", { S (snd::s1Wave), S (snd::s1Ratio), S (snd::s1Sym), sep (S (snd::s1Ring, nullptr, ring)), sep (S (snd::s1Ring, "FM depth", fm)),
+                                         sep (S (snd::s1Sync)) } });
+        pg.banks.push_back ({ "sat 2", { S (snd::s2Wave), S (snd::s2Ratio), S (snd::s2Sym), sep (S (snd::s2Ring)), sep (S (snd::s2Sync)), S (snd::s2Phase) } });
+        return pg;
+    };
+    // the MIXEUR, before the filter: every source's level (and ORBITE's switch, at hand)
+    auto mixerPage = [&] (bool sampler)
+    {
+        Page pg { "mixer", "mix", {} };
+        if (sampler)
+            pg.banks.push_back ({ "mixer", { S (snd::mxSample), sep (S (snd::mxOrbite)), S (snd::orOn, "On") } });
+        else
+            pg.banks.push_back ({ "mixer", { S (snd::oaLevel, "Osc A"), S (snd::obLevel, "Osc B"), S (snd::subLevel), S (snd::noiseLevel),
+                                              sep (S (snd::mxOrbite)), S (snd::orOn, "On") } });
         return pg;
     };
     auto modsPage = [&]
@@ -1768,7 +2239,7 @@ void Machine::buildPages()
             b.ctls.push_back (S (M (snd::mShape), nullptr, is ({ ModType::wave })));
             b.ctls.push_back (S (M (snd::mLen), nullptr, is ({ ModType::steps, ModType::random })));
             b.ctls.push_back (S (M (snd::mVari), nullptr, is ({ ModType::random })));
-            b.ctls.push_back (S (M (snd::mSync), nullptr, periodic));
+            b.ctls.push_back (sep (S (M (snd::mSync), nullptr, periodic)));
             b.ctls.push_back (S (M (snd::mDiv), nullptr, [this, periodic, mi] { return periodic() && P (proc, snd::modParam (mi, snd::mSync)) < 0.5f; }));
             b.ctls.push_back (S (M (snd::mHz), nullptr, [this, periodic, mi] { return periodic() && P (proc, snd::modParam (mi, snd::mSync)) > 0.5f; }));
             b.ctls.push_back (S (M (snd::mSmooth), nullptr, is ({ ModType::wave, ModType::steps })));
@@ -1780,24 +2251,26 @@ void Machine::buildPages()
             b.ctls.push_back (S (M (snd::mDecay), nullptr, is ({ ModType::envelope })));
             b.ctls.push_back (S (M (snd::mSustain), nullptr, is ({ ModType::envelope })));
             b.ctls.push_back (S (M (snd::mRelease), nullptr, is ({ ModType::envelope, ModType::follower })));
-            b.ctls.push_back (S (M (snd::mAmt)));
+            b.ctls.push_back (sep (S (M (snd::mAmt))));
             pg.banks.push_back (std::move (b));
         }
         return pg;
     };
     auto settingsPage = [&]
     {
-        Page pg { "réglages"_fr, "scenes", {} };
+        Page pg { "settings", "settings", {} };
         auto& o = proc.options;
-        Bank b { "réglages"_fr, { S (snd::sceneA), S (snd::sceneB), S (snd::xfade), S (snd::tempo) } };
-        auto clockMode = choiceCtl ("Horloge", { "interne", "suit l'hôte"_fr }, [this] { return (int) proc.clock.getMode(); },
+        // (the scenes and their fader: in their own panel, under the screen)
+        Bank b { "settings", { S (snd::tempo) } };
+        auto clockMode = choiceCtl ("Clock", { "internal", "host" }, [this] { return (int) proc.clock.getMode(); },
                                     [this] (int v) { proc.setClockMode ((MidiClock::Mode) v); });
-        clockMode.tip = "INTERNE : au tempo, lancée par la touche lecture en haut. SUIT L'HÔTE : démarre et s'arrête avec le DAW, sur sa grille."_fr;
+        clockMode.tip = "INTERNAL : au tempo, lancée par la touche lecture en haut. HOST : démarre et s'arrête avec le DAW, sur sa grille."_fr;
+        clockMode.sepBefore = true;
         b.ctls.push_back (clockMode);
-        juce::StringArray dests { "aucune", "daw" };
+        juce::StringArray dests { "none", "daw" };
         for (auto& d : midiDevices)
             dests.add (lower (d.name));
-        b.ctls.push_back (choiceCtl ("Horloge vers", dests, [this]
+        b.ctls.push_back (choiceCtl ("Clock out", dests, [this]
         {
             const auto id = proc.clock.destinationId();
             if (id == "host") return 1;
@@ -1810,20 +2283,21 @@ void Machine::buildPages()
             else if (v == 1) proc.setClockDestination ("host", "DAW");
             else if (v - 2 < midiDevices.size()) proc.setClockDestination (midiDevices[v - 2].identifier, midiDevices[v - 2].name);
         }));
-        auto monitor = choiceCtl ("Écoute"_fr, { "non", "directe", "par les effets" }, [&o] { return o.monitor; }, [this, &o] (int v) { o.monitor = v; proc.settingsChanged(); });
+        auto monitor = choiceCtl ("Monitor", { "off", "direct", "thru fx" }, [&o] { return o.monitor; }, [this, &o] (int v) { o.monitor = v; proc.settingsChanged(); });
+        monitor.sepBefore = true;
         monitor.tip = "L'audio qui arrive (le synthé, ou la piste où REPLIK8 est en insert) : coupé, tel quel, ou passé dans le filtre et les effets (multi-effet, avec les mods)."_fr;
         b.ctls.push_back (monitor);
-        b.ctls.push_back (choiceCtl ("Clavier vers", { "replikant", "synthé"_fr }, [&o] { return o.thru ? 1 : 0; }, [this, &o] (int v) { o.thru = v == 1; proc.settingsChanged(); }));
+        b.ctls.push_back (choiceCtl ("Keys to", { "replik8", "synth" }, [&o] { return o.thru ? 1 : 0; }, [this, &o] (int v) { o.thru = v == 1; proc.settingsChanged(); }));
         pg.banks.push_back (std::move (b));
         return pg;
     };
     auto amp = [&] (bool withVoices)
     {
-        Page pg { "ampli", "adsr", {} };
-        Bank b { "ampli", { S (snd::attack), S (snd::decay), S (snd::sustain), S (snd::release), S (snd::velocity), S (snd::volume) } };
+        Page pg { "env", "adsr", {} };
+        Bank b { "amp env", { S (snd::attack), S (snd::decay), S (snd::sustain), S (snd::release), sep (S (snd::velocity)), S (snd::volume) } };
         if (withVoices)
         {
-            b.ctls.push_back (S (snd::voiceMode));
+            b.ctls.push_back (sep (S (snd::voiceMode)));
             b.ctls.push_back (S (snd::voices, nullptr, [this] { return P (proc, snd::voiceMode) < 0.5f; }));
         }
         pg.banks.push_back (std::move (b));
@@ -1834,10 +2308,13 @@ void Machine::buildPages()
     {
         auto& v = pages[synthMode];
         v.clear();
-        v.push_back ({ "osc a", "osc", { { "osc a", { S (snd::oaBank), S (snd::oaPos), S (snd::oaOct), S (snd::oaSemi), S (snd::oaFine), S (snd::oaLevel), S (snd::pmBA), S (snd::subLevel) } } } });
-        v.push_back ({ "osc b", "osc", { { "osc b", { S (snd::obBank), S (snd::obPos), S (snd::obOct), S (snd::obSemi), S (snd::obFine), S (snd::obLevel), S (snd::noiseLevel) } } } });
-        v.push_back ({ "voix", "voices", { { "voix", { S (snd::voiceMode), S (snd::voices, nullptr, [this] { return P (proc, snd::voiceMode) < 0.5f; }),
-                                                       S (snd::glide), S (snd::unison), S (snd::detune), S (snd::width), S (snd::bend), S (snd::transpose) } } } });
+        // (their levels, the sub's and the noise's: on the MIXEUR)
+        v.push_back ({ "osc a", "osc", { { "osc a", { S (snd::oaBank), S (snd::oaPos), sep (S (snd::oaOct)), S (snd::oaSemi), S (snd::oaFine), sep (S (snd::pmBA)) } } } });
+        v.push_back ({ "osc b", "osc", { { "osc b", { S (snd::obBank), S (snd::obPos), sep (S (snd::obOct)), S (snd::obSemi), S (snd::obFine) } } } });
+        v.push_back (orbitePage());
+        v.push_back (mixerPage (false));
+        v.push_back ({ "voices", "voices", { { "voices", { S (snd::voiceMode), S (snd::voices, nullptr, [this] { return P (proc, snd::voiceMode) < 0.5f; }),
+                                                       S (snd::glide), sep (S (snd::unison)), S (snd::detune), S (snd::width), sep (S (snd::bend)), S (snd::transpose) } } } });
         v.push_back (filterPage());
         v.push_back (amp (false));
         v.push_back (fxPage());
@@ -1854,13 +2331,15 @@ void Machine::buildPages()
     {
         auto& v = pages[samplerMode];
         v.clear();
-        v.push_back ({ "lecture", "lecture", { { "lecture", { S (snd::playMode), S (snd::start), S (snd::speed, nullptr, elastic), S (snd::grain, nullptr, elastic),
+        v.push_back ({ "play", "lecture", { { "play", { S (snd::playMode), S (snd::start), S (snd::speed, nullptr, elastic), S (snd::grain, nullptr, elastic),
                                                               S (snd::spray, nullptr, elastic), S (snd::transients, nullptr, [elastic] { return ! elastic(); }),
-                                                              S (snd::reverse), S (snd::alias) } } } });
-        v.push_back ({ "boucle", "loop", { { "boucle", { S (snd::loops), S (snd::loopStart), S (snd::loopSize), S (snd::loopXfade), S (snd::bits) } } } });
-        v.push_back ({ "hauteur", "pitch", { { "hauteur", { S (snd::transpose), S (snd::fine), S (snd::glide), S (snd::bend), S (snd::pmSource, "PM source"),
-                                                            S (snd::pmRatio, "PM rapport", [this] { const int s = (int) P (proc, snd::pmSource); return s == 1 || s == 2; }),
-                                                            S (snd::pmIndex, "PM indice", [this] { return (int) P (proc, snd::pmSource) != 0; }) } } } });
+                                                              sep (S (snd::reverse)), sep (S (snd::alias)) } } } });
+        v.push_back ({ "loop", "loop", { { "loop", { S (snd::loops), sep (S (snd::loopStart)), S (snd::loopSize), S (snd::loopXfade), sep (S (snd::bits)) } } } });
+        v.push_back ({ "pitch", "pitch", { { "pitch", { S (snd::tune), S (snd::transpose), S (snd::fine), S (snd::glide), S (snd::bend), sep (S (snd::pmSource)),
+                                                            S (snd::pmRatio, nullptr, [this] { const int s = (int) P (proc, snd::pmSource); return s == 1 || s == 2; }),
+                                                            S (snd::pmIndex, nullptr, [this] { return (int) P (proc, snd::pmSource) != 0; }) } } } });
+        v.push_back (orbitePage());
+        v.push_back (mixerPage (true));
         v.push_back (filterPage());
         v.push_back (amp (true));
         v.push_back (fxPage());
@@ -1886,6 +2365,19 @@ void Machine::buildPages()
         tip (*v, snd::transients, "GARDÉS : l'attaque de chaque sample est jouée à sa vitesse, le corps seul est transposé : un kick descendu de deux octaves garde son clic."_fr);
         tip (*v, snd::quality, "Le suréchantillonnage du filtre (4X : le plus propre)."_fr);
         tip (*v, snd::unison, "Jusqu'à quatre voix par note, désaccordées et étalées dans la stéréo."_fr);
+        tip (*v, snd::orOn, "ORBITE : un porteur et deux satellites synchronisés qui le modulent en anneau. Allume-le, puis règle son niveau dans le MIXEUR."_fr);
+        tip (*v, snd::orAlgo, "Le câblage. PARALLÈLE : les deux satellites sur le porteur. CASCADE : le 2 module le 1, qui module le porteur. FM : le 1 pousse la phase du porteur. BOUCLE : la sortie revient dans les satellites."_fr);
+        tip (*v, snd::orShape, "La forme du porteur : triangle, scie, carré, et tout ce qu'il y a entre."_fr);
+        tip (*v, snd::orOrbit, "Le satellite 2 tourne autour du porteur : le timbre bouge, la note reste juste. FIXE : il ne tourne pas."_fr);
+        tip (*v, snd::orTrack, "OUI : les satellites suivent la note. NON : ils restent fixes, comme des formants, et le timbre change d'une touche à l'autre."_fr);
+        tip (*v, snd::s1Ring, "Combien le satellite multiplie le porteur (modulation en anneau, harmonique tant qu'il est synchronisé)."_fr);
+        tip (*v, snd::s2Ring, "Combien le satellite multiplie le porteur (modulation en anneau, harmonique tant qu'il est synchronisé)."_fr);
+        tip (*v, snd::s1Sync, "OUI : il repart avec chaque cycle du porteur, le son reste sur la note. NON : métallique, inharmonique."_fr);
+        tip (*v, snd::s2Sync, "OUI : il repart avec chaque cycle du porteur, le son reste sur la note. NON : métallique, inharmonique."_fr);
+        tip (*v, snd::s2Phase, "Où le satellite 2 repart dans son cycle : une autre couleur, sans changer la note."_fr);
+        tip (*v, snd::mxSample, "Le niveau du sample, avant le filtre."_fr);
+        tip (*v, snd::mxOrbite, "Le niveau d'ORBITE, avant le filtre (s'il est allumé)."_fr);
+        tip (*v, snd::pmSource, "Ce qui pousse la tête de lecture : un sinus, le sample lui-même, l'entrée, RETOUR (la voix se module elle-même) ou ORBITE."_fr);
     }
 }
 
@@ -1915,12 +2407,12 @@ void Machine::buildCapturePages()
     {
         Page pg { "source", "plan", {} };
         Bank b { "source", {} };
-        b.ctls.push_back (choice ("Son", { "entrée"_fr, "sidechain", "synthé test"_fr }, [&o] { return (int) o.source; }, [&o] (int v) { o.source = (ReplikantProcessor::Source) v; }));
+        b.ctls.push_back (choice ("Source", { "input", "sidechain", "test synth" }, [&o] { return (int) o.source; }, [&o] (int v) { o.source = (ReplikantProcessor::Source) v; }));
         b.ctls.back().tip = "D'où vient le son du synthé : l'entrée du plug-in (ou de la carte son), le sidechain, ou le petit synthé intégré pour essayer."_fr;
         juce::StringArray ports { "aucune", "daw" };
         for (auto& d : midiDevices)
             ports.add (lower (d.name));
-        b.ctls.push_back (choice ("Sortie midi", ports, [this]
+        b.ctls.push_back (choice ("MIDI out", ports, [this]
         {
             if (proc.options.midiPort == "host") return 1;
             for (int i = 0; i < midiDevices.size(); ++i)
@@ -1933,102 +2425,102 @@ void Machine::buildCapturePages()
             else if (v - 2 < midiDevices.size()) proc.setMidiPort (midiDevices[v - 2].identifier, midiDevices[v - 2].name);
         }));
         b.ctls.back().tip = "Le port MIDI qui va au synthé. DAW : la sortie MIDI du plug-in (si ton DAW la route)."_fr;
-        b.ctls.push_back (num ("Canal", 1, 16, 1, [&o] { return (double) o.channel; }, [&o] (double v) { o.channel = (int) v; }, intText));
-        b.ctls.push_back (num ("Programme", -1, 127, 1, [&o] { return (double) o.program; }, [&o] (double v) { o.program = (int) v; },
-                               [] (double v) { return v < 0 ? juce::String ("aucun") : juce::String ((int) v + 1); }));
-        b.ctls.push_back (choice ("Écoute"_fr, { "non", "directe", "par les effets" }, [&o] { return o.monitor; }, [&o] (int v) { o.monitor = v; }));
-        b.ctls.push_back (choice ("Fichiers", { "24 bits", "32 bits flottant" }, [&s] { return s.fileBits == 32 ? 1 : 0; }, [&s] (int v) { s.fileBits = v == 1 ? 32 : 24; }));
+        b.ctls.push_back (num ("Channel", 1, 16, 1, [&o] { return (double) o.channel; }, [&o] (double v) { o.channel = (int) v; }, intText));
+        b.ctls.push_back (num ("Program", -1, 127, 1, [&o] { return (double) o.program; }, [&o] (double v) { o.program = (int) v; },
+                               [] (double v) { return v < 0 ? juce::String ("none") : juce::String ((int) v + 1); }));
+        b.ctls.push_back (choice ("Monitor", { "off", "direct", "thru fx" }, [&o] { return o.monitor; }, [&o] (int v) { o.monitor = v; }));
+        b.ctls.push_back (choice ("Files", { "24 bit", "32 bit float" }, [&s] { return s.fileBits == 32 ? 1 : 0; }, [&s] (int v) { s.fileBits = v == 1 ? 32 : 24; }));
         pg.banks.push_back (std::move (b));
         capturePages.push_back (std::move (pg));
     }
     {
         Page pg { "notes", "plan", {} };
         Bank b { "notes", {} };
-        b.ctls.push_back (choice ("Mode", { "intervalle", "nombre", "perso" }, [&s] { return (int) s.noteMode; },
+        b.ctls.push_back (choice ("Mode", { "interval", "count", "custom" }, [&s] { return (int) s.noteMode; },
                                   [&s] (int v) { s.noteMode = (rk::NoteMode) v; if (s.noteMode == rk::NoteMode::custom && s.customNotes.empty()) s.customNotes = rk::plannedNotes (rk::Session { s }); }));
-        b.ctls.push_back (num ("De", 0, 127, 1, [&s] { return (double) s.lowNote; }, [&s] (double v) { s.lowNote = (int) v; if (s.highNote < s.lowNote) s.highNote = s.lowNote; }, noteText));
-        b.ctls.push_back (num ("À"_fr, 0, 127, 1, [&s] { return (double) s.highNote; }, [&s] (double v) { s.highNote = (int) v; if (s.lowNote > s.highNote) s.lowNote = s.highNote; }, noteText));
-        auto iv = num ("Tous les", 1, 24, 1, [&s] { return (double) s.interval; }, [&s] (double v) { s.interval = (int) v; }, semis);
+        b.ctls.push_back (num ("From", 0, 127, 1, [&s] { return (double) s.lowNote; }, [&s] (double v) { s.lowNote = (int) v; if (s.highNote < s.lowNote) s.highNote = s.lowNote; }, noteText));
+        b.ctls.push_back (num ("To", 0, 127, 1, [&s] { return (double) s.highNote; }, [&s] (double v) { s.highNote = (int) v; if (s.lowNote > s.highNote) s.lowNote = s.highNote; }, noteText));
+        auto iv = num ("Every", 1, 24, 1, [&s] { return (double) s.interval; }, [&s] (double v) { s.interval = (int) v; }, semis);
         iv.shown = [&s] { return s.noteMode == rk::NoteMode::interval; };
         b.ctls.push_back (iv);
-        auto nc = num ("Nombre", 1, 64, 1, [&s] { return (double) s.noteCount; }, [&s] (double v) { s.noteCount = (int) v; }, intText);
+        auto nc = num ("Count", 1, 64, 1, [&s] { return (double) s.noteCount; }, [&s] (double v) { s.noteCount = (int) v; }, intText);
         nc.shown = [&s] { return s.noteMode == rk::NoteMode::count; };
         b.ctls.push_back (nc);
-        b.ctls.push_back (num ("Couches", 1, 16, 1, [&s] { return (double) s.layers; }, [&s] (double v) { s.layers = (int) v; }, intText));
-        b.ctls.push_back (choice ("Répartition"_fr, { "linéaire"_fr, "douces", "fortes" }, [&s] { return juce::jmin (2, (int) s.curve); }, [&s] (int v) { s.curve = (rk::VelCurve) v; }));
+        b.ctls.push_back (num ("Layers", 1, 16, 1, [&s] { return (double) s.layers; }, [&s] (double v) { s.layers = (int) v; }, intText));
+        b.ctls.push_back (choice ("Curve", { "linear", "soft", "hard" }, [&s] { return juce::jmin (2, (int) s.curve); }, [&s] (int v) { s.curve = (rk::VelCurve) v; }));
         b.ctls.push_back (num ("Round robin", 1, 8, 1, [&s] { return (double) s.roundRobins; }, [&s] (double v) { s.roundRobins = (int) v; },
                                [] (double v) { return juce::String ((int) v) + ((int) v > 1 ? " prises" : " prise"); }));
         pg.banks.push_back (std::move (b));
         capturePages.push_back (std::move (pg));
     }
     {
-        Page pg { "durées"_fr, "plan", {} };
-        Bank b { "durées"_fr, {} };
-        b.ctls.push_back (choice ("Jeu", { "tenue", "one-shot" }, [&s] { return s.oneShot ? 1 : 0; }, [&s] (int v) { s.oneShot = v == 1; }));
-        b.ctls.push_back (num ("Tenue", 0.05, 30.0, 0.0, [&s] { return s.hold; }, [&s] (double v) { s.hold = v; }, ms, true));
-        b.ctls.push_back (num ("Relâche max"_fr, 0.0, 30.0, 0.05, [&s] { return s.releaseMax; }, [&s] (double v) { s.releaseMax = v; }, ms));
+        Page pg { "timing", "plan", {} };
+        Bank b { "timing", {} };
+        b.ctls.push_back (choice ("Play", { "hold", "one-shot" }, [&s] { return s.oneShot ? 1 : 0; }, [&s] (int v) { s.oneShot = v == 1; }));
+        b.ctls.push_back (num ("Hold", 0.05, 30.0, 0.0, [&s] { return s.hold; }, [&s] (double v) { s.hold = v; }, ms, true));
+        b.ctls.push_back (num ("Max release", 0.0, 30.0, 0.05, [&s] { return s.releaseMax; }, [&s] (double v) { s.releaseMax = v; }, ms));
         b.ctls.push_back (num ("Pause", 0.0, 5.0, 0.05, [&s] { return s.pause; }, [&s] (double v) { s.pause = v; }, ms));
         pg.banks.push_back (std::move (b));
         capturePages.push_back (std::move (pg));
     }
     {
-        Page pg { "boucles", "plan", {} };
-        Bank b { "boucles", {} };
+        Page pg { "loops", "plan", {} };
+        Bank b { "loops", {} };
         auto loopOn = [&s] { return s.loop && ! s.oneShot; };
-        b.ctls.push_back (choice ("Boucle", { "auto", "aucune" }, [&s] { return s.loop ? 0 : 1; }, [&s] (int v) { s.loop = v == 0; }));
-        auto a = num ("Chercher de", 0.05, 0.9, 0.01, [&s] { return s.loopSettings.searchStart; },
+        b.ctls.push_back (choice ("Loop", { "auto", "none" }, [&s] { return s.loop ? 0 : 1; }, [&s] (int v) { s.loop = v == 0; }));
+        auto a = num ("Search from", 0.05, 0.9, 0.01, [&s] { return s.loopSettings.searchStart; },
                       [&s] (double v) { s.loopSettings.searchStart = v; if (s.loopSettings.searchEnd < v + 0.05) s.loopSettings.searchEnd = v + 0.05; }, pct);
         a.shown = loopOn;
         b.ctls.push_back (a);
-        auto e = num ("Jusqu'à"_fr, 0.1, 1.0, 0.01, [&s] { return s.loopSettings.searchEnd; },
+        auto e = num ("Search to", 0.1, 1.0, 0.01, [&s] { return s.loopSettings.searchEnd; },
                       [&s] (double v) { s.loopSettings.searchEnd = v; if (s.loopSettings.searchStart > v - 0.05) s.loopSettings.searchStart = v - 0.05; }, pct);
         e.shown = loopOn;
         b.ctls.push_back (e);
-        auto l = num ("Longueur min", 0.01, 10.0, 0.0, [&s] { return s.loopSettings.minSeconds; }, [&s] (double v) { s.loopSettings.minSeconds = v; }, ms, true);
+        auto l = num ("Min length", 0.01, 10.0, 0.0, [&s] { return s.loopSettings.minSeconds; }, [&s] (double v) { s.loopSettings.minSeconds = v; }, ms, true);
         l.shown = loopOn;
         b.ctls.push_back (l);
-        auto f = num ("Fondu", 0.0, 1.0, 0.005, [&s] { return s.loopSettings.crossfadeSeconds; }, [&s] (double v) { s.loopSettings.crossfadeSeconds = v; }, ms);
+        auto f = num ("Crossfade", 0.0, 1.0, 0.005, [&s] { return s.loopSettings.crossfadeSeconds; }, [&s] (double v) { s.loopSettings.crossfadeSeconds = v; }, ms);
         f.shown = loopOn;
         b.ctls.push_back (f);
         pg.banks.push_back (std::move (b));
         capturePages.push_back (std::move (pg));
     }
     {
-        Page pg { "attaque", "plan", {} };
-        Bank b { "attaque", {} };
-        b.ctls.push_back (choice ("Calage", { "par note", "latence fixe" }, [&s] { return (int) s.align; }, [&s] (int v) { s.align = (rk::Align) v; }));
-        b.ctls.push_back (num ("Seuil", 3.0, 40.0, 1.0, [&s] { return s.thresholdDb; }, [&s] (double v) { s.thresholdDb = v; },
+        Page pg { "attack", "plan", {} };
+        Bank b { "attack", {} };
+        b.ctls.push_back (choice ("Align", { "per note", "fixed latency" }, [&s] { return (int) s.align; }, [&s] (int v) { s.align = (rk::Align) v; }));
+        b.ctls.push_back (num ("Threshold", 3.0, 40.0, 1.0, [&s] { return s.thresholdDb; }, [&s] (double v) { s.thresholdDb = v; },
                                [] (double v) { return "+" + juce::String ((int) v) + " db"; }));
-        b.ctls.push_back (num ("Marge avant", 0.0, 20.0, 0.5, [&s] { return s.preMs; }, [&s] (double v) { s.preMs = v; },
+        b.ctls.push_back (num ("Pre-roll", 0.0, 20.0, 0.5, [&s] { return s.preMs; }, [&s] (double v) { s.preMs = v; },
                                [] (double v) { return juce::String (v, 1) + " ms"; }));
         pg.banks.push_back (std::move (b));
         capturePages.push_back (std::move (pg));
     }
     {
-        Page pg { "niveau", "plan", {} };
-        Bank b { "niveau", {} };
-        b.ctls.push_back (choice ("Normalisation", { "instrument", "par sample", "aucune" }, [&s] { return (int) s.normalise; }, [&s] (int v) { s.normalise = (rk::Normalise) v; }));
-        auto t = num ("Cible", -24.0, 0.0, 0.1, [&s] { return s.normaliseDb; }, [&s] (double v) { s.normaliseDb = v; }, dbText);
+        Page pg { "level", "plan", {} };
+        Bank b { "level", {} };
+        b.ctls.push_back (choice ("Normalize", { "instrument", "per sample", "off" }, [&s] { return (int) s.normalise; }, [&s] (int v) { s.normalise = (rk::Normalise) v; }));
+        auto t = num ("Target", -24.0, 0.0, 0.1, [&s] { return s.normaliseDb; }, [&s] (double v) { s.normaliseDb = v; }, dbText);
         t.enabled = [&s, this] { return s.normalise != rk::Normalise::off && ! proc.isSampling(); };
         b.ctls.push_back (t);
-        b.ctls.push_back (choice ("Retirer le dc", { "oui", "non" }, [&s] { return s.removeDc ? 0 : 1; }, [&s] (int v) { s.removeDc = v == 0; }));
-        b.ctls.push_back (choice ("Accordage", { "recaler", "fin", "non" }, [&s] { return (int) s.tuning; }, [&s] (int v) { s.tuning = (rk::Tuning) v; }, true));
-        b.ctls.push_back (num ("Accord global", -100.0, 100.0, 1.0, [&s] { return s.tuneCents; }, [&s] (double v) { s.tuneCents = v; },
+        b.ctls.push_back (choice ("Remove DC", { "on", "off" }, [&s] { return s.removeDc ? 0 : 1; }, [&s] (int v) { s.removeDc = v == 0; }));
+        b.ctls.push_back (choice ("Tuning", { "snap", "fine", "off" }, [&s] { return (int) s.tuning; }, [&s] (int v) { s.tuning = (rk::Tuning) v; }, true));
+        b.ctls.push_back (num ("Master tune", -100.0, 100.0, 1.0, [&s] { return s.tuneCents; }, [&s] (double v) { s.tuneCents = v; },
                                [] (double v) { return (v > 0 ? "+" : "") + juce::String ((int) std::lround (v)) + " ct"; }, false, true));
         pg.banks.push_back (std::move (b));
         capturePages.push_back (std::move (pg));
     }
     {
-        Page pg { "transpo", "plan", {} };
-        Bank b { "transposition", {} };
-        b.ctls.push_back (choice ("Algorithme", { "hq formants", "classique hd", "durée fixe"_fr }, [&s] { return s.algo == rk::Algo::formant ? 0 : s.algo == rk::Algo::classic ? 1 : 2; },
+        Page pg { "transpose", "plan", {} };
+        Bank b { "transpose", {} };
+        b.ctls.push_back (choice ("Algorithm", { "hq formants", "classic hd", "fixed length" }, [&s] { return s.algo == rk::Algo::formant ? 0 : s.algo == rk::Algo::classic ? 1 : 2; },
                                   [&s] (int v) { s.algo = v == 0 ? rk::Algo::formant : v == 1 ? rk::Algo::classic : rk::Algo::fixedTime; }, true));
         auto f = num ("Formants", 0.0, 1.0, 0.01, [&s] { return s.formant; }, [&s] (double v) { s.formant = v; }, pct, false, true);
         f.enabled = [&s] { return s.algo != rk::Algo::classic; };
         b.ctls.push_back (f);
-        b.ctls.push_back (choice ("Placement", { "centré"_fr, "vers le haut", "vers le bas" }, [&s] { return (int) s.placement; }, [&s] (int v) { s.placement = (rk::Placement) v; }, true));
-        b.ctls.push_back (num ("Étendre"_fr, 0, 48, 1, [&s] { return (double) s.extend; }, [&s] (double v) { s.extend = (int) v; }, semis, false, true));
-        b.ctls.push_back (choice ("Touches", { "rendues hq", "en direct" }, [&s] { return s.renderKeys ? 0 : 1; }, [&s] (int v) { s.renderKeys = v == 0; }, true));
+        b.ctls.push_back (choice ("Placement", { "centred", "upward", "downward" }, [&s] { return (int) s.placement; }, [&s] (int v) { s.placement = (rk::Placement) v; }, true));
+        b.ctls.push_back (num ("Extend", 0, 48, 1, [&s] { return (double) s.extend; }, [&s] (double v) { s.extend = (int) v; }, semis, false, true));
+        b.ctls.push_back (choice ("Keys", { "hq render", "live" }, [&s] { return s.renderKeys ? 0 : 1; }, [&s] (int v) { s.renderKeys = v == 0; }, true));
         pg.banks.push_back (std::move (b));
         capturePages.push_back (std::move (pg));
     }
@@ -2040,24 +2532,24 @@ void Machine::buildResamplePages()
     auto& o = proc.resampleOptions;
     auto idle = [this] { return proc.player.resampleState() == Player::Resample::idle; };
     resamplePages.clear();
-    Page pg { "rééchantillonner"_fr, "resample", {} };
-    Bank b { "rééchantillonner"_fr, {} };
+    Page pg { "resample", "resample", {} };
+    Bank b { "resample", {} };
     auto keep = [this] (Ctl c, std::function<bool()> when)
     {
         c.enabled = std::move (when);
         c.changed = [this] { proc.settingsChanged(); };
         return c;
     };
-    b.ctls.push_back (keep (choiceCtl ("Longueur", { "1 mesure", "2 mesures", "4 mesures", "8 mesures", "libre" },
+    b.ctls.push_back (keep (choiceCtl ("Length", { "1 bar", "2 bars", "4 bars", "8 bars", "free" },
                                         [&o] { return o.length; }, [&o] (int v) { o.length = v; }), idle));
     b.ctls.back().tip = "Combien enregistrer : des mesures au tempo (la boucle tombe juste), ou libre jusqu'à ce que tu arrêtes (une minute au plus)."_fr;
-    b.ctls.push_back (keep (choiceCtl ("Départ"_fr, { "à la mesure"_fr, "tout de suite" }, [&o] { return o.synced ? 0 : 1; },
+    b.ctls.push_back (keep (choiceCtl ("Start", { "on the bar", "now" }, [&o] { return o.synced ? 0 : 1; },
                                         [&o] (int v) { o.synced = v == 0; }), idle));
     b.ctls.back().tip = "À LA MESURE : quand le transport joue, l'enregistrement part sur la mesure suivante (sinon, tout de suite)."_fr;
     b.ctls.push_back (keep (numberCtl ("Note", 0.0, 127.0, 1.0, [&o] { return (double) o.root; }, [&o] (double v) { o.root = (int) v; },
                                        [] (double v) { return lower (rk::noteName ((int) v)); }), [] { return true; }));
     b.ctls.back().tip = "La touche qui rejoue le son tel qu'il a été enregistré (les autres le transposent)."_fr;
-    b.ctls.push_back (keep (choiceCtl ("Effets", { "à zéro"_fr, "gardés"_fr }, [&o] { return o.resetFx ? 0 : 1; },
+    b.ctls.push_back (keep (choiceCtl ("Effects", { "reset", "kept" }, [&o] { return o.resetFx ? 0 : 1; },
                                         [&o] (int v) { o.resetFx = v == 0; }), [] { return true; }));
     b.ctls.back().tip = "À ZÉRO : une fois injecté, le filtre, le drive, les effets et WTF?! sont coupés, pour ne pas traiter le son deux fois."_fr;
     pg.banks.push_back (std::move (b));
@@ -2082,19 +2574,19 @@ void Machine::buildCyclePages()
     b.ctls.push_back (keep (numberCtl ("Note", 0.0, 127.0, 1.0, [&o] { return (double) o.note; }, [&o] (double v) { o.note = (int) v; },
                                        [] (double v) { return lower (rk::noteName ((int) v)); })));
     b.ctls.back().tip = "La note tenue à chaque prise. Grave, c'est mieux : plus de points par période (C1 par défaut)."_fr;
-    b.ctls.push_back (keep (choiceCtl ("Prises", { "8", "16", "32", "64" }, [&o] { return o.count; }, [&o] (int v) { o.count = v; })));
+    b.ctls.push_back (keep (choiceCtl ("Takes", { "8", "16", "32", "64" }, [&o] { return o.count; }, [&o] (int v) { o.count = v; })));
     b.ctls.back().tip = "Combien de cycles dans la banque : un par prise."_fr;
-    b.ctls.push_back (keep (choiceCtl ("Ce qui bouge", { "un cc", "la vélocité"_fr, "à la main"_fr }, [&o] { return o.vary; }, [&o] (int v) { o.vary = v; })));
+    b.ctls.push_back (keep (choiceCtl ("Sweep", { "cc", "velocity", "by hand" }, [&o] { return o.vary; }, [&o] (int v) { o.vary = v; })));
     b.ctls.back().tip = "D'une prise à l'autre : un CC balayé (le filtre, une forme d'onde...), la vélocité de 1 à 127, ou rien, et tu tournes un bouton du synthé pendant la capture."_fr;
     auto ccOn = [this] { return ! proc.isSampling() && proc.cycleOptions.vary == 0; };
-    b.ctls.push_back (keep (numberCtl ("Cc", 0.0, 127.0, 1.0, [&o] { return (double) o.cc; }, [&o] (double v) { o.cc = (int) v; },
+    b.ctls.push_back (keep (numberCtl ("CC", 0.0, 127.0, 1.0, [&o] { return (double) o.cc; }, [&o] (double v) { o.cc = (int) v; },
                                        [] (double v) { return juce::String ((int) v); }), ccOn));
     b.ctls.back().tip = "Le numéro du CC envoyé avant chaque prise (74 : souvent la brillance, le filtre)."_fr;
-    b.ctls.push_back (keep (numberCtl ("De", 0.0, 127.0, 1.0, [&o] { return (double) o.ccFrom; }, [&o] (double v) { o.ccFrom = (int) v; },
+    b.ctls.push_back (keep (numberCtl ("From", 0.0, 127.0, 1.0, [&o] { return (double) o.ccFrom; }, [&o] (double v) { o.ccFrom = (int) v; },
                                        [] (double v) { return juce::String ((int) v); }), ccOn));
-    b.ctls.push_back (keep (numberCtl ("À"_fr, 0.0, 127.0, 1.0, [&o] { return (double) o.ccTo; }, [&o] (double v) { o.ccTo = (int) v; },
+    b.ctls.push_back (keep (numberCtl ("To", 0.0, 127.0, 1.0, [&o] { return (double) o.ccTo; }, [&o] (double v) { o.ccTo = (int) v; },
                                        [] (double v) { return juce::String ((int) v); }), ccOn));
-    b.ctls.push_back (keep (numberCtl ("Tenue", 0.15, 4.0, 0.05, [&o] { return o.hold; }, [&o] (double v) { o.hold = v; },
+    b.ctls.push_back (keep (numberCtl ("Hold", 0.15, 4.0, 0.05, [&o] { return o.hold; }, [&o] (double v) { o.hold = v; },
                                        [] (double v) { return seconds (v); }, true)));
     b.ctls.back().tip = "Combien de temps chaque note est tenue : le cycle est pris aux deux tiers, une fois l'attaque passée."_fr;
     b.ctls.push_back (keep (numberCtl ("Pause", 0.05, 4.0, 0.05, [&o] { return o.settle; }, [&o] (double v) { o.settle = v; },
@@ -2176,7 +2668,7 @@ void Machine::showPage (int p)
         proc.settingsFile().setValue ("page" + juce::String (mode), p);
         proc.settingsFile().saveIfNeeded();
     }
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < numPageKeys; ++i)
     {
         auto& k = pageKeys[i];
         const bool exists = i < (int) pgs.size();
@@ -2258,6 +2750,16 @@ void Machine::paint (juce::Graphics& g)
     }
     ledMeter (g, inMeter.toFloat(), proc.isSampling() || proc.options.monitor > 0 ? proc.inputLevel() : 0.0f, "in");
     ledMeter (g, outMeter.toFloat(), proc.player.outLevel.load(), "out");
+    // the lines between the groups of the row of controls, engraved in the desk
+    for (int i = 1; i < 8; ++i)
+        if (encoders[i] != nullptr && encoders[i]->getCtl() != nullptr && encoders[i]->getCtl()->sepBefore)
+        {
+            const float x = (float) encoders[i]->getX(), y0 = (float) encArea.getY() + 16.0f, y1 = (float) encArea.getBottom() - 12.0f;
+            g.setColour (juce::Colours::black.withAlpha (0.28f));
+            g.fillRect (x - 1.0f, y0, 1.0f, y1 - y0);
+            g.setColour (juce::Colours::white.withAlpha (0.22f));
+            g.fillRect (x, y0, 1.0f, y1 - y0);
+        }
     // the name (its band lit while a capture runs)
     auto l = logo.toFloat();
     badge (g, l.removeFromLeft (138.0f).withSizeKeepingCentre (138.0f, 40.0f), col::ink, col::body,
@@ -2353,8 +2855,10 @@ void Machine::resized()
     deckArea = body.expanded (0, 0).withTop (body.getY()).withBottom (getHeight() - 8);
     body = body.reduced (12, 0).withTrimmedTop (12).withTrimmedBottom (4);
     keysArea = body.removeFromTop (44);
-    const int kw = (keysArea.getWidth() - 7 * 8) / 8;
-    for (int i = 0; i < 8; ++i)
+    // the page keys: eight across, or as many as the mode has (SYNTHÉ and SAMPLER: ten)
+    const int nk = juce::jlimit (8, numPageKeys, (int) pagesShown().size());
+    const int kw = (keysArea.getWidth() - (nk - 1) * 8) / nk;
+    for (int i = 0; i < numPageKeys; ++i)
         pageKeys[i].setBounds (keysArea.getX() + i * (kw + 8), keysArea.getY(), kw, keysArea.getHeight());
     body.removeFromTop (8);
     encArea = body.removeFromTop (176);

@@ -5,7 +5,7 @@ if(APPLE)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Universal binary")
 endif()
 
-project(REPLIKANT VERSION 0.3.2 LANGUAGES C CXX)
+project(REPLIKANT VERSION 0.3.3 LANGUAGES C CXX)
 
 # GitHub repository whose releases the plug-in checks for updates (public releases).
 set(RK_UPDATE_REPO "distortedimages-code/REPLIKANT" CACHE STRING "owner/repo checked for updates (empty = no update check)")
@@ -49,7 +49,9 @@ add_library(rk_core STATIC
     Source/dsp/Modulators.cpp
     Source/dsp/Space.cpp
     Source/dsp/Effects.cpp
-    Source/dsp/Cycles.cpp)
+    Source/dsp/Cycles.cpp
+    Source/dsp/Polyphase.cpp
+    Source/dsp/Orbite.cpp)
 target_compile_features(rk_core PUBLIC cxx_std_17)
 # Signalsmith Stretch and Linear (MIT), vendored in ThirdParty
 target_include_directories(rk_core PUBLIC ThirdParty)

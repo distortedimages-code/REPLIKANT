@@ -27,7 +27,8 @@ struct Instrument
     std::array<std::vector<int>, 128> byKey;  // samples whose zone holds the key
     juce::File folder;                        // where it is saved (empty = not yet)
     // per recording, the same an octave, two and three lower in rate (a voice pitched far up reads the nearest)
-    std::vector<std::array<rk::Channels, 3>> octaves;
+    static constexpr int octaveCopies = 8;          // down to 1/256 of the rate: the tuning dial's +96 semitones read clean
+    std::vector<std::array<rk::Channels, octaveCopies>> octaves;
     rk::NoiseFloor noise;
     juce::var sound;                          // the player's sound kept with it (settings, routes, scenes), if any
     std::shared_ptr<const dsp::CycleBank> cycles;   // its cycles (CAPTURE CYCLES), for the SYNTHÉ's oscillators

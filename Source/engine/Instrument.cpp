@@ -84,8 +84,8 @@ void Instrument::prepareForPlaying()
         for (size_t i = 0; i < samples.size(); ++i)
         {
             octaves[i][0] = rk::halfRate (samples[i].audio);
-            octaves[i][1] = rk::halfRate (octaves[i][0]);
-            octaves[i][2] = rk::halfRate (octaves[i][1]);
+            for (int k = 1; k < octaveCopies; ++k)
+                octaves[i][(size_t) k] = rk::halfRate (octaves[i][(size_t) k - 1]);
         }
     }
     for (auto* list : { &samples, &keys })

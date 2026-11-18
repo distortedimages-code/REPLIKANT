@@ -132,7 +132,8 @@ namespace te
         } packDrag { *this };
 
         std::unique_ptr<juce::Component> screen;
-        Key pageKeys[8];
+        static constexpr int numPageKeys = 10;
+        Key pageKeys[numPageKeys];
         std::unique_ptr<Encoder> encoders[8];
         std::unique_ptr<juce::Component> keyboard, modScenes, wtfPanel, captureStrip;
         juce::Rectangle<int> screenArea, keysArea, encArea, bottomArea, deckArea, inMeter, outMeter;

@@ -1211,6 +1211,279 @@ static void testGuard()
     CHECK (clean && after > 0.1f, "guard: clean %d, rescued %d, then playing %.2f", (int) clean, p.rescues.load(), after);
 }
 
+//==============================================================================
+// The reading engine, measured as its design note asks: a slow pitch sweep through its phases and cutoffs (no level
+// step), an impulse (linear phase: the ringing as long before as after), the feedback PM (bounded)
+static void testReadingEngine()
+{
+    // a 2 kHz sine bent slowly up a fifth: speed 1 to 1.5, through the kernels' phases and cutoff rows
+    {
+        auto ins = instrumentOf (sine (2000.0, 3.0));
+        Player p;
+        p.set (snd::engine, (float) snd::sampler);
+        plain (p);
+        p.setInstrument (ins.get());
+        p.set (snd::bend, 7.0f);
+        std::vector<float> out;
+        juce::AudioBuffer<float> buf (2, 64);
+        const int total = (int) (2.0 * sr);
+        for (int pos = 0; pos < total; pos += 64)
+        {
+            buf.clear();
+            juce::MidiBuffer midi;
+            if (pos == 0)
+                midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 127), 0);
+            const double t = juce::jlimit (0.0, 1.0, ((double) pos / sr - 0.2) / 1.6);
+            midi.addEvent (juce::MidiMessage::pitchWheel (1, 8192 + (int) std::lround (t * 8191.0)), 0);
+            p.render (buf, midi, {}, nullptr, 0, false);
+            for (int i = 0; i < 64; ++i)
+                out.push_back (buf.getSample (0, i));
+        }
+        double lo = 1.0e9, hi = -1.0e9;
+        for (size_t w = (size_t) (0.25 * sr); w + 960 < (size_t) (1.75 * sr); w += 480)
+        {
+            const double l = db (rms (out, w, w + 960));
+            lo = std::min (lo, l);
+            hi = std::max (hi, l);
+        }
+        CHECK (hi - lo < 0.05, "a slow bend up a fifth: the level moves %.3f dB", hi - lo);
+        std::printf ("  2 kHz bent up a fifth: level within %.4f dB\n", hi - lo);
+    }
+    // an impulse played a minor third up: the kernel is symmetric, so is the ringing round the peak
+    {
+        std::vector<float> imp (48000, 0.0f);
+        imp[20000] = 1.0f;
+        auto ins = instrumentOf (imp);
+        Player p;
+        p.set (snd::engine, (float) snd::sampler);
+        plain (p);
+        p.setInstrument (ins.get());
+        auto out = play (p, 0.6, { { 0.0, 63, 127 } });
+        size_t peak = 0;
+        for (size_t i = 0; i < out.size(); ++i)
+            if (std::abs (out[i]) > std::abs (out[peak]))
+                peak = i;
+        // where its energy is centred, against its peak found between samples: together for a symmetric response
+        double e = 0.0, m = 0.0;
+        for (size_t i = peak - 160; i <= peak + 160; ++i)
+        {
+            e += (double) out[i] * out[i];
+            m += (double) out[i] * out[i] * (double) i;
+        }
+        const double y0 = out[peak - 1], y1 = out[peak], y2 = out[peak + 1];
+        const double top = (double) peak + 0.5 * (y0 - y2) / (y0 - 2.0 * y1 + y2);
+        const double shift = m / e - top;
+        CHECK (std::abs (shift) < 0.25, "an impulse: its energy centred %.3f samples from its peak (linear phase)", shift);
+        std::printf ("  impulse a minor third up: energy centred %.3f samples from the peak\n", shift);
+    }
+    // the tuning dial at its ends: +96 semitones (256x, the eighth octave copy) and -48, the tone where it should be
+    for (auto [hz, tune] : { std::pair<double, float> { 40.0, 96.0f }, { 2000.0, -48.0f }, { 300.0, 60.5f } })
+    {
+        // (looped on whole periods: at 256x a recording runs out in no time)
+        const int period = (int) std::lround (sr / hz);
+        auto ins = instrumentOf (sine (hz, 2.0), period, period * (int) (1.8 * hz));
+        Player p;
+        p.set (snd::engine, (float) snd::sampler);
+        plain (p);
+        p.setInstrument (ins.get());
+        p.set (snd::tune, tune);
+        auto out = play (p, 0.8, { { 0.0, 60, 127 } });
+        const double want = hz * std::exp2 ((double) tune / 12.0);
+        const double level = db (toneLevel (out, 4800, 32768, want) / 0.5);
+        const double off = db (toneLevel (out, 4800, 32768, want * 1.26) / 0.5);
+        CHECK (std::abs (level) < 0.5 && off < -60.0, "tune %+.1f: %.0f Hz at %.2f dB (a third off: %.1f dB)", tune, want, level, off);
+        std::printf ("  tuning dial %+.1f st: %.0f Hz -> %.0f Hz at %.2f dB\n", tune, hz, want, level);
+    }
+    // RETOUR at its deepest: chaos if it likes, but bounded and finite
+    {
+        auto ins = instrumentOf (sine (220.0, 2.0, 0.8f), 0, 96000 - 218);
+        Player p;
+        p.set (snd::engine, (float) snd::sampler);
+        plain (p);
+        p.setInstrument (ins.get());
+        p.set (snd::pmSource, 4.0f);
+        p.set (snd::pmIndex, 256.0f);
+        auto out = play (p, 1.0, { { 0.0, 60, 127 } });
+        float peak = 0.0f;
+        bool finite = true;
+        for (float x : out)
+        {
+            finite = finite && std::isfinite (x);
+            peak = std::max (peak, std::abs (x));
+        }
+        CHECK (finite && peak < 1.5f, "RETOUR at 256 samples: peak %.2f", peak);
+        CHECK (rms (out, 4800, out.size()) > 0.05, "RETOUR still sounds: %.3f", rms (out, 4800, out.size()));
+    }
+}
+
+//==============================================================================
+// ORBITE: on the note (harmonic while synced), clean far up, its timbre turning with ORBITE while the pitch stays,
+// every algorithm bounded; in the SAMPLER's mix and as its phase modulator
+static void testOrbite()
+{
+    auto orbiteOnly = [] (Player& p)
+    {
+        p.set (snd::engine, (float) snd::synth);
+        plain (p);
+        p.set (snd::fModel, 0.0f);
+        p.set (snd::oaLevel, 0.0f);
+        p.set (snd::obLevel, 0.0f);
+        p.set (snd::orOn, 1.0f);
+        p.set (snd::mxOrbite, 1.0f);
+        p.set (snd::orOrbit, 0.0f);
+    };
+    // how much of a sound sits on the harmonics of f0 (the rest: aliases, or inharmonic partials)
+    auto offHarmonic = [] (const std::vector<float>& x, size_t from, double f0, size_t n = 16384)
+    {
+        // (its DC aside: a ring modulation has some, the output's high pass takes it)
+        double mean = 0.0;
+        for (size_t i = 0; i < n; ++i)
+            mean += x[from + i];
+        mean /= (double) n;
+        double total = 0.0, w = 0.0;
+        for (size_t i = 0; i < n; ++i)
+        {
+            const double h = 0.5 - 0.5 * std::cos (2.0 * pi * (double) i / (double) n);
+            total += h * ((double) x[from + i] - mean) * ((double) x[from + i] - mean);
+            w += h;
+        }
+        total /= w;
+        double harm = 0.0;
+        for (int k = 1; k * f0 < sr * 0.5 - 50.0; ++k)
+        {
+            const double a = toneLevel (x, from, n, k * f0);
+            harm += 0.5 * a * a;
+        }
+        return db (std::sqrt (std::max (1.0e-30, total - harm) / std::max (1.0e-30, total)));
+    };
+    {
+        Player p;
+        orbiteOnly (p);
+        auto out = play (p, 0.6, { { 0.0, 57, 127 } });
+        const double off = offHarmonic (out, 4800, rk::noteHz (57));
+        CHECK (off < -45.0 && rms (out, 4800, 20000) > 0.02, "ORBITE on A2: off the harmonics %.1f dB (rms %.3f)", off, rms (out, 4800, 20000));
+        std::printf ("  ORBITE A2, synced: off its harmonics %.1f dB\n", off);
+    }
+    // the loudest alias heard (below 18 kHz) of a sound on f0, against its loudest harmonic: partials up to
+    // four times the rate fold back at |k f0 - j sr|
+    auto aliasDb = [] (const std::vector<float>& x, size_t from, double f0)
+    {
+        double top = 0.0, worst = 0.0;
+        for (int k = 1; k * f0 < sr * 0.5; ++k)
+            top = std::max (top, toneLevel (x, from, 16384, k * f0));
+        for (int k = 1; k * f0 < sr * 2.0; ++k)
+        {
+            const double f = k * f0, a = std::abs (f - std::round (f / sr) * sr);
+            const double nearest = std::round (a / f0) * f0;
+            if (f < sr * 0.5 || a > 18000.0 || std::abs (a - nearest) < 40.0)
+                continue;
+            worst = std::max (worst, toneLevel (x, from, 16384, a));
+        }
+        return db (worst / std::max (1.0e-12, top));
+    };
+    {
+        Player p;
+        orbiteOnly (p);
+        p.set (snd::orShape, 1.5f);
+        p.set (snd::s1Wave, 2.0f);
+        p.set (snd::s1Ratio, 2.7f);
+        p.set (snd::s1Ring, 1.0f);
+        auto out = play (p, 0.6, { { 0.0, 96, 127 } });
+        const double al = aliasDb (out, 4800, rk::noteHz (96));
+        CHECK (al < -60.0, "ORBITE at C7 (square-ish carrier, square satellite synced 2.7x): loudest alias %.1f dB", al);
+        std::printf ("  ORBITE C7, square x square synced: loudest alias heard %.1f dB\n", al);
+    }
+    {
+        Player p;
+        orbiteOnly (p);
+        p.set (snd::s1Sync, 0.0f);
+        p.set (snd::s1Ratio, 2.37f);
+        p.set (snd::s1Ring, 1.0f);
+        auto out = play (p, 0.6, { { 0.0, 57, 127 } });
+        const double off = offHarmonic (out, 4800, rk::noteHz (57));
+        CHECK (off > -20.0, "ORBITE unsynced at 2.37x: inharmonic (%.1f dB off the harmonics)", off);
+    }
+    {
+        // ORBITE turning: the harmonics move, the pitch doesn't (480 Hz: a period of exactly 100 samples, so the
+        // sound must still match itself a period later, and best there)
+        Player p;
+        orbiteOnly (p);
+        p.set (snd::s2Ring, 1.0f);
+        p.set (snd::orOrbit, 0.25f);
+        p.set (snd::fine, (float) (1200.0 * std::log2 (480.0 / rk::noteHz (70))));
+        auto out = play (p, 2.4, { { 0.0, 70, 127 } });
+        double moved = 0.0;
+        for (int k = 2; k <= 8; ++k)
+            moved = std::max (moved, std::abs (db (toneLevel (out, 4800, 8192, k * 480.0)) - db (toneLevel (out, 100800, 8192, k * 480.0))));
+        auto match = [&out] (int lag)
+        {
+            double xy = 0.0, xx = 0.0, yy = 0.0;
+            for (size_t i = 52800; i < 52800 + 9600; ++i)
+            {
+                xy += (double) out[i] * out[i + (size_t) lag];
+                xx += (double) out[i] * out[i];
+                yy += (double) out[i + (size_t) lag] * out[i + (size_t) lag];
+            }
+            return xy / std::sqrt (xx * yy + 1.0e-30);
+        };
+        const double at = match (100);
+        CHECK (moved > 1.0 && at > 0.98 && at > match (99) && at > match (101),
+               "ORBITE at 0.25 Hz: a harmonic moved %.1f dB, the sound a period later %.4f alike", moved, at);
+        std::printf ("  ORBITE turning: half a turn moves a harmonic %.1f dB, the period stays (%.4f alike)\n", moved, at);
+    }
+    for (int algo = 0; algo < 4; ++algo)
+    {
+        Player p;
+        orbiteOnly (p);
+        p.set (snd::orAlgo, (float) algo);
+        p.set (snd::s1Ring, 1.0f);
+        p.set (snd::s2Ring, 1.0f);
+        p.set (snd::orOrbit, 5.0f);
+        auto out = play (p, 0.5, { { 0.0, 48, 127 }, { 0.0, 55, 127 }, { 0.0, 64, 127 } });
+        float peak = 0.0f;
+        bool finite = true;
+        for (float x : out)
+        {
+            finite = finite && std::isfinite (x);
+            peak = std::max (peak, std::abs (x));
+        }
+        CHECK (finite && peak < 1.5f && rms (out, 4800, out.size()) > 0.01, "ORBITE algo %d: peak %.2f, rms %.3f", algo, peak, rms (out, 4800, out.size()));
+    }
+    // the SAMPLER's mix: the sample at 0, ORBITE alone; and ORBITE pushing the reading by up to INDICE samples
+    {
+        const int len = 96000;
+        std::vector<float> ramp ((size_t) len);
+        for (int i = 0; i < len; ++i)
+            ramp[(size_t) i] = (float) i / (float) len;
+        auto ins = instrumentOf (ramp);
+        Player p;
+        p.set (snd::engine, (float) snd::sampler);
+        plain (p);
+        p.setInstrument (ins.get());
+        p.set (snd::orOn, 1.0f);
+        p.set (snd::mxSample, 0.0f);
+        p.set (snd::orOrbit, 0.0f);
+        auto out = play (p, 0.6, { { 0.0, 60, 127 } });
+        CHECK (rms (out, 2000, out.size()) > 0.02 && offHarmonic (out, 2000, rk::noteHz (60)) < -30.0,
+               "SAMPLER: ORBITE alone in the mix (rms %.3f)", rms (out, 2000, out.size()));
+        Player q;
+        q.set (snd::engine, (float) snd::sampler);
+        plain (q);
+        q.setInstrument (ins.get());
+        q.set (snd::pmSource, 5.0f);
+        q.set (snd::pmIndex, 80.0f);
+        out = play (q, 0.5, { { 0.0, 60, 127 } });
+        double lo = 0.0, hi = 0.0;
+        for (int i = 2000; i < 20000; ++i)
+        {
+            const double off = (double) out[(size_t) i] * len - (double) i;
+            lo = std::min (lo, off);
+            hi = std::max (hi, off);
+        }
+        CHECK (hi > 20.0 && lo < -20.0 && hi < 81.0 && lo > -81.0, "ORBITE as PM source: the reading moved %.1f .. %.1f samples", lo, hi);
+    }
+}
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI gui;
@@ -1247,6 +1520,8 @@ int main()
     testAntiAliasing();
     testAliasingScale();
     testPhaseModulation();
+    testReadingEngine();
+    testOrbite();
     testReverseElasticLoops();
     testFarPitch();
     testScenes();

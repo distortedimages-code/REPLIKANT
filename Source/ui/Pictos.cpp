@@ -209,6 +209,26 @@ void picto (juce::Graphics& g, Picto kind, juce::Rectangle<float> area, juce::Co
             break;
         }
 
+        case Picto::orbit:
+        {
+            // the carrier, its round orbit, two satellites on it (one each side)
+            d.circle (0.5f, 0.5f, 0.13f, true);
+            d.circle (0.5f, 0.5f, 0.36f, false, 0.55f);
+            d.circle (0.81f, 0.32f, 0.08f, true);
+            d.circle (0.19f, 0.68f, 0.08f, true);
+            break;
+        }
+
+        case Picto::mixer:
+            // three faders, their caps at different heights
+            for (int i = 0; i < 3; ++i)
+            {
+                const float x = 0.22f + 0.28f * (float) i, y = i == 0 ? 0.36f : (i == 1 ? 0.62f : 0.45f);
+                d.line (x, 0.12f, x, 0.88f, 0.5f);
+                d.rect (x - 0.09f, y - 0.06f, x + 0.09f, y + 0.06f, 0.03f, true);
+            }
+            break;
+
         case Picto::sliders:
             d.line (0.1f, 0.25f, 0.9f, 0.25f, 0.5f);
             d.line (0.1f, 0.5f, 0.9f, 0.5f, 0.5f);

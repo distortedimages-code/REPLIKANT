@@ -93,16 +93,27 @@ int main (int argc, char** argv)
     proc.player.setRoute (0, snd::cutoff, 0.2f);
     for (int n : { 48, 55, 63 })
         proc.audition (n, 100, true);
-    const char* synthShots[] = { "1-synthe-osc-a.png", "2-synthe-osc-b.png", "3-synthe-voix.png", "4-synthe-filtre.png", "5-synthe-ampli.png",
-                                 "6-synthe-fx.png", "7-synthe-mods.png", "8-synthe-reglages.png" };
-    for (int pg = 0; pg < 8; ++pg)
+    const char* synthShots[] = { "1-synthe-osc-a.png", "2-synthe-osc-b.png", "27-synthe-orbite.png", "28-synthe-mixer.png", "3-synthe-voix.png",
+                                 "4-synthe-filtre.png", "5-synthe-ampli.png", "6-synthe-fx.png", "7-synthe-mods.png", "8-synthe-reglages.png" };
+    for (int pg = 0; pg < 10; ++pg)
     {
+        set (snd::orOn, pg == 2 || pg == 3 ? 1.0f : 0.0f);      // ORBITE on for its pages
         view->showPage (pg);
         run (60);
         shoot (synthShots[pg]);
     }
+    // ORBITE's satellites, in CASCADE
+    set (snd::orOn, 1.0f);
+    set (snd::orAlgo, 1.0f);
+    view->showPage (2);
+    view->showBank (1);
+    run (40);
+    shoot ("29-synthe-orbite-sat1.png");
+    set (snd::orAlgo, 0.0f);
+    set (snd::orOn, 0.0f);
+    view->showBank (0);
     // the filter's other banks and models: the drive on tape, the MS-20 high-pass
-    view->showPage (3);
+    view->showPage (5);
     set (snd::dModel, 3.0f);
     set (snd::dAmt, 0.5f);
     view->showBank (2);
@@ -200,9 +211,11 @@ int main (int argc, char** argv)
     set (snd::loopStart, 0.2f);
     for (int n : { 48, 55 })
         proc.audition (n, 100, true);
-    const char* samplerShots[] = { "11-sampler-lecture.png", "12-sampler-boucle.png", "13-sampler-hauteur.png", "14-sampler-filtre.png" };
-    for (int pg = 0; pg < 4; ++pg)
+    const char* samplerShots[] = { "11-sampler-lecture.png", "12-sampler-boucle.png", "13-sampler-hauteur.png", "30-sampler-orbite.png",
+                                   "31-sampler-mixer.png", "14-sampler-filtre.png" };
+    for (int pg = 0; pg < 6; ++pg)
     {
+        set (snd::orOn, pg == 4 ? 1.0f : 0.0f);
         view->showPage (pg);
         run (60);
         shoot (samplerShots[pg]);
@@ -213,7 +226,7 @@ int main (int argc, char** argv)
     proc.player.setSceneLock (1, snd::cutoff, 6000.0f);
     set (snd::xfade, 0.35f);
     set (snd::wtf, 0.3f);
-    view->showPage (3);
+    view->showPage (5);
     run (60);
     shoot ("15-sampler-filtre-wtf.png");
     for (int n : { 48, 55 })

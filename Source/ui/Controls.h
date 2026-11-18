@@ -34,6 +34,21 @@ namespace te
         int steps = 0;                                   // > 1: that many values (a choice, a whole number)
         bool bipolar = false;
         bool toggle = false;                             // on or off: drawn as a switch, not a knob
+        // how it looks on the desk (chosen from what it is by dress(); a page can choose another):
+        //   knob     a knob with its printed scale (ticks, a few values written round it), its value in a small LCD
+        //   toggle   a bat-handle switch, ON above and OFF below, a lamp by the side it's on
+        //   twoWay   the same switch for two named positions (the first above)
+        //   buttons  a push button per position (a few, short names), a lamp above the one chosen
+        //   ledList  the positions written one under the other, a lamp by the one chosen
+        //   display  an orange digital display, arrows each side (a click in the middle: the list)
+        enum class Look { knob, toggle, twoWay, buttons, ledList, display };
+        Look look = Look::knob;
+        juce::StringArray options;                       // its positions' names (a choice)
+        struct Mark { float at; juce::String label; };   // a value printed round a knob, where it sits (0..1)
+        std::vector<Mark> marks;
+        int ticks = 0;                                   // the knob's graduations, evenly spread (0: none)
+        bool sepBefore = false;                          // a line before it on the desk (a new group)
+        float quantum = 0.0f;                            // > 0: kept on whole multiples of it (in its own units)
         std::function<void()> begin, end;                // the gesture (a host records automation between them)
         std::function<void()> changed;                   // after it was set
         juce::String tip;
@@ -41,6 +56,12 @@ namespace te
         bool isShown() const             { return ! shown || shown(); }
         bool isEnabled() const           { return ! enabled || enabled(); }
     };
+
+    // its look, its positions, its scale, from what it is
+    void dress (Ctl&);
+    // a look chosen by the page; a line before it
+    inline Ctl as (Ctl c, Ctl::Look l)           { c.look = l; return c; }
+    inline Ctl sep (Ctl c)                         { c.sepBefore = true; return c; }
 
     // a setting of the sound
     Ctl soundCtl (ReplikantProcessor&, int id, const char* label = nullptr, std::function<bool()> shown = nullptr);
@@ -77,6 +98,12 @@ namespace te
         float shownNorm() const;
         void nudge (float deltaNorm, bool fine);
         void setFrom (float norm);
+
+        // where its positions were drawn (a click picks one); the display's arrows and middle
+        std::vector<juce::Rectangle<float>> hits;
+        juce::Rectangle<float> prevHit, nextHit, menuHit;
+        void pick (int option);
+        void paintScale (juce::Graphics&, juce::Point<float> c, float radius, bool on) const;
 
         const int index;
         Arming& arm;

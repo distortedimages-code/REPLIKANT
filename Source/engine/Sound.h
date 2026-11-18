@@ -55,6 +55,15 @@ namespace snd
         // WTF?! (after IMPAKT's): the sound pulled away from itself, a new draw every eighth note (LIVE) or a loop
         // of eight draws coming back (LOOP); at 0, the sound as it is
         wtf, wtfMode,
+        // (0.3.2) ORBITE (dsp/Orbite.h): a carrier and two satellites synced to it and ringing it, wired by an
+        // algorithm, satellite 2's restart circling; and the MIXEUR before the filter: the sample's level and
+        // ORBITE's (the oscillators, the sub and the noise keep theirs)
+        orOn, orAlgo, orShape, orSym, orOct, orSemi, orOrbit, orTrack,
+        s1Wave, s1Ratio, s1Sym, s1Ring, s1Sync,
+        s2Wave, s2Ratio, s2Sym, s2Ring, s2Sync, s2Phase,
+        mxSample, mxOrbite,
+        // SAMPLER: the tuning dial, -96..+96 semitones, continuous (the reading engine's speed: up to 256x either way)
+        tune,
         count
     };
 

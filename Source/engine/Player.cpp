@@ -1,5 +1,6 @@
 #include "Player.h"
 #include "../core/Sinc.h"
+#include "../dsp/Polyphase.h"
 
 #include <cmath>
 #include <limits>
@@ -42,17 +43,43 @@ struct Player::Chunk
 
 namespace
 {
-    // a gentle kernel for the middle of ALIASING (the slopes of the old samplers' interpolators)
-    const rk::SincKernel& shortKernel()
+    // ORBITE over a chunk: its settings, and its frequencies for a note (semitones, as played)
+    struct OrbitePlan
     {
-        static const rk::SincKernel k (6, 512, 3.0);
-        return k;
+        dsp::OrbiteSettings s;
+        double incC = 0.0, inc1 = 0.0, inc2 = 0.0, orbitInc = 0.0;
+    };
+    OrbitePlan orbitePlan (const float* v, double played, double sr)
+    {
+        OrbitePlan p;
+        p.s.algo = (int) v[snd::orAlgo];
+        p.s.shape = v[snd::orShape];
+        p.s.sym = v[snd::orSym];
+        p.s.wave[0] = (int) v[snd::s1Wave];
+        p.s.wave[1] = (int) v[snd::s2Wave];
+        p.s.symS[0] = v[snd::s1Sym];
+        p.s.symS[1] = v[snd::s2Sym];
+        p.s.ring[0] = v[snd::s1Ring];
+        p.s.ring[1] = v[snd::s2Ring];
+        p.s.sync[0] = v[snd::s1Sync] > 0.5f;
+        p.s.sync[1] = v[snd::s2Sync] > 0.5f;
+        p.s.phase2 = v[snd::s2Phase];
+        const double hz = rk::noteHz (played + 12.0 * (double) v[snd::orOct] + (double) v[snd::orSemi]);
+        // SUIVI: the satellites at their ratio of the carrier, or of C3 whatever the key (fixed, like formants)
+        const double ref = v[snd::orTrack] > 0.5f ? hz : rk::noteHz (60.0 + 12.0 * (double) v[snd::orOct] + (double) v[snd::orSemi]);
+        p.incC = std::min (0.45, hz / sr);
+        p.inc1 = std::min (0.45, ref * (double) v[snd::s1Ratio] / sr);
+        p.inc2 = std::min (0.45, ref * (double) v[snd::s2Ratio] / sr);
+        p.orbitInc = (double) v[snd::orOrbit] / sr;
+        return p;
     }
+
     constexpr int spliceLength = 144;     // 3 ms at 48 kHz: a splice smoothed
 }
 
 Player::Player()
 {
+    dsp::Polyphase::prepareAll();      // the kernels' tables, before any audio
     for (int i = 0; i < snd::count; ++i)
     {
         own[(size_t) i] = snd::def (i).def;
@@ -337,6 +364,8 @@ void Player::startVoice (int note, int velocity, float fromPitch, const Chunk& c
         v.phA.fill (0.0);
         v.phB.fill (0.0);
         v.phSub = 0.0;
+        v.orb.reset();
+        v.orbit = 0.0;
         v.amp = {};
         v.flt = {};
         v.note = v.origin = note;
@@ -407,6 +436,10 @@ void Player::startVoice (int note, int velocity, float fromPitch, const Chunk& c
     v.ghostLeft = 0;
     v.pmPhase = 0.0;
     v.pmPos = v.pos;
+    v.pmDisp = 0.0;
+    v.lastOut = 0.0f;
+    v.orb.reset();
+    v.orbit = 0.0;
     v.attackLeft = 0;
     // TRANSITOIRES GARDÉS: the attack at its own speed, the pitched body taking over at its end
     if (c.v[snd::transients] > 0.5f && ! c.elastic && c.v[snd::reverse] < 0.5f && std::abs (v.baseShift) > 0.01)
@@ -574,7 +607,7 @@ void Player::prepareRead (Voice& v, const Chunk& c, Read& r) const
     // the pitch: glide, transposition moved since the note began, fine, bend
     const double semis = v.baseShift + (double) (v.pitch - (float) v.origin)
                        + (double) ((int) c.v[snd::transpose] - v.transposeAtOn)
-                       + (double) c.v[snd::fine] * 0.01 + (double) c.bendSemis;
+                       + (double) c.v[snd::fine] * 0.01 + (double) c.bendSemis + (double) c.v[snd::tune];
     r.step = rk::ratioOf (semis) * v.rateScale * (c.v[snd::reverse] > 0.5f ? -1.0 : 1.0);
     // far up: the nearest octave copy (a recording's), the kernel kept short and the result as clean
     r.octaves = nullptr;
@@ -584,7 +617,7 @@ void Player::prepareRead (Voice& v, const Chunk& c, Read& r) const
         r.octaves = &ins->octaves[(size_t) v.index];
         const double astep = std::abs (r.step);
         if (astep > 1.5)
-            r.level = juce::jlimit (0, 3, (int) std::ceil (std::log2 (astep / 1.5)));
+            r.level = juce::jlimit (0, Instrument::octaveCopies, (int) std::ceil (std::log2 (astep / 1.5)));
     }
     r.alias = c.v[snd::alias];
     const float bits = c.v[snd::bits];
@@ -594,7 +627,7 @@ void Player::prepareRead (Voice& v, const Chunk& c, Read& r) const
     if (r.pmIndex < 0.01f || (r.pm == 3 && c.inL == nullptr))
         r.pm = 0;
     // the sine sits on the note played; the second head reads the sample at that ratio of its speed
-    const double playing = (double) v.pitch + (double) (int) c.v[snd::transpose] + (double) c.v[snd::fine] * 0.01 + (double) c.bendSemis;
+    const double playing = (double) v.pitch + (double) (int) c.v[snd::transpose] + (double) c.v[snd::fine] * 0.01 + (double) c.bendSemis + (double) c.v[snd::tune];
     r.pmInc = rk::noteHz (playing) * (double) c.v[snd::pmRatio] / sr;
 }
 
@@ -607,7 +640,7 @@ void Player::prepareRead (Voice& v, const Chunk& c, Read& r) const
 //   51 .. 89 %    towards drop sample (Mirage, SP-1200)
 //   89 .. 100 %   past it: the interpolation turns high pass (nearest minus linear), the images louder than the sound
 // Far up, it reads the recording's copy an octave (two, three) down, at half (a quarter...) the step.
-void Player::readFrame (const Read& r, double p, float& left, float& right) const
+void Player::readFrame (const Read& r, double p, double speed, float& left, float& right) const
 {
     const auto& s = *r.s;
     const rk::Channels& data = r.level > 0 ? (*r.octaves)[(size_t) (r.level - 1)] : s.audio;
@@ -629,27 +662,47 @@ void Player::readFrame (const Read& r, double p, float& left, float& right) cons
     };
     const double ip = std::floor (pp);
     const double frac = pp - ip;
-    const double astep = std::abs (r.step) * scale;
+    // the speed met at this octave copy (the step, and what the phase modulation adds right now)
+    const double astep = speed * scale;
     const float a = r.alias;
-    auto sinc = [&] (double cutoff, const rk::SincKernel& K, float& o0, float& o1)
+    // the band-limited read: the kernels' taps over the samples around p (gathered when they cross an edge or the
+    // loop's end), one dot product per channel
+    auto band = [&] (const dsp::Polyphase& B, double cutoff, float& o0, float& o1)
     {
-        const double halfWidth = (double) K.zeroCrossings() / cutoff;
-        const auto k0 = (int64_t) std::ceil (pp - halfWidth);
-        const auto k1 = (int64_t) std::floor (pp + halfWidth);
-        const bool plain = ! wraps && k0 >= 0 && k1 < len;
-        double s0 = 0.0, s1 = 0.0, ws = 0.0;
-        for (int64_t k = k0; k <= k1; ++k)
+        const int T = B.taps();
+        const auto k0 = (int64_t) ip - T / 2 + 1;
+        const auto k = B.pick (cutoff, frac);
+        if (k0 >= 0 && k0 + T <= (wraps ? (int64_t) juce::jmin (le, len) : (int64_t) len))
         {
-            const float w = K (((double) k - pp) * cutoff);
-            ws += w;
-            s0 += (double) w * (double) (plain ? d0[k] : at (d0, k));
             if (d1 != nullptr)
-                s1 += (double) w * (double) (plain ? d1[k] : at (d1, k));
+                B.apply2 (d0 + k0, d1 + k0, k, o0, o1);
+            else
+            {
+                o0 = B.apply (d0 + k0, k);
+                o1 = 0.0f;
+            }
+            return;
         }
-        const double inv = ws > 1.0e-9 ? 1.0 / ws : 0.0;
-        o0 = (float) (s0 * inv);
-        o1 = (float) (s1 * inv);
+        float g0[dsp::Polyphase::maxTaps], g1[dsp::Polyphase::maxTaps];
+        for (int j = 0; j < T; ++j)
+            g0[j] = at (d0, k0 + j);
+        if (d1 != nullptr)
+        {
+            for (int j = 0; j < T; ++j)
+                g1[j] = at (d1, k0 + j);
+            B.apply2 (g0, g1, k, o0, o1);
+        }
+        else
+        {
+            o0 = B.apply (g0, k);
+            o1 = 0.0f;
+        }
     };
+    const auto& bank = r.bank != nullptr ? *r.bank : dsp::Polyphase::hq();
+    const double top = bank.top();
+    // the cutoff at that speed: the kernel's stop band begins where the output's Nyquist falls in the recording
+    // (its transition, 1 - top wide on each side, kept under it)
+    const double clean = juce::jlimit (0.05, top, 1.0 / juce::jmax (1.0e-6, astep) - (1.0 - top));
     auto linear = [&] (float& o0, float& o1)
     {
         const auto k = (int64_t) ip;
@@ -668,21 +721,21 @@ void Player::readFrame (const Read& r, double p, float& left, float& right) cons
         if (r.level == 0 && frac < 1.0e-9 && std::abs (astep - 1.0) < 1.0e-9)
             drop (o0, o1);
         else
-            sinc (0.9 * juce::jmin (1.0, 1.0 / astep), rk::SincKernel::live(), o0, o1);
+            band (bank, clean, o0, o1);
     }
     else if (a <= 0.25f)
-        sinc (0.9 * std::pow (juce::jmin (1.0, 1.0 / astep), 1.0 - (double) a / 0.25), rk::SincKernel::live(), o0, o1);
+        band (bank, top * std::pow (clean / top, 1.0 - (double) a / 0.25), o0, o1);
     else if (a <= 0.36f)
     {
         float b0, b1;
-        sinc (0.9, rk::SincKernel::live(), o0, o1);
-        sinc (0.95, shortKernel(), b0, b1);
+        band (bank, top, o0, o1);
+        band (dsp::Polyphase::soft(), 0.95, b0, b1);
         blend (o0, o1, b0, b1, (a - 0.25f) / 0.11f);
     }
     else if (a <= 0.51f)
     {
         float b0, b1;
-        sinc (0.95, shortKernel(), o0, o1);
+        band (dsp::Polyphase::soft(), 0.95, o0, o1);
         linear (b0, b1);
         blend (o0, o1, b0, b1, (a - 0.36f) / 0.15f);
     }
@@ -833,18 +886,29 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
 
     // one frame of the sample at p, with the phase modulation, the bits
     float pm = 0.0f;
+    // the phase modulation's push now, and the speed the reading meets (the step and how fast the push moves):
+    // the kernel's cutoff follows that speed, so a deep modulation doesn't fold back either
+    double disp = 0.0, speedNow = std::abs (stepNow);
+    r.bank = c.elastic ? &dsp::Polyphase::grains() : &dsp::Polyphase::hq();
+    // the MIXEUR: the sample's level, ORBITE's (heard when it's on; computed too when it modulates the phase)
+    const float mixS = c.v[snd::mxSample];
+    const float mixO = c.v[snd::orOn] > 0.5f ? c.v[snd::mxOrbite] * synthLevel : 0.0f;
+    const bool orbNeeded = mixO > 0.0f || r.pm == 5;
+    const double playedNow = (double) v.pitch + (double) (int) c.v[snd::transpose] + (double) c.v[snd::fine] * 0.01 + (double) c.bendSemis
+                           + (double) c.v[snd::tune];
+    const OrbitePlan op = orbNeeded ? orbitePlan (c.v, playedNow, sr) : OrbitePlan {};
+    float orbNow = 0.0f;
     // CROSSFADE: the loop's end fades into what comes before its start, up to half the loop and no
     // further back than the sample's beginning
     const double xfLen = r.loop ? juce::jmin ((double) c.v[snd::loopXfade] * 0.5 * (double) (r.le - r.ls), (double) r.ls) : 0.0;
     auto frame = [&] (double p, float& l, float& rr)
     {
-        if (r.pm != 0)
-            p += (double) (r.pmIndex * pm);
-        readFrame (r, p, l, rr);
+        p += disp;
+        readFrame (r, p, speedNow, l, rr);
         if (xfLen > 1.0 && p >= (double) r.le - xfLen && p < (double) r.le)
         {
             float l2, r2;
-            readFrame (r, p - (double) (r.le - r.ls), l2, r2);
+            readFrame (r, p - (double) (r.le - r.ls), speedNow, l2, r2);
             // raised cosine: the two sum to one (a sustained tone, the two sides alike, keeps its level)
             const float t = (float) ((p - ((double) r.le - xfLen)) / xfLen);
             const float b = 0.5f - 0.5f * std::cos (3.14159265f * t), a = 1.0f - b;
@@ -865,6 +929,11 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
         cutNow += cutInc;
         envNow += envInc;
         stepNow += stepInc;
+        if (orbNeeded)
+        {
+            v.orbit += op.orbitInc;
+            orbNow = v.orb.process (op.s, op.incC, op.inc1, op.inc2, v.orbit);
+        }
         if (r.pm == 1)
         {
             v.pmPhase += r.pmInc;
@@ -879,11 +948,24 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
             v.pmPos += std::abs (r.step) * (double) c.v[snd::pmRatio];
             if (v.pmPos >= (double) b)
                 v.pmPos = (double) a + std::fmod (v.pmPos - (double) a, (double) juce::jmax (1, b - a));
-            const int k = juce::jlimit (0, len - 1, (int) v.pmPos);
-            pm = sm.audio[0][(size_t) k] * 1.5f;
+            // (between its samples, linearly: the second head moves at any speed)
+            const double q = juce::jlimit (0.0, (double) (len - 1), v.pmPos);
+            const int k = (int) q;
+            const float* d = sm.audio[0].data();
+            const float x0 = d[k], x1 = d[juce::jmin (len - 1, k + 1)];
+            pm = (x0 + (float) (q - (double) k) * (x1 - x0)) * 1.5f;
         }
         else if (r.pm == 3)
             pm = juce::jlimit (-1.5f, 1.5f, 0.5f * (c.inL[i] + c.inR[i]));
+        else if (r.pm == 4)
+            pm = v.lastOut;          // RETOUR: the voice's own last sample, before its filter (a DX's feedback)
+        else if (r.pm == 5)
+            pm = orbNow;             // ORBITE pushing the reading
+        {
+            const double d = r.pm != 0 ? (double) (r.pmIndex * pm) : 0.0;
+            speedNow = std::abs (stepNow + d - v.pmDisp);
+            v.pmDisp = disp = d;
+        }
 
         float xl = 0.0f, xr = 0.0f;
         if (c.elastic)
@@ -944,7 +1026,7 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
             if (v.attackLeft > v.attackFade)
             {
                 // the attack alone, at its own speed; the body waits
-                readFrame (ra, v.attackPos, xl, xr);
+                readFrame (ra, v.attackPos, std::abs (ra.step), xl, xr);
                 v.attackPos += ra.step;
                 --v.attackLeft;
             }
@@ -955,7 +1037,7 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
                 {
                     // the attack handing over to the pitched body (equal power)
                     float al, ar;
-                    readFrame (ra, v.attackPos, al, ar);
+                    readFrame (ra, v.attackPos, std::abs (ra.step), al, ar);
                     v.attackPos += ra.step;
                     const float t = (float) v.attackLeft / (float) juce::jmax (1, v.attackFade);
                     const float out = std::sin (1.5707963f * t), in = std::cos (1.5707963f * t);
@@ -1002,6 +1084,10 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
         }
         xl = quantise (xl);
         xr = stereo ? quantise (xr) : xl;
+        xl = xl * mixS + orbNow * mixO;
+        xr = xr * mixS + orbNow * mixO;
+        // RETOUR's next push: this sample, kept in bounds (a feedback that can't run away)
+        v.lastOut = juce::jlimit (-1.5f, 1.5f, 0.5f * (xl + xr));
         const float fe = tick (v.flt, c.flt, false);
         if (c.filterOn)
         {
@@ -1079,6 +1165,9 @@ void Player::renderSynth (Voice& v, float* L, float* R, int n, const Chunk& c)
     const int levA = dsp::CycleBank::levelFor (hzA * top, sr), levB = dsp::CycleBank::levelFor (hzB * top, sr);
     const float lvA = c.v[snd::oaLevel], lvB = c.v[snd::obLevel], sub = c.v[snd::subLevel], noise = c.v[snd::noiseLevel];
     const float pmTo = c.v[snd::pmBA] * c.v[snd::pmBA] * 1.5f;     // B moves A's phase by up to 1.5 cycles
+    // ORBITE, in the mix when it's on (centred, one per note)
+    const float lvO = c.v[snd::orOn] > 0.5f ? c.v[snd::mxOrbite] : 0.0f;
+    const OrbitePlan op = lvO > 0.0f ? orbitePlan (c.v, played, sr) : OrbitePlan {};
 
     // the filter, its cutoff following the keys and the velocity; everything ramped from the last chunk
     if (c.filterOn)
@@ -1154,6 +1243,13 @@ void Player::renderSynth (Voice& v, float* L, float* R, int n, const Chunk& c)
             const float w = noise * 0.5f * (uniform (v.rng) * 2.0f - 1.0f);
             xl += w;
             xr += w;
+        }
+        if (lvO > 0.0f)
+        {
+            v.orbit += op.orbitInc;
+            const float o = lvO * v.orb.process (op.s, op.incC, op.inc1, op.inc2, v.orbit);
+            xl += o;
+            xr += o;
         }
         if (! stereo)
             xr = xl;

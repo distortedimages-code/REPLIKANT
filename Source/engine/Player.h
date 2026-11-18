@@ -21,6 +21,9 @@
 #include "../dsp/Effects.h"
 #include "../dsp/Modulators.h"
 #include "../dsp/Cycles.h"
+#include "../dsp/Orbite.h"
+
+namespace dsp { class Polyphase; }
 
 #include <array>
 #include <atomic>
@@ -154,14 +157,15 @@ private:
     struct Read
     {
         const rk::Sample* s = nullptr;
-        const std::array<rk::Channels, 3>* octaves = nullptr;  // the recording's octave copies (none for a rendered key)
-        int level = 0;                                        // 0: the sample itself; 1..3: its copy that many octaves down
+        const std::array<rk::Channels, Instrument::octaveCopies>* octaves = nullptr;   // the recording's octave copies (none for a rendered key)
+        int level = 0;                                        // 0: the sample itself; 1..8: its copy that many octaves down
         int len = 0;
         bool stereo = false, loop = false, moved = false;    // moved: the loop isn't the one found (splices smoothed)
         int ls = 0, le = 0;
         double step = 1.0;                                    // < 0: backwards
         float alias = 0.0f, bitsQ = 0.0f;                     // bitsQ: 2^(bits - 1), 0 = untouched
-        int pm = 0;                                           // 0 none, 1 sine, 2 its own sample, 3 the input
+        const dsp::Polyphase* bank = nullptr;                // its kernels (null: the voices' 128 taps)
+        int pm = 0;                                           // 0 none, 1 sine, 2 its own sample, 3 the input, 4 itself
         float pmIndex = 0.0f;
         double pmInc = 0.0;
     };
@@ -182,6 +186,11 @@ private:
         double attackPos = 0.0;
         int attackLeft = 0, attackFade = 0;
         double pmPhase = 0.0, pmPos = 0.0;                 // the modulator: a sine's phase, a second head in the sample
+        double pmDisp = 0.0;                               // the modulation's push at the last sample (samples)
+        float lastOut = 0.0f;                              // the voice's last sample (RETOUR)
+        // ORBITE: its oscillators, and how far satellite 2's restart has circled (cycles, unwrapped)
+        dsp::Orbite orb;
+        double orbit = 0.0;
         Env amp, flt;
         // elastic
         double scan = 0.0;
@@ -213,7 +222,9 @@ private:
     void renderVoice (Voice&, float* L, float* R, int n, const Chunk&);
     void renderSynth (Voice&, float* L, float* R, int n, const Chunk&);
     const dsp::CycleBank& bankFor (int choice) const;
-    void readFrame (const Read&, double pos, float& left, float& right) const;
+    // speed: how many samples of the recording go by per sample played, right now (the step, and the phase
+    // modulation's push): the kernel's cutoff follows it
+    void readFrame (const Read&, double pos, double speed, float& left, float& right) const;
     double alignGrain (const Voice&, const Read&, double target, double search) const;
     void prepareRead (Voice&, const Chunk&, Read&) const;
     Voice* freeVoice();
