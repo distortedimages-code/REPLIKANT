@@ -1396,10 +1396,7 @@ private:
                 }
                 stroke (path, colour);
             }
-            // what it sends now
-            const float v = p.player.modValue[(size_t) mi].load();
-            g.setColour (col::screenText);
-            g.fillEllipse (r.getRight() - 8.0f, r.getCentreY() - v * r.getHeight() * 0.45f - 4.0f, 8.0f, 8.0f);
+            // (what it sends now: on its key, under the screen; no dot running on the curve)
         }
         else if (viz == "scenes")
         {
