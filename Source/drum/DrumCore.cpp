@@ -556,6 +556,19 @@ void Engine::hit (int track, int step, float velMul, bool)
     float p[numParams];
     for (int i = 0; i < numParams; ++i)
         p[i] = tk.at (step, i);
+    // WTF?!: the hit's settings pulled (each track its own share of the ten pulls)
+    static const int pulled[numWtf] = { pTune, pDecay, pSweep, pPmod, pCutoff, pReso, pNoise, pStart, pDrive, pFEnv };
+    static const float weight[numWtf] = { 0.4f, 1.0f, 0.6f, 1.0f, 1.0f, 0.7f, 0.8f, 0.8f, 0.8f, 0.8f };
+    for (int j = 0; j < numWtf; ++j)
+    {
+        const float o = wtf[(size_t) ((j + 3 * track) % numWtf)] * weight[j];
+        if (! (std::abs (o) > 1.0e-5f))
+            continue;
+        int id = pulled[j];
+        if (id == pStart && idx (p[pSource], 3) == synth)
+            id = pPosition;
+        p[id] = legal (id, fromNorm (id, clampf (toNorm (id, p[id]) + o, 0.0f, 1.0f)));
+    }
     startVoice (track, p, p[pVel] * velMul);
     glow[(size_t) track].store (1.0f, std::memory_order_relaxed);
 }

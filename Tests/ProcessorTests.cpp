@@ -362,6 +362,31 @@ static void drumAsAHost()
     }
     std::printf ("  drum on the host's transport: %d of 4 quarters hit, first %.3f rms\n", onBeats, rms (0, 1200));
     CHECK (finite && onBeats == 4, "the kick on the four quarters: %d", onBeats);
+    // WTF?!: at 0 the four kicks alike; at its end each one pulled its own way (its tune, decay, sweep...)
+    auto spread = [&]
+    {
+        double lo = 1e9, hi = 0.0;
+        for (int q = 0; q < 4; ++q)
+        {
+            const double h = rms (q * 24000, 4800);
+            lo = std::min (lo, h);
+            hi = std::max (hi, h);
+        }
+        return hi / std::max (1.0e-9, lo);
+    };
+    head.ppq = 0.0;
+    play (2.0);
+    const double still = spread();
+    proc->setSoundParam (snd::wtf, 1.0f);
+    head.ppq = 0.0;
+    play (0.2);
+    head.ppq = 0.0;
+    play (2.0);
+    const double pulled = spread();
+    proc->setSoundParam (snd::wtf, 0.0f);
+    play (0.5);
+    std::printf ("  drum WTF?!: the four kicks within x%.3f at 0, x%.2f at its end\n", still, pulled);
+    CHECK (still < 1.02 && pulled > 1.15, "WTF on the drum: x%.3f -> x%.2f", still, pulled);
     // the host stopped: silence once the last hit has died away
     head.playing = false;
     play (3.0);

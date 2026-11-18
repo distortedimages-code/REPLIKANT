@@ -1634,12 +1634,15 @@ void Player::modulate (int offset, int n, const Transport& t, Chunk& c, bool atR
 void Player::applyWtf (double ppq, int n, Chunk& c)
 {
     const float amount = c.v[snd::wtf];
-    const bool synthEngine = (int) c.v[snd::engine] == snd::synth;
+    const int engineNow = (int) c.v[snd::engine];
+    const bool synthEngine = engineNow == snd::synth;
     static const int synthIds[wtfCount] = { snd::oaPos, snd::obPos, snd::pmBA, snd::cutoff, snd::reso, snd::fEnv, snd::detune,
                                             snd::decay, snd::dAmt, snd::subLevel };
     static const int samplerIds[wtfCount] = { snd::start, snd::spray, snd::alias, snd::loopStart, snd::loopSize, snd::pmIndex,
                                               snd::cutoff, snd::reso, snd::decay, snd::speed };
-    const int* ids = synthEngine ? synthIds : samplerIds;
+    // (DRUM: the pulls go to its hits, DrumCore.h; here only the filter and the drive its tracks pass through)
+    static const int drumIds[wtfCount] = { -1, -1, -1, -1, -1, -1, -1, -1, snd::cutoff, snd::reso };
+    const int* ids = synthEngine ? synthIds : (engineNow == snd::drum ? drumIds : samplerIds);
     const auto step = (int64_t) std::floor (ppq * 2.0);
     if (step != wtfStep)
     {
@@ -1658,6 +1661,8 @@ void Player::applyWtf (double ppq, int n, Chunk& c)
         if (! (std::abs (wtfNow[(size_t) j]) > 0.0f))
             continue;
         const int id = ids[j];
+        if (id < 0)
+            continue;
         const float norm = juce::jlimit (0.0f, 1.0f, snd::toNorm (id, c.v[id]) + wtfNow[(size_t) j]);
         c.v[id] = snd::fromNorm (id, norm);
         shownNorm[(size_t) id].store (norm, std::memory_order_relaxed);

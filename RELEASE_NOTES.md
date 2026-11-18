@@ -1,3 +1,7 @@
+**REPLIK8 0.4.3** : WTF?! marche sur le DRUM.
+
+- **WTF?! sur le DRUM** : il ne tirait que des réglages du sampler, que le DRUM ne joue pas (et le filtre principal, éteint le plus souvent) : rien ne bougeait. Maintenant chaque coup est tiré à sa façon : TUNE, DECAY, SWEEP, PMOD, la coupure et la résonance du filtre de la piste, NOISE, START (ou POSITION sur une voix synth), DRIVE et F.ENV, chaque piste avec sa propre part du tirage. LIVE et LOOP marchent comme ailleurs, sur le tempo du DAW ou de l'appli
+
 **REPLIK8 0.4.2** : SPECTRE refait de fond en comble.
 
 - **Les slices** : FREE (avec MULTIPLY, jusqu'à 32 fois plus lent : une analyse toutes les quelques secondes), SYNC sur la grille du DAW, NOTES (une analyse à chaque note jouée, puis le spectre tenu jusqu'à la suivante) ou ATTACKS (à chaque attaque du son qui entre : parfait sur le DRUM ou en insert)

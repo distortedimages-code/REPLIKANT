@@ -306,6 +306,11 @@ private:
     int64_t wtfStep = -1;
     uint32_t wtfRng = 0x7f4a7c15u;
     void applyWtf (double ppq, int n, Chunk&);
+public:
+    // WTF?!'s pulls now (normalised, its amount in them): the DRUM takes them for its hits
+    const float* wtfPulls() const        { return wtfNow.data(); }
+    static constexpr int numWtfPulls = wtfCount;
+private:
 
     // modulators
     std::array<dsp::Modulator, snd::numMods> mods;

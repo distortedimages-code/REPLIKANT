@@ -127,6 +127,11 @@ namespace drum
         // n frames of the eight tracks into L, R (written, not added)
         void render (float* L, float* R, int n, const Clock&, float swing, const Event* events, int numEvents);
         void allSoundOff();
+        // WTF?!: the player's ten pulls (normalised, its amount in them), set before render: each hit's settings are
+        // pulled by them (TUNE, DECAY, SWEEP, PMOD, CUTOFF, RESO, NOISE, START or POSITION, DRIVE, F.ENV), each
+        // track taking them in its own order
+        static constexpr int numWtf = 10;
+        void setWtf (const float* pulls)          { for (int j = 0; j < numWtf; ++j) wtf[(size_t) j] = pulls[j]; }
 
         // ---- the screen
         std::array<std::atomic<int>, numTracks> stepNow {};      // the step each track plays, -1: stopped
@@ -138,6 +143,7 @@ namespace drum
         std::atomic<bool> armed { false };
         std::vector<Pattern> pats;
         std::atomic<int> playing { 0 }, queued { -1 };
+        std::array<float, numWtf> wtf {};
         std::array<std::atomic<int>, 64> chainSlots {};
         std::atomic<int> chainLen { 0 };
         int chainAt = 0;

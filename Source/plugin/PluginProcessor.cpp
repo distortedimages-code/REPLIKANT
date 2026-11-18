@@ -381,6 +381,8 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
             }
             drumClockWas = own;
             dc.bpm = transport.bpm;
+            static_assert (Player::numWtfPulls == drum::Engine::numWtf, "WTF's pulls, one for one");
+            drum.setWtf (player.wtfPulls());          // (the player's, a block late: drawn as it renders)
             drum.render (rl, rr, n, dc, player.get (snd::drSwing), radioEvents.data(), (int) radioEvents.size());
         }
         if (mon == 2 && kept[0] != nullptr)
