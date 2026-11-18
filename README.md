@@ -1,8 +1,20 @@
 # REPLIKANT
 
-**REPLIKANT** : l'autosampleur de tes synthés, et le player qui les malmène. Plug-in AU / VST3 et appli pour Mac. Il joue chaque note au synthé (MIDI), l'enregistre (audio), trouve la boucle, mesure la justesse (et recale la note vraiment jouée), et fait de l'ensemble un instrument jouable, exportable en dossier de WAV, en `.multisample` Bitwig ou en pack zip à partager. Le player le joue à travers des filtres analogiques modélisés, un drive, cinq effets, quatre mods façon IMPAKT et des scènes façon Octatrack, et sert aussi de multi-effet en insert.
+**REPLIKANT** : l'autosampleur de tes synthés, un synthé à cycles et un sampler. Plug-in AU / VST3 et appli pour Mac. Il capture tes synthés (chaque note jouée en MIDI et enregistrée, bouclée, accordée ; ou leurs cycles, pendant qu'un CC balaie un bouton ; ou ce qui sort de tes effets) et en fait des instruments : le SYNTHÉ lit des banques de cycles, le SAMPLER joue un multisample ou n'importe quel son glissé sur la fenêtre. Les deux passent dans des filtres analogiques modélisés, un drive, cinq effets dans l'ordre que tu veux, quatre mods façon IMPAKT et des scènes façon Octatrack. REPLIKANT sert aussi de multi-effet en insert. Exports en dossier de WAV, en `.multisample` Bitwig ou en pack zip à partager.
 
 **Page de téléchargement** : https://distortedimages-code.github.io/REPLIKANT/
+
+## La version 0.3.0 : synthé, sampler, capture des cycles, rééchantillonnage
+
+- **Modes** : SYNTHÉ (par défaut, il joue dès l'ouverture), SAMPLER, DRUM (en 0.4) ; CAPTURE par-dessus : notes, cycles ou rééchantillonner.
+- **SYNTHÉ** (`Source/dsp/Cycles`) : deux oscillateurs de cycles de 2048 points, chaque cycle gardé en 20 copies limitées en bande (une par demi-octave) et lu en Hermite, POSITION qui fond deux cycles voisins ; 64 basiques ou les cycles capturés ; PM de B vers A, sub, bruit, unisson jusqu'à 4 (±30 cents, étalés à puissance constante).
+- **SAMPLER** : un son glissé (wav, aiff, flac, mp3 sur Mac) devient un instrument d'un sample sur tout le clavier, en varispeed ; sa note vient du chunk `smpl`, de son nom (« Basse A2.wav ») ou de sa hauteur (McLeod puis YIN). Boucle : fondu en cosinus surélevé de 0 à 100 % de sa moitié.
+- **CAPTURE CYCLES** : N prises d'une note grave, un CC envoyé avant chacune (ou la vélocité, ou rien : à la main) ; dans chaque prise, la période trouvée par autocorrélation près de la note (ou du double, quand un sub est là), le cycle pris sur un passage par zéro et rééchantillonné en Lanczos. Banque gardée dans `<Nom>/Cycles/<Nom> - cycles 2048.wav` (32 bits flottants, lu par Serum, Vital, Bitwig).
+- **RÉÉCHANTILLONNER** (`Player::resampleChunk`) : la sortie de la chaîne, avant le volume, enregistrée sur 1 à 8 mesures (départ sur la mesure de l'hôte) ou en libre ; la passation se fait en 20 ms à puissance constante. Ensuite, la chaîne rendue neutre (filtre, drive, effets, WTF?! coupés et vidés, voix arrêtées), l'enregistrement y repasse en boucle comme une entrée, identique à l'échantillon près. Sa fin est fondue dans son début avec les 10 ms enregistrées après elle. Injecté dans le SAMPLER, les réglages remis à zéro, puis la chaîne relâchée.
+- **Ordre des effets** libre : une permutation des six étages, prise au fond d'un creux de 10 ms.
+- **Interface** (`Source/ui/Machine`, `Look`, `Pictos`) : écran noir, pages et banques, huit encodeurs, pupitre, vu-mètres ; pictos dessinés (schémas des filtres, bobines, chaîne, câble de patch…) ; thèmes Noir & or et Clair.
+- **Lissage** : coupure, profondeur d'enveloppe et pas de lecture en rampes à l'échantillon ; réglages continus glissés (~12 ms) pendant que ça joue.
+- **WTF?!** : dix réglages du moteur tirés au sort à chaque croche (LIVE) ou en boucle de huit (LOOP), glissés en 30 ms.
 
 ## La version 0.2.0 : le player
 
@@ -44,8 +56,8 @@
 
 ## Comment ça se branche
 
-- **Appli** : *Carte son* en haut, Source = Entrée, Sortie MIDI = le port du synthé. 96 kHz dans la carte son pour transposer très bas.
-- **En multi-effet** : REPLIKANT en insert sur n'importe quelle piste, PLAYER › SON › ÉCOUTE = PAR LES EFFETS.
+- **Appli** : FICHIER › Réglages audio et MIDI, puis CAPTURE › SOURCE : Son = entrée, Sortie MIDI = le port du synthé. 96 kHz dans la carte son pour transposer très bas.
+- **En multi-effet** : REPLIKANT en insert sur n'importe quelle piste, RÉGLAGES › ÉCOUTE = PAR LES EFFETS (ou, dans CAPTURE › RÉÉCHANTILLONNER, ENTRÉE : PAR LES EFFETS).
 - **Logic** : REPLIKANT en effet audio sur une piste qui reçoit le synthé (type `aumf`, « effet contrôlé par MIDI ») ; pour jouer, dans le slot d'instrument (effets contrôlés par MIDI).
 - **Bitwig / Reaper / Cubase** : sur une piste qui reçoit l'audio du synthé ; les notes de la piste jouent l'instrument.
 - **Live** : l'enregistrement marche sur une piste audio ; Live n'envoyant pas de notes aux effets audio, on joue l'export (Sampler) ou l'appli.
@@ -69,9 +81,9 @@ ctest --test-dir build --output-on-failure
 
 - `Source/core/` : le DSP sans JUCE (sinc, formants, boucles, hauteur, découpe, plan, WAV) ; `Tests/CoreTests.cpp` le vérifie, transposition comprise (écart des harmoniques avec la vraie note).
 - `Source/dsp/` : le DSP du player, sans JUCE (suréchantillonnage, filtres, drives, modulateurs, effets) ; `Tests/DspTests.cpp`.
-- `Source/engine/` : l'enregistreur (fil audio, sans allocation), le worker (découpe, assemblage, sauvegarde, rendu des touches en parallèle), l'instrument, le player (`Sound.h` : la table de tous ses réglages), le synthé test ; `Tests/EngineTests.cpp` fait une session entière sur le synthé test (et un pack chez un pote) ; `Tests/PlayerTests.cpp` mesure le player (repliement, échelle d'aliasing, décalage de la PM, transitoires, scènes, horloge, CPU).
-- `Source/ui/` : l'interface rétro pixel (polices de RackAttack Editor, palette sobre à un accent) ; la cible `Snapshot` (hors build par défaut) dessine la fenêtre en PNG, chaque page.
+- `Source/engine/` : l'enregistreur (fil audio, sans allocation), le worker (découpe, assemblage, sauvegarde, rendu des touches en parallèle), l'instrument, le player (`Sound.h` : la table de tous ses réglages), le synthé test ; `Tests/EngineTests.cpp` fait une session entière sur le synthé test (et un pack chez un pote) ; `Tests/PlayerTests.cpp` mesure le player (repliement, échelle d'aliasing, décalage de la PM, transitoires, scènes, horloge, lissage, synthé, rééchantillonnage, CPU) ; `EngineTests` fait aussi une capture de cycles et lit des sons glissés.
+- `Source/ui/` : l'interface (écran, pupitre, encodeurs, pictos, deux thèmes) ; la cible `Snapshot` (hors build par défaut) dessine la fenêtre en PNG, chaque page, une capture, un rééchantillonnage et une capture de cycles.
 - `ThirdParty/` : Signalsmith Stretch et Signalsmith Linear (licence MIT, textes à côté).
 - `Source/dsp/Space.*` : la réverbération de MIFM1 (MPL-2.0).
 - REPLIKANT est sous licence **GPL-3** (`LICENSE`).
-- `Resources/fonts/` : Silkscreen et VT323, SIL Open Font License.
+- `Resources/fonts/` : Space Grotesk et IBM Plex Mono, SIL Open Font License.

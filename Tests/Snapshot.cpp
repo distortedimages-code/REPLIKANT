@@ -168,6 +168,7 @@ int main (int argc, char** argv)
 
     // the capture: the plan, then a session going
     view->showCapture (true);
+    view->setCaptureKind (te::Machine::notesKind);
     view->showPage (1);
     run (10);
     shoot ("9-capture-plan.png");
