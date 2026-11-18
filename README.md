@@ -4,6 +4,10 @@
 
 **Page de téléchargement** : https://distortedimages-code.github.io/REPLIKANT/
 
+## La version 0.4.2 : SPECTRE refait
+
+- **SPECTRE** (`dsp::Spectral`) : une FFT d'environ 85 ms à toutes les fréquences d'échantillonnage (4096 points à 44,1 et 48 kHz, 8192 à 88,2 et 96), fenêtre de Blackman-Harris ; TRANSIENTS : le dernier quart dans une fenêtre de Hann, complété de zéros (les mêmes bins), mêlé à la longue entre 700 et 1300 Hz. BLUR : chaque bin suit les analyses avec `α = 1 - exp(-Δt/τ)`, τ de 20 ms à 10 s (Δt : le temps réel entre deux analyses), figé au bout. La bande (ou le notch) avant les pics ; les pics au-dessus de -60 dB du plus fort, interpolés en parabole sur les logarithmes, les plus forts gardés, triés en fréquence. RANK (les oscillateurs qui jouent, dans l'ordre de leurs partiels) ou TRACK (les paires les plus proches en octaves d'abord, sous la demi-octave ; les autres pics à des oscillateurs muets). Un oscillateur qui naît suit son pic sans glisser pendant la durée d'une fenêtre. Les hauteurs : WARP `f' = c·(f/c)^q`, c la moyenne géométrique des pics pondérée par leurs niveaux, q de 0 à 2 ; puis OCTAVE et FINE ; GLIDE en log2, un pas toutes les 8 échantillons réparti sur les 8, τ de 1 ms à 10 s, HOLD. XF : l'ancienne hauteur gardée par un second oscillateur, fondue en puissance constante sur la durée de la slice (un troisième lâché en 2 ms si une slice tombe en plein fondu). Les slices : FREE (6 à 506 ms × 1 à 32), SYNC (sur la position de l'hôte, à l'échantillon ; au tempo quand il est arrêté), NOTES et ATTACKS (deux suiveurs, rapide et lent ; l'analyse 55 ms après, 30 avec TRANSIENTS, que la fenêtre tienne le nouveau son). FEEDBACK : la sortie renvoyée dans l'analyse par un limiteur (montée instantanée, 300 ms de retour, sous 0,5) ; un nombre non fini remet tout à zéro. MIX à puissance constante. `Tests/DspTests.cpp` : hauteurs au cent près de 55 à 440 Hz, bande et notch, BLUR indépendant des slices, gel, les quatre horloges, TRANSIENTS plus rapide, WARP, TRACK contre RANK, formes XF, feedback borné, coût.
+
 ## La version 0.4.0 : le drum
 
 - **DRUM** (`Source/drum/DrumCore`), sans JUCE. Huit pistes, deux voix chacune (un coup efface le précédent en 3 ms), 128 patterns (`drum::Pattern` : huit `drum::Track`, une longueur de changement), alloués la première fois que l'onglet s'ouvre (environ 8 Mo).
@@ -46,7 +50,7 @@
 - **Modulation de phase** : l'adresse de lecture poussée de ±INDICE échantillons (0 à 256) par un sinus sur la note × RAPPORT, par le sample (une deuxième tête à RAPPORT fois sa vitesse) ou par l'entrée.
 - **Filtres** (`Source/dsp/VAFilter`) : MOOG (échelle D'Angelo–Välimäki), MS-20 (Korg 35 en série, SÉPARATION), SEM (OTA), OSCAR (deux 12 dB écartés), WASP (CMOS), POLIVOKS (rails) ; ZDF, suréchantillonnés 1X / 2X / 4X (demi-bandes), réinjection FM, enveloppe, suivi du clavier, vélocité.
 - **Drive** : PRÉAMPLI, CONSOLE, BANDE (pré/désaccentuation exactes, bosse de tête, pleurage), suréchantillonné 4X.
-- **Effets**, dans cet ordre : SPECTRE (pics d'une FFT de 4096 points rendus par 1 à 33 oscillateurs), PITCH (deux voix Signalsmith, retards, réinjection, CRISTAUX : grains à l'envers), CHORUS / FLANGER / VIBRATO, CRUSH, ESPACE (FDN de 8 lignes de MIFM1, shimmer, gel).
+- **Effets**, dans cet ordre : SPECTRE (pics d'une FFT d'environ 85 ms rendus par 1 à 33 oscillateurs ; refait en 0.4.2, voir plus haut), PITCH (deux voix Signalsmith, retards, réinjection, CRISTAUX : grains à l'envers), CHORUS / FLANGER / VIBRATO, CRUSH, ESPACE (FDN de 8 lignes de MIFM1, shimmer, gel).
 - **Mods** : 4, ONDE / PAS / HASARD / ENV / SUIVEUR, au tempo de l'hôte (sur sa grille) ou au leur, 8 routes chacun ; assignation en tournant le potard.
 - **Scènes** : 16, deux sous le fader (A, B) ; un réglage tenu d'un seul côté part de sa propre valeur.
 - **Multi-effet** : MONITOR THRU FX, l'entrée (une piste en insert) passe dans le filtre et la chaîne.

@@ -165,7 +165,7 @@ public:
             paintCapture (g, in);
         else if (m.mode == Machine::radioMode && vizNow == "tune")
             {}                                  // (the tuner over it)
-        else if (m.mode == Machine::radioMode && ! (vizNow == "fx" && (m.bankOf[juce::String ("fx") + juce::String (m.mode)] == 1 || m.bankOf[juce::String ("fx") + juce::String (m.mode)] == 2)))
+        else if (m.mode == Machine::radioMode && ! (vizNow == "fx" && spectreBank()))
             radioScreen.paint (g, in, proc(), m.radioPad());
         else if (vizNow == "orbite")
             paintOrbite (g, in);
@@ -173,7 +173,7 @@ public:
             paintMixer (g, in);
         else if (vizNow == "pitch" && m.mode == Machine::samplerMode)
             paintTuner (g, in);
-        else if (vizNow == "fx" && (m.bankOf[juce::String ("fx") + juce::String (m.mode)] == 1 || m.bankOf[juce::String ("fx") + juce::String (m.mode)] == 2))
+        else if (vizNow == "fx" && spectreBank())
             paintSpectre (g, in);
         else if (m.mode == Machine::synthMode)
             paintSynth (g, in);
@@ -266,7 +266,7 @@ public:
         {
             // a click: that effect's bank (the drive lives on the filter's page)
             const int st = order[(size_t) from];
-            const int banks[Player::numStages] = { 0, 1, 3, 4, 5, 6 };
+            const int banks[Player::numStages] = { 0, 1, 4, 5, 6, 7 };
             m.bankOf[juce::String ("fx") + juce::String (m.mode)] = banks[st];
             m.focus = nullptr;
             m.layoutEncoders();
@@ -333,13 +333,21 @@ public:
         text (g, "spectre", top.removeFromTop (40.0f), grotesk (32.0f, 300), on ? col::screenText : col::screenDim, juce::Justification::centredLeft);
         const double centre = 40.0 * std::pow (250.0, (double) liveNorm (p, snd::spCentre)) ;
         const double halfOct = 0.5 + 5.0 * (double) liveValue (p, snd::spWidth);
-        const double bandLo = centre / std::exp2 (halfOct), bandHi = centre * std::exp2 (halfOct);
+        const bool all = liveValue (p, snd::spWidth) >= 0.999f;
+        const bool notch = liveValue (p, snd::spNotch) > 0.5f;
+        const double bandLo = all ? 10.0 : centre / std::exp2 (halfOct), bandHi = all ? 40000.0 : centre * std::exp2 (halfOct);
+        const bool blurFrozen = liveValue (p, snd::spBlur) >= 0.995f;
         juce::String sub;
         if (! on)
             sub = "off · switch it on in the chain";
         else
-            sub << (int) P (p, snd::spVoices) << " voices · band " << juce::String::fromUTF8 (snd::text (snd::cutoff, (float) juce::jmax (20.0, bandLo)).c_str()).toLowerCase()
-                << " – " << juce::String::fromUTF8 (snd::text (snd::cutoff, (float) juce::jmin (20000.0, bandHi)).c_str()).toLowerCase() << (frozen ? " · frozen" : "");
+        {
+            const char* clocks[4] = { "free", "sync", "on notes", "on attacks" };
+            sub << (int) P (p, snd::spVoices) << " voices · " << clocks[juce::jlimit (0, 3, (int) P (p, snd::spClock))]
+                << (notch ? " · notch " : " · band ") << juce::String::fromUTF8 (snd::text (snd::cutoff, (float) juce::jmax (20.0, bandLo)).c_str()).toLowerCase()
+                << " – " << juce::String::fromUTF8 (snd::text (snd::cutoff, (float) juce::jmin (20000.0, bandHi)).c_str()).toLowerCase()
+                << (P (p, snd::spTrans) > 0.5f ? " · transients" : "") << (frozen || blurFrozen ? " · frozen" : "");
+        }
         text (g, sub, top, mono (11.0f), on ? col::screenDim : col::sYellow, juce::Justification::centredLeft);
 
         // the frequency axis (30 Hz .. 16 kHz, log), its decades; the band analysed, shaded
@@ -348,7 +356,17 @@ public:
         const double fLo = 30.0, fHi = 16000.0;
         auto xOf = [&plot, fLo, fHi] (double f) { return plot.getX() + plot.getWidth() * (float) (std::log (juce::jlimit (fLo, fHi, f) / fLo) / std::log (fHi / fLo)); };
         g.setColour (col::sBlue.withAlpha (on ? 0.07f : 0.03f));
-        g.fillRect (juce::Rectangle<float>::leftTopRightBottom (xOf (bandLo), plot.getY(), xOf (bandHi), plot.getBottom()));
+        if (! notch)
+            g.fillRect (juce::Rectangle<float>::leftTopRightBottom (xOf (bandLo), plot.getY(), xOf (bandHi), plot.getBottom()));
+        else
+        {
+            // (the notch: what is kept is either side of it; what is rejected, hatched)
+            g.fillRect (juce::Rectangle<float>::leftTopRightBottom (plot.getX(), plot.getY(), xOf (bandLo), plot.getBottom()));
+            g.fillRect (juce::Rectangle<float>::leftTopRightBottom (xOf (bandHi), plot.getY(), plot.getRight(), plot.getBottom()));
+            g.setColour (col::sRed.withAlpha (0.18f));
+            for (float x = xOf (bandLo); x < xOf (bandHi); x += 6.0f)
+                g.drawLine (x, plot.getBottom(), juce::jmin (xOf (bandHi), x + 12.0f), plot.getY() + plot.getHeight() * 0.6f, 1.0f);
+        }
         for (double f : { 100.0, 1000.0, 10000.0 })
         {
             g.setColour (col::screenLine);
@@ -392,7 +410,7 @@ public:
                 continue;                                               // (one fading out, under -48 dB)
             g.setGradientFill (juce::ColourGradient (col::sBlue.withAlpha (0.35f), x, y, col::sBlue.withAlpha (0.0f), x, plot.getBottom(), false));
             g.fillRect (x - 3.0f, y, 6.0f, plot.getBottom() - y);
-            g.setColour (frozen ? col::sViolet : col::screenText);
+            g.setColour (frozen || blurFrozen ? col::sViolet : col::screenText);
             g.fillRect (x - 0.75f, y, 1.5f, plot.getBottom() - y);
             g.fillEllipse (x - 2.5f, y - 2.5f, 5.0f, 5.0f);
         }
@@ -522,6 +540,12 @@ private:
     int lastSample = 0;
 
     ReplikantProcessor& proc() const     { return m.proc; }
+    // the fx page on one of SPECTRE's banks (its picture on the screen)
+    bool spectreBank() const
+    {
+        const auto it = m.bankOf.find (juce::String ("fx") + juce::String (m.mode));
+        return it != m.bankOf.end() && it->second >= 1 && it->second <= 3;
+    }
 
     void paintTitle (juce::Graphics& g, juce::Rectangle<float> r)
     {
@@ -1509,8 +1533,8 @@ private:
             const int ons[6] = { (int) P (p, snd::dModel) > 0, P (p, snd::spOn) > 0.5f, P (p, snd::piOn) > 0.5f, P (p, snd::chOn) > 0.5f,
                                  P (p, snd::crOn) > 0.5f, P (p, snd::rvOn) > 0.5f };
             const char* names[6] = { "drive", "spectre", "pitch", "chorus", "crush", "espace" };
-            const int bankStage[7] = { 0, 1, 1, 2, 3, 4, 5 };
-            const int shownStage = bankStage[juce::jlimit (0, 6, m.bankOf[juce::String ("fx") + juce::String (m.mode)])];
+            const int bankStage[8] = { 0, 1, 1, 1, 2, 3, 4, 5 };
+            const int shownStage = bankStage[juce::jlimit (0, 7, m.bankOf[juce::String ("fx") + juce::String (m.mode)])];
             const auto order = p.player.fxOrder();
             fxShown = true;
             fxRow = r.withSizeKeepingCentre (r.getWidth(), 80.0f).translated (0.0f, -8.0f);
@@ -2511,8 +2535,14 @@ void Machine::buildPages()
         // (each effect's on and off: the switch on its block, in the chain on the screen)
         Page pg { "fx", "fx", {} };
         pg.banks.push_back ({ "drive", { S (snd::dModel), sep (S (snd::dAmt)), S (snd::dTone), sep (S (snd::dMix)) } });
-        pg.banks.push_back ({ "spectre", { S (snd::spVoices), S (snd::spSlice), S (snd::spBlur), S (snd::spGlide), sep (S (snd::spCentre)), S (snd::spWidth), sep (S (snd::spMix)) } });
-        pg.banks.push_back ({ "spectre +", { S (snd::spOct), S (snd::spWave), sep (S (snd::spFreeze)), S (snd::spFeedback) } });
+        // SPECTRE: its slices and its memory; its band; its pitches
+        auto spClock = [this] (int k) { return std::function<bool()> ([this, k] { return (int) P (proc, snd::spClock) == k; }); };
+        pg.banks.push_back ({ "spectre", { S (snd::spVoices), sep (as (S (snd::spClock), Ctl::Look::ledList)), S (snd::spSlice, nullptr, spClock (0)),
+                                           S (snd::spMult, nullptr, spClock (0)), S (snd::spDiv, nullptr, spClock (1)), sep (S (snd::spBlur)), S (snd::spFreeze),
+                                           sep (S (snd::spMix)) } });
+        pg.banks.push_back ({ "spectre +", { S (snd::spCentre), S (snd::spWidth), S (snd::spNotch), sep (S (snd::spTrans)), sep (S (snd::spAssign)),
+                                             sep (S (snd::spFeedback)) } });
+        pg.banks.push_back ({ "spectre ++", { S (snd::spOct), S (snd::spFine), S (snd::spWarp), sep (S (snd::spGlide)), sep (S (snd::spWave)) } });
         pg.banks.push_back ({ "pitch", { S (snd::piA), S (snd::piB), S (snd::piDetune), sep (S (snd::piDelay)), S (snd::piLevelB), S (snd::piFeedback), sep (S (snd::piMix)) } });
         pg.banks.push_back ({ "chorus", { S (snd::chMode), sep (S (snd::chRate)), S (snd::chDepth), S (snd::chFeedback), S (snd::chTone), sep (S (snd::chMix)), sep (S (snd::piCrystals)) } });
         pg.banks.push_back ({ "crush", { S (snd::crBits), S (snd::crRate), S (snd::crJitter), sep (S (snd::crTone)), sep (S (snd::crMix)) } });
@@ -2922,6 +2952,29 @@ void Machine::buildPages()
                     if (c.param == id)
                         c.tip = t;
     };
+    // SPECTRE's, on every mode's effects
+    for (auto* v : { &pages[synthMode], &pages[drumMode], &pages[samplerMode], &pages[radioMode] })
+    {
+        tip (*v, snd::spVoices, "Combien de partiels sont rejoués : les plus forts, de 1 à 33 oscillateurs."_fr);
+        tip (*v, snd::spClock, "Quand le son est analysé. FREE : toutes les SLICE. SYNC : sur la grille du DAW (ou au tempo). NOTES : à chaque note jouée, puis le spectre tenu jusqu'à la suivante. ATTACKS : à chaque attaque du son qui entre."_fr);
+        tip (*v, snd::spSlice, "Le temps entre deux analyses, de 6 à 506 ms (multiplié par MULTIPLY)."_fr);
+        tip (*v, snd::spMult, "SLICE multiplié, jusqu'à 32 fois : une analyse toutes les quelques secondes."_fr);
+        tip (*v, snd::spDiv, "SYNC : une analyse à chaque division de la mesure."_fr);
+        tip (*v, snd::spBlur, "Le spectre qui traîne : chaque analyse s'y fond en 20 ms à 10 s, quelle que soit la vitesse des slices. Au bout, il se fige."_fr);
+        tip (*v, snd::spFreeze, "Le spectre figé : les oscillateurs continuent de jouer, la bande, les hauteurs et WARP restent réglables."_fr);
+        tip (*v, snd::spMix, "Le son sec et le spectre rejoué, à puissance constante."_fr);
+        tip (*v, snd::spCentre, "Le centre de la bande analysée, de 40 Hz à 10 kHz."_fr);
+        tip (*v, snd::spWidth, "Sa largeur, d'une octave à onze. Au bout, tout le spectre (avec NOTCH : plus rien)."_fr);
+        tip (*v, snd::spNotch, "ON : la bande est rejetée au lieu d'être gardée. Seuls les partiels hors de la bande sont rejoués."_fr);
+        tip (*v, snd::spTrans, "Une deuxième analyse, quatre fois plus courte, prend le relais au-dessus de 1 kHz : les aigus et les attaques répondent plus vite."_fr);
+        tip (*v, snd::spAssign, "RANK : les oscillateurs prennent les partiels dans l'ordre des hauteurs (un partiel qui arrive en dessous fait tout glisser). TRACK : chacun garde le plus proche du sien, plus stable."_fr);
+        tip (*v, snd::spFeedback, "Le spectre rejoué renvoyé dans l'analyse, par un limiteur : il se nourrit de lui-même, jusqu'au drone qui tient seul."_fr);
+        tip (*v, snd::spOct, "Tous les partiels transposés, de -2 à +3 octaves."_fr);
+        tip (*v, snd::spFine, "Et finement, ±7 demi-tons (à moduler)."_fr);
+        tip (*v, snd::spWarp, "À gauche, les partiels se resserrent vers leur centre, jusqu'à une seule hauteur. À droite, ils s'écartent : un spectre qui devient inharmonique."_fr);
+        tip (*v, snd::spGlide, "Le temps que met chaque oscillateur pour glisser vers son nouveau partiel, en demi-tons, jusqu'à 10 s. HOLD : les hauteurs ne bougent plus."_fr);
+        tip (*v, snd::spWave, "La forme des oscillateurs. SINE XF et SAW XF : à chaque slice, l'ancienne hauteur s'efface pendant que la nouvelle monte."_fr);
+    }
     for (auto* v : { &pages[synthMode], &pages[samplerMode] })
     {
         tip (*v, snd::oaPos, "Où lire dans la banque : les cycles se suivent, la position passe de l'un à l'autre en fondu (à moduler)."_fr);

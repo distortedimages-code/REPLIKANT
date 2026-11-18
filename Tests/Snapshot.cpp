@@ -119,6 +119,24 @@ int main (int argc, char** argv)
     view->showBank (1);
     run (90);
     shoot ("32-synthe-spectre.png");
+    // its band turned into a notch, its partials warped, in cross-fading saws
+    set (snd::spNotch, 1.0f);
+    set (snd::spWidth, 0.25f);
+    set (snd::spCentre, 0.42f);
+    set (snd::spTrans, 1.0f);
+    view->showBank (2);
+    run (60);
+    shoot ("45-spectre-notch.png");
+    set (snd::spWarp, 0.45f);
+    set (snd::spWave, 6.0f);
+    set (snd::spFine, 3.5f);
+    view->showBank (3);
+    run (90);
+    shoot ("46-spectre-warp.png");
+    for (int id : { (int) snd::spNotch, (int) snd::spTrans, (int) snd::spWarp, (int) snd::spWave, (int) snd::spFine })
+        set (id, 0.0f);
+    set (snd::spWidth, 1.0f);
+    set (snd::spCentre, 0.5f);
     set (snd::spOn, 0.0f);
     view->showBank (0);
     // the filter's other banks and models: the drive on tape, the MS-20 high-pass

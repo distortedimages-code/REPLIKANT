@@ -1,3 +1,15 @@
+**REPLIK8 0.4.2** : SPECTRE refait de fond en comble.
+
+- **Les slices** : FREE (avec MULTIPLY, jusqu'à 32 fois plus lent : une analyse toutes les quelques secondes), SYNC sur la grille du DAW, NOTES (une analyse à chaque note jouée, puis le spectre tenu jusqu'à la suivante) ou ATTACKS (à chaque attaque du son qui entre : parfait sur le DRUM ou en insert)
+- **BLUR** en secondes (de 20 ms à 10 s, figé au bout), le même quelle que soit la vitesse des slices ; FREEZE garde les oscillateurs qui jouent, la bande et les hauteurs toujours réglables
+- **TRANSIENTS** : une seconde analyse, quatre fois plus courte, prend le relais au-dessus de 1 kHz : les aigus et les attaques répondent trois fois plus vite
+- **NOTCH** : la bande rejetée au lieu d'être gardée
+- **Les hauteurs** : FINE (±7 demi-tons), OCTAVE de -2 à +3, et WARP, qui resserre les partiels vers une seule hauteur ou les écarte jusqu'à l'inharmonique. Elles bougent aussi sur un spectre figé
+- **GLIDE** en demi-tons, jusqu'à 10 s, et HOLD qui fige les hauteurs. FOLLOW : RANK (les partiels dans l'ordre, tout glisse quand un nouveau arrive en dessous) ou TRACK (chaque oscillateur garde le plus proche du sien)
+- **Formes d'onde** : PULSE, et SINE XF / SAW XF, où l'ancienne hauteur s'efface pendant que la nouvelle monte, sur toute la durée de la slice
+- **FEEDBACK** jusqu'au bout, par un limiteur : le spectre se nourrit de lui-même jusqu'au drone, sans jamais s'emballer. MIX à puissance constante
+- SPECTRE a maintenant trois banques dans la page FX, et l'écran montre l'horloge, la bande ou le notch
+
 **REPLIK8 0.4.1** : une enveloppe pour le filtre de chaque piste du DRUM.
 
 - **F.ENV, F.ATTACK, F.DECAY** dans la page TONE : au coup, la coupure du filtre de la piste monte (ou descend) jusqu'à six octaves, puis revient en F.DECAY (HOLD : elle reste). De quoi faire claquer une caisse ou miauler une basse, et chaque pas peut avoir les siens

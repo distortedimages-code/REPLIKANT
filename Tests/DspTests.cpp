@@ -384,12 +384,258 @@ static void testModulators()
     }
 }
 
+
+// SPECTRE (0.4.2): its pitches (to the cent), the band and the notch, BLUR a time constant whatever the slices, FREEZE,
+// the slices on the grid, on the notes, on the attacks, TRANSIENTS quicker in the highs, WARP, FINE and OCTAVE,
+// TRACK, the XF waves and the feedback bounded
+struct SpectreRig
+{
+    double sr = 48000.0;
+    Spectral sp;
+    SpectralSettings st;
+    std::vector<float> out;
+    double t = 0.0;
+    SpectreRig()
+    {
+        sp.prepare (sr);
+        st.mix = 1.0f;
+        st.glide = 0.0f;
+        st.blur = 0.0f;
+        st.slice = 0.1f;
+    }
+    // `seconds` of `gen` (time -> sample); `each` called at every block start (its time)
+    template <typename G, typename E>
+    void play (double seconds, G&& gen, E&& each)
+    {
+        std::vector<float> L (256), R (256);
+        const int blocks = (int) (seconds * sr / 256.0);
+        for (int b = 0; b < blocks; ++b)
+        {
+            each (t);
+            sp.set (st);
+            for (int i = 0; i < 256; ++i)
+                L[(size_t) i] = R[(size_t) i] = gen (t + i / sr);
+            sp.process (L.data(), R.data(), 256);
+            out.insert (out.end(), L.begin(), L.end());
+            t += 256.0 / sr;
+        }
+    }
+    template <typename G> void play (double seconds, G&& gen)   { play (seconds, gen, [] (double) {}); }
+    std::vector<std::pair<float, float>> now() const
+    {
+        float hz[33], lv[33];
+        const int n = sp.peaks (hz, lv, 33);
+        std::vector<std::pair<float, float>> v;
+        for (int i = 0; i < n; ++i)
+            v.push_back ({ hz[i], lv[i] });
+        std::sort (v.begin(), v.end());
+        return v;
+    }
+};
+
+static float sine (double t, double hz, double a = 0.4) { return (float) (a * std::sin (2.0 * M_PI * hz * t)); }
+static double cents (double a, double b) { return 1200.0 * std::log2 (a / b); }
+
+static void testSpectre()
+{
+    // its pitches, to a few cents (55 .. 440 Hz)
+    for (double hz : { 55.0, 110.0, 220.0, 440.0 })
+    {
+        SpectreRig r;
+        r.st.voices = 1;
+        r.play (1.0, [hz] (double t) { return sine (t, hz); });
+        const auto v = r.now();
+        CHECK (v.size() == 1 && std::abs (cents (v[0].first, hz)) < 8.0, "spectre on %.0f Hz: %.2f Hz", hz, v.empty() ? 0.0 : v[0].first);
+    }
+    // the band keeps 2 kHz, the notch 220 Hz
+    for (bool notch : { false, true })
+    {
+        SpectreRig r;
+        r.st.voices = 2;
+        r.st.centre = (float) (std::log (2000.0 / 40.0) / std::log (250.0));
+        r.st.bandwidth = 0.0f;
+        r.st.notch = notch;
+        r.play (1.0, [] (double t) { return sine (t, 220.0, 0.3) + sine (t, 2000.0, 0.3); });
+        const auto v = r.now();
+        const double want = notch ? 220.0 : 2000.0;
+        CHECK (v.size() == 1 && std::abs (cents (v[0].first, want)) < 10.0, "%s: %zu peaks, %.1f Hz", notch ? "notch" : "band", v.size(), v.empty() ? 0.0 : v[0].first);
+    }
+    // BLUR: 220 Hz then 330; the loudest peak moves after about the same time with slices of 11 ms and of 186 ms
+    double moved[2] = { 0.0, 0.0 };
+    for (int s = 0; s < 2; ++s)
+    {
+        SpectreRig r;
+        r.st.voices = 1;
+        r.st.blur = 0.5f;
+        r.st.slice = s == 0 ? 0.05f : 0.6f;
+        r.play (1.0, [] (double t) { return sine (t, 220.0); });
+        r.play (2.5, [] (double t) { return sine (t, 330.0); }, [&] (double t)
+        {
+            const auto v = r.now();
+            if (moved[s] == 0.0 && ! v.empty() && std::abs (cents (v[0].first, 330.0)) < 50.0)
+                moved[s] = t - 1.0;
+        });
+    }
+    std::printf ("  spectre blur: the peak moves after %.2f s (slices of 11 ms), %.2f s (186 ms)\n", moved[0], moved[1]);
+    CHECK (moved[0] > 0.15 && moved[1] > 0.15 && std::abs (moved[0] - moved[1]) < 0.25, "blur in seconds: %.2f vs %.2f", moved[0], moved[1]);
+    // FREEZE (BLUR at its end): the sound gone, the partial still there
+    {
+        SpectreRig r;
+        r.st.voices = 1;
+        r.play (1.0, [] (double t) { return sine (t, 220.0); });
+        r.st.blur = 1.0f;
+        r.play (1.0, [] (double) { return 0.0f; });
+        const auto v = r.now();
+        const double tail = rmsDb (std::vector<float> (r.out.end() - 24000, r.out.end()));
+        CHECK (v.size() == 1 && std::abs (cents (v[0].first, 220.0)) < 8.0 && tail > -20.0, "frozen: %.1f dB, %zu peaks", tail, v.size());
+    }
+    // the slices: on the grid (quarters at 120: four in two seconds, and one on the start), on notes, on attacks
+    {
+        SpectreRig r;
+        r.st.clock = 1;
+        r.st.division = 4;      // 1/4
+        r.st.bpm = 120.0;
+        r.st.playing = true;
+        r.play (2.0, [] (double t) { return sine (t, 220.0); }, [&] (double t) { r.st.ppq = t * 2.0; });
+        CHECK (r.sp.analyses() == 4 || r.sp.analyses() == 5, "sync: %d analyses in 2 s of quarters", r.sp.analyses());
+    }
+    {
+        SpectreRig r;
+        r.st.clock = 2;
+        bool did[2] = { false, false };
+        r.play (2.0, [] (double t) { return sine (t, 220.0); }, [&] (double t)
+        {
+            for (int k = 0; k < 2; ++k)
+                if (! did[k] && t >= 0.5 + k)
+                {
+                    did[k] = true;
+                    r.sp.trigger();
+                }
+        });
+        CHECK (r.sp.analyses() == 2, "notes: %d analyses for 2 notes", r.sp.analyses());
+    }
+    {
+        SpectreRig r;
+        r.st.clock = 3;
+        r.play (2.0, [] (double t)
+        {
+            const double in = std::fmod (t, 0.25);
+            return in < 0.08 ? (float) (std::exp (-in * 40.0) * 0.5 * std::sin (2.0 * M_PI * 300.0 * t)) : 0.0f;
+        });
+        CHECK (r.sp.analyses() >= 7 && r.sp.analyses() <= 9, "attacks: %d analyses for 8 hits", r.sp.analyses());
+    }
+    // TRANSIENTS: a quiet 5 kHz coming in over a loud 200 Hz is heard sooner
+    double seen[2] = { 0.0, 0.0 };
+    for (int tr = 0; tr < 2; ++tr)
+    {
+        SpectreRig r;
+        r.st.voices = 2;
+        r.st.slice = 0.0f;
+        r.st.transients = tr == 1;
+        r.play (1.0, [] (double t) { return sine (t, 200.0); });
+        r.play (0.3, [] (double t) { return sine (t, 200.0) + sine (t, 5000.0, 0.15); }, [&] (double t)
+        {
+            for (auto& p : r.now())
+                if (seen[tr] == 0.0 && std::abs (cents (p.first, 5000.0)) < 30.0 && p.second > 0.05f)
+                    seen[tr] = t - 1.0;
+        });
+    }
+    std::printf ("  spectre transients: 5 kHz heard after %.1f ms (long), %.1f ms (transients)\n", seen[0] * 1000.0, seen[1] * 1000.0);
+    CHECK (seen[1] > 0.0 && seen[0] > 0.0 && seen[1] < seen[0] * 0.8, "transients quicker: %.3f vs %.3f", seen[1], seen[0]);
+    // WARP: 200, 400 and 800 Hz drawn to their centre (400), or pushed out (100, 400, 1600); FINE and OCTAVE
+    for (float w : { -1.0f, 1.0f })
+    {
+        SpectreRig r;
+        r.st.voices = 3;
+        r.st.warp = w;
+        r.play (1.0, [] (double t) { return sine (t, 200.0, 0.25) + sine (t, 400.0, 0.25) + sine (t, 800.0, 0.25); });
+        const auto v = r.now();
+        bool ok = v.size() == 3;
+        const double want[3] = { w < 0 ? 400.0 : 100.0, 400.0, w < 0 ? 400.0 : 1600.0 };
+        for (size_t i = 0; ok && i < 3; ++i)
+            ok = std::abs (cents (v[i].first, want[i])) < 15.0;
+        CHECK (ok, "warp %+.0f: %zu peaks, %.1f %.1f %.1f", w, v.size(), v.size() > 0 ? v[0].first : 0.0f, v.size() > 1 ? v[1].first : 0.0f, v.size() > 2 ? v[2].first : 0.0f);
+    }
+    {
+        SpectreRig r;
+        r.st.voices = 1;
+        r.st.octave = 3.0f;
+        r.st.fine = 7.0f;
+        r.play (1.0, [] (double t) { return sine (t, 220.0); });
+        const auto v = r.now();
+        CHECK (v.size() == 1 && std::abs (cents (v[0].first, 220.0 * 8.0 * std::pow (2.0, 7.0 / 12.0))) < 8.0, "octave +3, fine +7: %.1f", v.empty() ? 0.0 : v[0].first);
+    }
+    // TRACK: a partial coming in under two others: they stay where they are (RANK: they shift up a place, gliding)
+    for (int a = 0; a < 2; ++a)
+    {
+        SpectreRig r;
+        r.st.voices = 3;
+        r.st.assign = a;
+        r.st.glide = 0.6f;
+        r.st.slice = 0.05f;
+        r.play (1.0, [] (double t) { return sine (t, 300.0, 0.3) + sine (t, 500.0, 0.3); });
+        r.play (0.25, [] (double t) { return sine (t, 100.0, 0.3) + sine (t, 300.0, 0.3) + sine (t, 500.0, 0.3); });
+        double worst = 0.0;
+        for (auto& p : r.now())
+            if (p.second > 0.02f)
+            {
+                double near = 1e9;
+                for (double want : { 100.0, 300.0, 500.0 })
+                    near = std::min (near, std::abs (cents (p.first, want)));
+                worst = std::max (worst, near);
+            }
+        CHECK (a == 1 ? worst < 30.0 : worst > 100.0, "%s: %.0f cents off at worst", a == 1 ? "track" : "rank", worst);
+    }
+    // its cost at its heaviest: 33 voices cross-fading saws, both analyses every 6 ms
+    {
+        SpectreRig r;
+        r.st.voices = 33;
+        r.st.wave = 6;
+        r.st.transients = true;
+        r.st.slice = 0.0f;
+        r.st.assign = 1;
+        const double t0 = now();
+        r.play (5.0, [] (double t) { return sine (t, 150.0 * std::pow (2.0, std::floor (t * 8.0) / 12.0)) + sine (t, 900.0, 0.2) + sine (t, 3100.0, 0.1); });
+        const double cpu = (now() - t0) / 5.0;
+        std::printf ("  spectre at its heaviest: %.1f %% of real time\n", cpu * 100.0);
+        CHECK (cpu < 0.25, "spectre cpu %.3f", cpu);
+    }
+    // the XF waves on a pitch changing each slice, and FEEDBACK at its end on silence: numbers only, bounded
+    for (int wave : { 4, 5, 6 })
+    {
+        SpectreRig r;
+        r.st.voices = 8;
+        r.st.wave = wave;
+        r.st.glide = 0.2f;
+        r.play (3.0, [] (double t) { return sine (t, 150.0 * std::pow (2.0, std::floor (t * 8.0) / 12.0)) + sine (t, 900.0, 0.2); });
+        float peak = 0.0f;
+        bool finite = true;
+        for (float x : r.out) { finite = finite && std::isfinite (x); peak = std::max (peak, std::abs (x)); }
+        CHECK (finite && peak < 2.0f && peak > 0.1f, "wave %d: peak %.2f", wave, peak);
+    }
+    {
+        SpectreRig r;
+        r.st.voices = 33;
+        r.st.feedback = 1.0f;
+        r.st.blur = 0.3f;
+        r.play (0.5, [] (double t) { return sine (t, 220.0) + sine (t, 1234.0, 0.3); });
+        r.play (8.0, [] (double) { return 0.0f; });
+        float peak = 0.0f;
+        bool finite = true;
+        for (float x : r.out) { finite = finite && std::isfinite (x); peak = std::max (peak, std::abs (x)); }
+        const double tail = rmsDb (std::vector<float> (r.out.end() - 48000, r.out.end()));
+        std::printf ("  spectre feedback at its end: peak %.2f, the last second %.1f dB\n", peak, tail);
+        CHECK (finite && peak < 3.0f, "feedback bounded: %.2f", peak);
+    }
+}
+
 int main()
 {
     testOversampler();
     testFilters();
     testDrive();
     testEffects();
+    testSpectre();
     testModulators();
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;

@@ -1,4 +1,5 @@
 #include "Effects.h"
+#include "Modulators.h"
 
 #include <algorithm>
 #include <cmath>
@@ -64,9 +65,28 @@ namespace
 
 //==============================================================================
 // SPECTRE
+namespace
+{
+    // a waveform at its phase (0..1), its step `dt` for the band limiting (polyBLEP); the XF waves are a sine and a saw
+    inline float spectreWave (int w, double ph, double dt)
+    {
+        switch (w)
+        {
+            case 1:  return (float) (1.0 - 4.0 * std::abs (ph - 0.5));
+            case 2:
+            case 6:  return (float) (2.0 * ph - 1.0) - polyBlep (ph, dt);
+            case 3:  return (ph < 0.5 ? 1.0f : -1.0f) + polyBlep (ph, dt) - polyBlep (std::fmod (ph + 0.5, 1.0), dt);
+            case 4:  return (ph < 0.25 ? 1.0f : -1.0f) + polyBlep (ph, dt) - polyBlep (std::fmod (ph + 0.75, 1.0), dt) + 0.5f;
+            default: return (float) std::sin (kTwoPi * ph);
+        }
+    }
+}
+
 void Spectral::prepare (double rate)
 {
     sr = rate;
+    // about 85 ms of sound whatever the rate (4096 at 44.1 and 48 kHz, 8192 at 88.2 and 96)
+    N = std::clamp (pow2 ((int) (sr * 0.08)), 1024, 32768);
     ring.assign ((size_t) N, 0.0f);
     window.resize ((size_t) N);
     for (int i = 0; i < N; ++i)
@@ -74,12 +94,18 @@ void Spectral::prepare (double rate)
         const double x = kTwoPi * i / N;   // Blackman-Harris: its side lobes under the quietest partials kept
         window[(size_t) i] = (float) (0.35875 - 0.48829 * std::cos (x) + 0.14128 * std::cos (2 * x) - 0.01168 * std::cos (3 * x));
     }
+    // TRANSIENTS: the last quarter, in a Hann window, the rest of the transform left at zero (the same bins)
+    const int Q = N / 4;
+    shortWindow.resize ((size_t) Q);
+    for (int i = 0; i < Q; ++i)
+        shortWindow[(size_t) i] = (float) (0.5 - 0.5 * std::cos (kTwoPi * i / Q));
     mags.assign ((size_t) N / 2 + 1, 0.0f);
     smooth.assign ((size_t) N / 2 + 1, 0.0f);
     fft->f.resize ((size_t) N);
     fa.assign ((size_t) N, {});
     fb.assign ((size_t) N, {});
     found.reserve ((size_t) N / 2);
+    matches.reserve ((size_t) maxVoices * maxVoices);
     reset();
 }
 
@@ -89,15 +115,21 @@ void Spectral::reset()
     std::fill (smooth.begin(), smooth.end(), 0.0f);
     for (auto& o : osc)
         o = Osc();
-    ringPos = sinceSlice = 0;
-    lastOut = level = 0.0f;
+    ringPos = sinceSlice = sinceAnalysis = analysisCount = 0;
+    pendingIn = -1;
+    triggered = analysedOnce = false;
+    lastGrid = -1;
+    lastOut = fbEnv = onsetFast = onsetSlow = 0.0f;
+    onsetHold = 0;
+    centreHz = 1000.0f;
+    found.clear();
 }
 
 int Spectral::peaks (float* hz, float* lv, int max) const
 {
     int n = 0;
     for (auto& o : osc)
-        if (o.amp > 1.0e-4f && n < max)
+        if (o.amp > 1.0e-4f && o.hz > 0.0f && n < max)
         {
             hz[n] = o.hz;
             lv[n] = o.amp;
@@ -108,39 +140,77 @@ int Spectral::peaks (float* hz, float* lv, int max) const
 
 void Spectral::analyse()
 {
+    const int H = N / 2;
     for (int i = 0; i < N; ++i)
         fa[(size_t) i] = ring[(size_t) ((ringPos + i) % N)] * window[(size_t) i];
     fft->f.fft (fa.data(), fb.data());
-    const int H = N / 2;
-    float total = 0.0f;
-    const float blur = std::clamp (target.blur, 0.0f, 0.98f);
+    const float gLong = 2.0f / ((float) N * 0.35875f);
+    for (int k = 0; k <= H; ++k)
+        mags[(size_t) k] = std::abs (fb[(size_t) k]) * gLong;
+    if (target.transients)
+    {
+        // the last 21 ms (at 48 kHz) above 1.3 kHz, the long one under 700 Hz, mixed in between
+        const int Q = N / 4;
+        for (int i = 0; i < N; ++i)
+            fa[(size_t) i] = i < Q ? ring[(size_t) ((ringPos + N - Q + i) % N)] * shortWindow[(size_t) i] : 0.0f;
+        fft->f.fft (fa.data(), fb.data());
+        const float gShort = 2.0f / ((float) Q * 0.5f);
+        const double binHz = sr / N;
+        for (int k = 0; k <= H; ++k)
+        {
+            const float u = (float) std::clamp ((k * binHz - 700.0) / 600.0, 0.0, 1.0);
+            if (u > 0.0f)
+                mags[(size_t) k] += u * (std::abs (fb[(size_t) k]) * gShort - mags[(size_t) k]);
+        }
+    }
+    // BLUR: each bin follows the analyses with a time constant (20 ms .. 10 s), whatever the time between them; at
+    // its end the spectrum stays as it is
+    const float b = std::clamp (target.blur, 0.0f, 1.0f);
+    float alpha = 1.0f;
+    if (analysedOnce && b >= 0.995f)
+        alpha = 0.0f;
+    else if (analysedOnce && b > 0.005f)
+        alpha = (float) (1.0 - std::exp (-(double) sinceAnalysis / sr / (0.02 * std::pow (500.0, (double) b))));
     for (int k = 0; k <= H; ++k)
     {
-        mags[(size_t) k] = std::abs (fb[(size_t) k]) * (2.0f / (N * 0.35875f));
-        smooth[(size_t) k] = blur * smooth[(size_t) k] + (1.0f - blur) * mags[(size_t) k];
-        total += smooth[(size_t) k] * smooth[(size_t) k];
+        smooth[(size_t) k] += alpha * (mags[(size_t) k] - smooth[(size_t) k]);
+        if (! std::isfinite (smooth[(size_t) k]))
+            smooth[(size_t) k] = 0.0f;
     }
-    // the band: centre (log, 40 Hz .. 10 kHz) and its width (an octave .. everything)
-    const double centreHz = 40.0 * std::pow (250.0, (double) std::clamp (target.centre, 0.0f, 1.0f));
-    const double halfOct = 0.5 + 5.0 * std::clamp (target.bandwidth, 0.0f, 1.0f);
-    const double lo = centreHz / std::pow (2.0, halfOct), hi = centreHz * std::pow (2.0, halfOct);
+    sinceAnalysis = 0;
+    analysedOnce = true;
+    ++analysisCount;
+}
+
+void Spectral::pick()
+{
+    const int H = N / 2;
     const double binHz = sr / N;
+    found.clear();
+    if (! analysedOnce)
+        return;
+    // the band: centre (log, 40 Hz .. 10 kHz) and its width (an octave .. eleven; at its end, everything), kept or
+    // rejected (NOTCH)
+    const double centre = 40.0 * std::pow (250.0, (double) std::clamp (target.centre, 0.0f, 1.0f));
+    const bool all = target.bandwidth >= 0.999f;
+    const double halfOct = 0.5 + 5.0 * std::clamp (target.bandwidth, 0.0f, 1.0f);
+    const double lo = centre / std::pow (2.0, halfOct), hi = centre * std::pow (2.0, halfOct);
     float loudest = 0.0f;
     for (int k = 2; k < H - 1; ++k)
         loudest = std::max (loudest, smooth[(size_t) k]);
     const float floorLevel = std::max (1.0e-5f, loudest * 0.001f);   // 60 dB under the loudest
-    found.clear();
     for (int k = 2; k < H - 1; ++k)
     {
         const float m = smooth[(size_t) k];
         if (m > smooth[(size_t) k - 1] && m >= smooth[(size_t) k + 1] && m > floorLevel)
         {
             const double f = k * binHz;
-            if (f < lo || f > hi)
+            const bool inside = all || (f >= lo && f <= hi);
+            if (inside == target.notch)
                 continue;
             // the peak between bins (parabolic, in log)
-            const double a = std::log (smooth[(size_t) k - 1] + 1e-9), b = std::log (m + 1e-9), c = std::log (smooth[(size_t) k + 1] + 1e-9);
-            const double den = a - 2.0 * b + c;
+            const double a = std::log (smooth[(size_t) k - 1] + 1e-9), bb = std::log (m + 1e-9), c = std::log (smooth[(size_t) k + 1] + 1e-9);
+            const double den = a - 2.0 * bb + c;
             const double off = std::abs (den) > 1e-12 ? std::clamp (0.5 * (a - c) / den, -0.5, 0.5) : 0.0;
             found.push_back ({ m, (float) ((k + off) * binHz) });
         }
@@ -150,72 +220,285 @@ void Spectral::analyse()
                        [] (auto& x, auto& y) { return x.first > y.first; });
     found.resize ((size_t) std::min ((int) found.size(), V));
     std::sort (found.begin(), found.end(), [] (auto& x, auto& y) { return x.second < y.second; });
-    // the oscillators, in frequency order, take the peaks in frequency order (each glides to the nearest change)
-    const float trans = std::exp2 (std::round (std::clamp (target.octave, -2.0f, 2.0f)));
-    float sumAmp = 0.0f;
+    // WARP's centre: the peaks' geometric mean, weighted by their levels
+    double sw = 0.0, sl = 0.0;
+    for (auto& f : found)
+    {
+        sw += f.first;
+        sl += f.first * std::log ((double) f.second);
+    }
+    if (sw > 0.0)
+        centreHz = (float) std::exp (sl / sw);
+}
+
+void Spectral::assign()
+{
+    const int H = N / 2;
+    float total = 0.0f, sumAmp = 0.0f;
+    for (int k = 0; k <= H; ++k)
+        total += smooth[(size_t) k] * smooth[(size_t) k];
     for (auto& f : found)
         sumAmp += f.first;
     const float norm = sumAmp > 0.0f ? std::sqrt (total) / std::max (1.0e-6f, sumAmp) * 1.5f : 0.0f;
-    std::array<int, maxVoices> order {};
-    for (int i = 0; i < maxVoices; ++i)
-        order[(size_t) i] = i;
-    std::sort (order.begin(), order.end(), [this] (int a, int b) { return osc[(size_t) a].hzTarget < osc[(size_t) b].hzTarget; });
+    const int F = (int) found.size();
+    std::array<bool, maxVoices> oscUsed {}, peakUsed {};
+    std::array<int, maxVoices> peakOf;
+    peakOf.fill (-1);
+    auto silent = [] (const Osc& o) { return o.amp < 1.0e-4f && o.ampTarget <= 0.0f; };
+    if (target.assign == 1)
+    {
+        // TRACK: each sounding oscillator to the nearest new peak (in octaves, under half an octave), the nearest
+        // pairs first; the peaks left over to silent oscillators
+        matches.clear();
+        for (int i = 0; i < maxVoices; ++i)
+            if (! silent (osc[(size_t) i]) && osc[(size_t) i].peak > 0.0f)
+                for (int j = 0; j < F; ++j)
+                    matches.push_back ({ std::abs (std::log2 (found[(size_t) j].second / osc[(size_t) i].peak)), i, j });
+        std::sort (matches.begin(), matches.end(), [] (const Match& x, const Match& y) { return x.cost < y.cost; });
+        for (auto& m : matches)
+        {
+            if (m.cost > 0.5f)
+                break;
+            if (oscUsed[(size_t) m.osc] || peakUsed[(size_t) m.peak])
+                continue;
+            oscUsed[(size_t) m.osc] = peakUsed[(size_t) m.peak] = true;
+            peakOf[(size_t) m.osc] = m.peak;
+        }
+        for (int j = 0; j < F; ++j)
+        {
+            if (peakUsed[(size_t) j])
+                continue;
+            int best = -1;
+            for (int pass = 0; pass < 2 && best < 0; ++pass)
+                for (int i = 0; i < maxVoices && best < 0; ++i)
+                    if (! oscUsed[(size_t) i] && (pass == 1 || silent (osc[(size_t) i])))
+                        best = i;
+            if (best >= 0)
+            {
+                oscUsed[(size_t) best] = peakUsed[(size_t) j] = true;
+                peakOf[(size_t) best] = j;
+            }
+        }
+    }
+    else
+    {
+        // RANK: the oscillators sounding, in the order of their partials (then the silent ones), take the peaks in
+        // frequency order: a partial coming in under the others moves them all up a place
+        std::array<int, maxVoices> order {};
+        for (int i = 0; i < maxVoices; ++i)
+            order[(size_t) i] = i;
+        std::stable_sort (order.begin(), order.end(), [this, &silent] (int a, int b)
+        {
+            const bool sa = silent (osc[(size_t) a]), sb = silent (osc[(size_t) b]);
+            if (sa != sb)
+                return ! sa;
+            return osc[(size_t) a].peak < osc[(size_t) b].peak;
+        });
+        for (int i = 0; i < F; ++i)
+            peakOf[(size_t) order[(size_t) i]] = i;
+    }
+    // XF: the old pitch fades out over the slice while the new one comes in
+    const bool xfMode = target.wave >= 5;
+    const float fade = (float) std::clamp ((double) sinceSlice, 0.005 * sr, 4.0 * sr);
     for (int i = 0; i < maxVoices; ++i)
     {
-        auto& o = osc[(size_t) order[(size_t) i]];
-        if (i < (int) found.size())
+        auto& o = osc[(size_t) i];
+        if (peakOf[(size_t) i] < 0)
         {
-            o.hzTarget = found[(size_t) i].second * trans;
-            if (o.amp < 1.0e-4f)
-                o.hz = o.hzTarget;
-            o.ampTarget = found[(size_t) i].first * norm;
-        }
-        else
             o.ampTarget = 0.0f;
+            continue;
+        }
+        const auto& f = found[(size_t) peakOf[(size_t) i]];
+        const bool born = silent (o) || o.peak <= 0.0f;
+        const bool moved = ! born && std::abs (std::log2 (f.second / o.peak)) > 5.0f / 1200.0f;
+        if (xfMode && moved && o.amp > 1.0e-4f)
+        {
+            const float gIn = o.xf < 1.0f ? std::sqrt (o.xf) : 1.0f, gOut = o.xf < 1.0f ? std::sqrt (1.0f - o.xf) : 0.0f;
+            if (o.xf < 1.0f && gOut > gIn)
+            {
+                // (mid-fade, the old one louder: the new one let go quickly, the old one fading from where it is)
+                o.tail = { o.phase, o.hz, o.amp * gIn };
+                o.ghost.gain *= gOut;
+            }
+            else
+            {
+                if (o.xf < 1.0f)
+                    o.tail = { o.ghost.phase, o.ghost.hz, o.ghost.gain * gOut };
+                o.ghost = { o.phase, o.hz, o.amp * gIn };
+            }
+            o.xf = 0.0f;
+            o.xfInc = 1.0f / fade;
+            rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+            o.phase = (double) rng / 4294967296.0;      // (a new oscillator: its own phase)
+        }
+        o.peak = f.second;
+        o.ampTarget = f.first * norm;
+        if (born)
+        {
+            o.hz = 0.0f;                                  // (silent: it starts on its pitch, and follows the estimate
+            o.young = N;                                  //  as it settles, the partial filling the window)
+        }
     }
+}
+
+void Spectral::slice()
+{
+    if (! target.freeze)
+        analyse();
+    pick();
+    assign();
+    sinceSlice = 0;
 }
 
 void Spectral::process (float* L, float* R, int n)
 {
     const float k = (float) std::min (1.0, 100.0 / sr);
-    const int hop = (int) (sr * (0.006 + 0.5 * std::pow ((double) std::clamp (target.slice, 0.0f, 1.0f), 2.0)));
-    const float glideK = (float) (1.0 - std::exp (-1.0 / (sr * (0.001 + 0.6 * std::pow ((double) target.glide, 2.0)))));
     const float ampK = (float) (1.0 - std::exp (-1.0 / (sr * 0.01)));
-    const float fb = std::clamp (target.feedback, 0.0f, 0.95f);
+    // GLIDE: in semitones, 1 ms .. 10 s (the first half as before 0.4.2), at its end HOLD
+    const double g = std::clamp ((double) target.glide, 0.0, 1.0);
+    const bool hold = g >= 0.995;
+    const double tau = 0.001 + 0.6 * g * g + 9.4 * std::pow (g, 8.0);
+    const float k8 = hold ? 0.0f : (float) (1.0 - std::exp (-8.0 / (sr * tau)));
+    const float fb = std::clamp (target.feedback, 0.0f, 1.0f);
+    const float fbRel = (float) std::exp (-1.0 / (0.3 * sr));
+    const float tailK = (float) std::exp (-1.0 / (0.002 * sr));
+    const int wave = std::clamp (target.wave, 0, 6);
+    // the slices
+    const int clock = std::clamp (target.clock, 0, 3);
+    const double freeHop = sr * (0.006 + 0.5 * std::pow ((double) std::clamp (target.slice, 0.0f, 1.0f), 2.0)) * (double) (1 << std::clamp (target.mult, 0, 5));
+    const double beats = divisions()[std::clamp (target.division, 0, numDivisions() - 1)].beats;
+    const double bpm = target.bpm > 1.0 ? target.bpm : 120.0;
+    const double syncHop = beats * 60.0 / bpm * sr;
+    const int triggerDelay = (int) (sr * (target.transients ? 0.03 : 0.055));
+    if (clock != 1 || ! target.playing)
+        lastGrid = -1;
+    if (clock == 2 && triggered)
+        pendingIn = triggerDelay;
+    triggered = false;
+    // the pitches the oscillators go to: their partials, warped around the centre (q 0 .. 2), transposed
+    const float trans = std::exp2 (std::round (std::clamp (target.octave, -2.0f, 3.0f)) + std::clamp (target.fine, -7.0f, 7.0f) / 12.0f);
+    const float q = 1.0f + std::clamp (target.warp, -1.0f, 1.0f);
+    const float top = (float) (sr * 0.49);
+    std::array<float, maxVoices> goal {};
+    auto goals = [&]
+    {
+        for (int i = 0; i < maxVoices; ++i)
+        {
+            const auto& o = osc[(size_t) i];
+            float f = o.peak;
+            if (f > 0.0f && std::abs (q - 1.0f) > 1.0e-4f)
+                f = centreHz * std::pow (f / centreHz, q);
+            goal[(size_t) i] = std::clamp (f * trans, 5.0f, top);
+        }
+    };
+    goals();
+    const float dryG0 = 0.0f;
+    (void) dryG0;
     for (int i = 0; i < n; ++i)
     {
         mix += (target.mix - mix) * k;
         const float dl = L[i], dr = R != nullptr ? R[i] : L[i];
-        ring[(size_t) ringPos] = 0.5f * (dl + dr) + fb * lastOut;
+        const float mono = 0.5f * (dl + dr);
+        // FEEDBACK: the result back into the analysis, held under 0.5 by a limiter (instant up, 300 ms down)
+        const float a = std::abs (lastOut);
+        fbEnv = a > fbEnv ? a : fbEnv * fbRel;
+        const float lim = fbEnv > 0.5f ? 0.5f / fbEnv : 1.0f;
+        ring[(size_t) ringPos] = mono + fb * lastOut * lim;
         ringPos = (ringPos + 1) % N;
-        if (++sinceSlice >= hop && ! target.freeze)
+        ++sinceSlice;
+        ++sinceAnalysis;
+        // ATTACKS: a fast follower jumping over a slow one
+        if (clock == 3)
         {
-            sinceSlice = 0;
-            analyse();
+            const float x = std::abs (mono);
+            onsetFast += (x - onsetFast) * (x > onsetFast ? 0.02f : 0.0015f) * (float) (48000.0 / sr);
+            onsetSlow += (x - onsetSlow) * (x > onsetSlow ? 0.0004f : 0.0001f) * (float) (48000.0 / sr);
+            if (onsetHold > 0)
+                --onsetHold;
+            else if (onsetFast > 2.0f * onsetSlow + 0.003f)
+            {
+                pendingIn = triggerDelay;
+                onsetHold = (int) (0.05 * sr);
+            }
         }
+        bool due = false;
+        if (clock == 0)
+            due = sinceSlice >= freeHop;
+        else if (clock == 1)
+        {
+            if (target.playing)
+            {
+                const double at = target.ppq + (double) i * bpm / (60.0 * sr);
+                const auto grid = (long long) std::floor (at / beats + 1.0e-9);
+                due = grid != lastGrid;
+                lastGrid = grid;
+            }
+            else
+                due = sinceSlice >= syncHop;
+        }
+        if (pendingIn >= 0 && pendingIn-- == 0)
+            due = true;
+        if (due)
+        {
+            slice();
+            goals();
+        }
+        // the pitches: every 8 samples a step in log2 towards their goal, spread evenly over the 8
+        if ((i & 7) == 0)
+            for (int v = 0; v < maxVoices; ++v)
+            {
+                auto& o = osc[(size_t) v];
+                const float gl = std::log2 (goal[(size_t) v]);
+                if (o.hz <= 0.0f || o.young > 0)
+                {
+                    o.young = std::max (0, o.young - 8);
+                    o.lhz = gl;
+                    o.hz = goal[(size_t) v];
+                    o.mul = 1.0f;
+                    continue;
+                }
+                o.hz = std::exp2 (o.lhz);
+                const float d = (gl - o.lhz) * k8;
+                o.lhz += d;
+                o.mul = std::exp2 (d * 0.125f);
+            }
         float outL = 0.0f, outR = 0.0f;
         int idx = 0;
         for (auto& o : osc)
         {
-            o.hz += (o.hzTarget - o.hz) * glideK;
             o.amp += (o.ampTarget - o.amp) * ampK;
-            if (o.amp < 1.0e-5f || o.hz <= 0.0f || o.hz > sr * 0.45)
+            o.hz *= o.mul;
+            float s = 0.0f;
+            const bool fading = o.xf < 1.0f;
+            if (o.amp > 1.0e-5f && o.hz > 0.0f && o.hz < top)
             {
-                ++idx;
-                continue;
+                const double dt = o.hz / sr;
+                o.phase += dt;
+                if (o.phase >= 1.0) o.phase -= 1.0;
+                s = spectreWave (wave, o.phase, dt) * o.amp * (fading ? std::sqrt (o.xf) : 1.0f);
             }
-            const double dt = o.hz / sr;
-            o.phase += dt;
-            if (o.phase >= 1.0) o.phase -= 1.0;
-            float s;
-            switch (target.wave)
+            if (fading)
             {
-                case 1:  s = (float) (1.0 - 4.0 * std::abs (o.phase - 0.5)); break;
-                case 2:  s = (float) (2.0 * o.phase - 1.0) - polyBlep (o.phase, dt); break;
-                case 3:  s = (o.phase < 0.5 ? 1.0f : -1.0f) + polyBlep (o.phase, dt) - polyBlep (std::fmod (o.phase + 0.5, 1.0), dt); break;
-                default: s = (float) std::sin (kTwoPi * o.phase); break;
+                if (o.ghost.gain > 1.0e-5f && o.ghost.hz < top)
+                {
+                    const double dt = o.ghost.hz / sr;
+                    o.ghost.phase += dt;
+                    if (o.ghost.phase >= 1.0) o.ghost.phase -= 1.0;
+                    s += spectreWave (wave, o.ghost.phase, dt) * o.ghost.gain * std::sqrt (1.0f - o.xf);
+                }
+                o.xf = std::min (1.0f, o.xf + o.xfInc);
+                if (o.xf >= 1.0f)
+                    o.ghost.gain = 0.0f;
             }
-            s *= o.amp;
+            if (o.tail.gain > 1.0e-5f)
+            {
+                const double dt = o.tail.hz / sr;
+                o.tail.phase += dt;
+                if (o.tail.phase >= 1.0) o.tail.phase -= 1.0;
+                if (o.tail.hz < top)
+                    s += spectreWave (wave, o.tail.phase, dt) * o.tail.gain;
+                o.tail.gain *= tailK;
+            }
             // spread: every other oscillator leans left or right
             const float pan = (idx % 2 == 0) ? 0.3f : 0.7f;
             outL += s * (1.0f - pan) * 1.4f;
@@ -223,9 +506,21 @@ void Spectral::process (float* L, float* R, int n)
             ++idx;
         }
         lastOut = 0.5f * (outL + outR);
-        L[i] = dl + mix * (outL - dl);
+        if (! std::isfinite (lastOut))
+        {
+            // (a number gone wrong: everything let go, nothing sent on)
+            for (auto& o : osc)
+                o = Osc();
+            std::fill (ring.begin(), ring.end(), 0.0f);
+            std::fill (smooth.begin(), smooth.end(), 0.0f);
+            lastOut = fbEnv = outL = outR = 0.0f;
+        }
+        // MIX: at constant power
+        const float th = std::clamp (mix, 0.0f, 1.0f) * 1.5707963f;
+        const float dg = std::cos (th), wg = std::sin (th);
+        L[i] = dl * dg + outL * wg;
         if (R != nullptr)
-            R[i] = dr + mix * (outR - dr);
+            R[i] = dr * dg + outR * wg;
     }
 }
 

@@ -67,15 +67,15 @@ namespace
 
         { "spOn",      "Spectre",                     K::toggle,  0, 1, 0, 1, nullptr, false, "" },
         { "spVoices",  "Voices",                      K::integer, 1, 33, 12, 1, nullptr, false, "" },
-        { "spSlice",   "Slice",                       K::linear,  0, 1, 0.4f, 1, nullptr, true, "%" },
-        { "spBlur",    "Blur",                        K::linear,  0, 1, 0.2f, 1, nullptr, true, "%" },
-        { "spGlide",   "Glide",                       K::linear,  0, 1, 0.3f, 1, nullptr, true, "%" },
+        { "spSlice",   "Slice",                       K::linear,  0, 1, 0.4f, 1, nullptr, true, "sps" },
+        { "spBlur",    "Blur",                        K::linear,  0, 1, 0.2f, 1, nullptr, true, "spb" },
+        { "spGlide",   "Glide",                       K::linear,  0, 1, 0.3f, 1, nullptr, true, "spg" },
         { "spCentre",  "Centre",                      K::linear,  0, 1, 0.5f, 1, nullptr, true, "spc" },
-        { "spWidth",   "Width",                       K::linear,  0, 1, 1, 1, nullptr, true, "%" },
-        { "spOct",     "Octave",                      K::integer, -2, 2, 0, 1, nullptr, true, "oct" },
-        { "spWave",    "Wave",                        K::choice,  0, 3, 0, 1, "SINE|TRI|SAW|SQR", false, "" },
+        { "spWidth",   "Width",                       K::linear,  0, 1, 1, 1, nullptr, true, "spw" },
+        { "spOct",     "Octave",                      K::integer, -2, 3, 0, 1, nullptr, true, "oct" },
+        { "spWave",    "Wave",                        K::choice,  0, 6, 0, 1, "SINE|TRI|SAW|SQR|PULSE|SINE XF|SAW XF", false, "" },
         { "spFreeze",  "Freeze",                      K::toggle,  0, 1, 0, 1, nullptr, true, "" },
-        { "spFeedback","Feedback",                    K::linear,  0, 0.95f, 0, 1, nullptr, true, "%" },
+        { "spFeedback","Feedback",                    K::linear,  0, 1, 0, 1, nullptr, true, "%" },
         { "spMix",     "Mix",                         K::linear,  0, 1, 0.5f, 1, nullptr, true, "%" },
 
         { "piOn",      "Pitch",                       K::toggle,  0, 1, 0, 1, nullptr, false, "" },
@@ -218,6 +218,14 @@ namespace
         { "rdPadLevel","Level",                       K::linear,  0, 1, 0.8f, 1, nullptr, true, "%" },
         { "rdOn",      "On air",                      K::toggle,  0, 1, 1, 1, nullptr, false, "" },
         { "drSwing",   "Swing",                       K::linear,  0.5f, 0.8f, 0.5f, 1, nullptr, true, "swg" },
+        { "spClock",   "Clock",                       K::choice,  0, 3, 0, 1, "FREE|SYNC|NOTES|ATTACKS", false, "" },
+        { "spMult",    "Multiply",                    K::choice,  0, 5, 0, 1, "X1|X2|X4|X8|X16|X32", false, "" },
+        { "spDiv",     "Division",                    K::choice,  0, 15, 6, 1, kDivisions, false, "" },
+        { "spNotch",   "Notch",                       K::toggle,  0, 1, 0, 1, nullptr, true, "" },
+        { "spTrans",   "Transients",                  K::toggle,  0, 1, 0, 1, nullptr, true, "" },
+        { "spFine",    "Fine",                        K::linear,  -7, 7, 0, 1, nullptr, true, "fst" },
+        { "spWarp",    "Warp",                        K::linear,  -1, 1, 0, 1, nullptr, true, "sym" },
+        { "spAssign",  "Follow",                      K::choice,  0, 1, 0, 1, "RANK|TRACK", false, "" },
     };
 
     std::string fmt (const char* f, double v)
@@ -342,6 +350,12 @@ std::string text (int id, float v)
     if (u == "dB")  return (v > 0.0f ? "+" : "") + fmt ("%.1f DB", v);
     if (u == "ms")  return msText (v);
     if (u == "Hz")  return hzText (v);
+    // SPECTRE's BLUR (a time constant, 20 ms .. 10 s; at its end frozen) and GLIDE (1 ms .. 10 s; at its end held)
+    if (u == "sps") return msText (6.0 + 500.0 * (double) v * v);
+    if (u == "spw") return v >= 0.999f ? std::string ("ALL") : fmt ("%.1f OCT", 1.0 + 10.0 * v);
+    if (u == "spb") return v < 0.005f ? std::string ("OFF") : (v >= 0.995f ? std::string ("FROZEN") : msText (20.0 * std::pow (500.0, (double) v)));
+    if (u == "spg") return v >= 0.995f ? std::string ("HOLD") : msText (1000.0 * (0.001 + 0.6 * v * v + 9.4 * std::pow ((double) v, 8.0)));
+    if (u == "fst") return std::abs (v) < 0.005f ? std::string ("0 ST") : fmt ("%+.2f ST", v);
     if (u == "st")  return (v > 0.0f ? "+" : "") + fmt ("%.0f ST", v);
     if (u == "ct")  return (v > 0.0f ? "+" : "") + fmt ("%.0f CT", v);
     if (u == "oct") return (v > 0.0f ? "+" : "") + fmt (d.kind == Kind::integer ? "%.0f OCT" : "%.1f OCT", d.kind == Kind::integer ? v : v * 6.0f);
@@ -404,6 +418,7 @@ std::string longName (int id)
     if (id == mxSub)               return "Mixer Sub";
     if (in (rdRx, rdDrive) || id == rdOn) return "Radio " + name;
     if (id == drSwing)             return "Drum Swing";
+    if (in (spClock, spAssign))    return "Spectre " + name;
     if (in (rdTake, rdPads))       return "Radio " + name;
     if (in (rdPadTune, rdPadLevel)) return "Radio Pads " + name;
     return name;

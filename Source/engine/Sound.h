@@ -78,6 +78,9 @@ namespace snd
         rdOn,
         // (0.4) DRUM: the swing of its sequencer (every second sixteenth late)
         drSwing,
+        // (0.4.2) SPECTRE: its slices (free and their multiplier, on the grid, on the notes, on the attacks), its band
+        // or notch, TRANSIENTS, FINE and WARP on its pitches, how its oscillators follow the peaks
+        spClock, spMult, spDiv, spNotch, spTrans, spFine, spWarp, spAssign,
         count
     };
 

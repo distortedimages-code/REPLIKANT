@@ -493,6 +493,7 @@ void Player::startVoice (int note, int velocity, float fromPitch, const Chunk& c
 
 void Player::noteOn (int note, int velocity, const Chunk& c)
 {
+    spectral.trigger();                  // (SPECTRE on NOTES: an analysis for each note)
     keyDown[(size_t) note] = true;
     sustained[(size_t) note] = false;
     const int mode = (int) c.v[snd::voiceMode];
@@ -1754,6 +1755,17 @@ void Player::runChain (float* L, float* R, int n, const Chunk& c)
                 s.freeze = c.v[snd::spFreeze] > 0.5f;
                 s.feedback = c.v[snd::spFeedback];
                 s.mix = c.v[snd::spMix];
+                s.clock = (int) c.v[snd::spClock];
+                s.mult = (int) c.v[snd::spMult];
+                s.division = (int) c.v[snd::spDiv];
+                s.notch = c.v[snd::spNotch] > 0.5f;
+                s.transients = c.v[snd::spTrans] > 0.5f;
+                s.fine = c.v[snd::spFine];
+                s.warp = c.v[snd::spWarp];
+                s.assign = (int) c.v[snd::spAssign];
+                s.ppq = c.ppq;
+                s.bpm = c.bpm;
+                s.playing = c.playing;
                 spectral.set (s);
                 stage (1, c.v[snd::spOn] > 0.5f, [this] (float* l, float* r, int m) { spectral.process (l, r, m); });
             }

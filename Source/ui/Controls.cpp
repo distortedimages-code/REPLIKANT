@@ -113,6 +113,13 @@ namespace
         else if (u == "rbw")           { add (0.0f, "FULL"); add (1.0f, "250"); c.ticks = 9; }
         else if (u == "rdc")           { add (0.0f, "20MS"); add (1.0f, "HOLD"); c.ticks = 9; }
         else if (u == "s")             decades ({ 1.0, 5.0, 20.0 }, nullptr);
+        else if (u == "spc")           { add (0.0f, "40"); add (at (std::log (200.0 / 40.0) / std::log (250.0)), "200"); add (at (std::log (1000.0 / 40.0) / std::log (250.0)), "1K");
+                                         add (1.0f, "10K"); c.ticks = 11; }
+        else if (u == "sps")           { add (0.0f, "6MS"); add (0.5f, "130"); add (1.0f, "506"); c.ticks = 11; }
+        else if (u == "spw")           { add (0.0f, "1 OCT"); add (0.5f, "6"); add (1.0f, "ALL"); c.ticks = 11; }
+        else if (u == "spb")           { add (0.0f, "OFF"); add (at (0.5), "450"); add (1.0f, "FRZ"); c.ticks = 11; }
+        else if (u == "spg")           { add (0.0f, "1MS"); add (at (0.5), "190"); add (1.0f, "HOLD"); c.ticks = 11; }
+        else if (u == "fst")           { add (0.0f, "-7"); add (0.5f, "0"); add (1.0f, "+7"); c.ticks = 15; }
         else if (u == "swg")           { add (0.0f, "50"); add (at (0.65), "65"); add (1.0f, "80"); c.ticks = 7; }
         else if (u == "shp")           { add (0.0f, "TRI"); add (0.5f, "SAW"); add (1.0f, "SQR"); c.ticks = 9; }
         else if (u == "deg")           { add (0.0f, "0"); add (0.5f, "180"); add (1.0f, "360"); c.ticks = 9; }
