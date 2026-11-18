@@ -321,7 +321,34 @@ namespace ui
         void mouseEnter (const juce::MouseEvent&) override   { repaint(); }
         void mouseExit (const juce::MouseEvent&) override    { repaint(); }
 
+        // the editor's timer asks: repainted only when what it shows has changed (its value, what moves it, whether
+        // it is on), not thirty times a second for nothing
+        void refreshIfChanged()
+        {
+            double sig = isChoice() ? (double) shownChoice() : (get != nullptr || armedSceneHolds() ? shownValue() : 0.0);
+            float moved = -1.0f;
+            if (param >= 0 && arm != nullptr && arm->player != nullptr)
+            {
+                moved = arm->player->modulatedNorm (param);
+                for (int m = 0; m < snd::numMods; ++m)
+                    sig += 1.0e-6 * (m + 1) * (double) arm->player->routeAmount (m, param);
+                sig += (sceneHeld (0) ? 1.0e-7 : 0.0) + (sceneHeld (1) ? 2.0e-7 : 0.0);
+            }
+            const bool on = isOn();
+            if (std::abs (sig - lastSig) > 1.0e-12 || std::abs (moved - lastMoved) > 1.0e-4f || on != lastOn)
+            {
+                lastSig = sig;
+                lastMoved = moved;
+                lastOn = on;
+                repaint();
+            }
+        }
+
     private:
+        double lastSig = -1.0e300;
+        float lastMoved = -2.0f;
+        bool lastOn = true;
+
         int armedModHere() const
         {
             return arm != nullptr && arm->mod >= 0 && param >= 0 && arm->player != nullptr && snd::def (param).modulatable

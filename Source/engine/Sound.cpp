@@ -51,7 +51,7 @@ namespace
         { "fDrive",    "Saturation",                K::linear,  0, 1, 0.2f, 1, nullptr, true, "%" },
         { "sep",       "S\xc3\xa9paration",         K::linear,  0, 1, 0.0f, 1, nullptr, true, "%" },
         { "fm",        "FM (r\xc3\xa9injection)",   K::linear,  0, 1, 0, 1, nullptr, true, "%" },
-        { "quality",   "Qualit\xc3\xa9",            K::choice,  0, 2, 1, 1, "1X|2X|4X", false, "" },
+        { "quality",   "Qualit\xc3\xa9",            K::choice,  0, 2, 2, 1, "1X|2X|4X", false, "" },
         { "fEnv",      "Enveloppe",                 K::linear,  -1, 1, 0, 1, nullptr, true, "oct" },
         { "fAttack",   "Attaque",                   K::power,   0, 4000, 2, 3.3f, nullptr, false, "ms" },
         { "fDecay",    "D\xc3\xa9" "croissance",    K::log,     1, 10000, 400, 1, nullptr, true, "ms" },

@@ -456,6 +456,7 @@ void Crush::process (float* L, float* R, int n)
     const float steps = std::exp2 (bits - 1.0f);
     const double period = sr / std::clamp ((double) target.rateHz, 200.0, sr);
     const float toneK = (float) (1.0 - std::exp (-kTwoPi * (800.0 + 20000.0 * target.tone * target.tone) / sr));
+    const float mixK = (float) std::min (1.0, 330.0 / sr);
     auto rnd = [this]
     {
         rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
@@ -475,9 +476,10 @@ void Crush::process (float* L, float* R, int n)
         }
         lp[0] += toneK * (held[0] - lp[0]);
         lp[1] += toneK * (held[1] - lp[1]);
-        L[i] = dl + target.mix * (lp[0] - dl);
+        mix += (target.mix - mix) * mixK;
+        L[i] = dl + mix * (lp[0] - dl);
         if (R != nullptr)
-            R[i] = dr + target.mix * (lp[1] - dr);
+            R[i] = dr + mix * (lp[1] - dr);
     }
 }
 }

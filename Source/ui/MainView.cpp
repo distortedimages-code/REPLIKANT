@@ -907,9 +907,11 @@ void MainView::paint (juce::Graphics& g)
     g.setColour (px::frame);
     g.fillRect (bottom.withHeight (2));
 
-    auto st = statusArea;
     const bool sampling = status.sampling;
     const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
+    if (g.clipRegionIntersects (statusArea))       // (the meter alone is repainted far more often)
+    {
+    auto st = statusArea;
     juce::String line;
     if (sampling)
         line = status.text;
@@ -992,6 +994,7 @@ void MainView::paint (juce::Graphics& g)
         lowColour = px::cyan;
     }
     px::drawText (g, low, st.withHeight (22), juce::Justification::centredLeft, px::text (21.0f), lowColour);
+    }
 
     // level meter (dBFS from -72 to 0): the input while sampling, the player's output when playing
     {
@@ -1222,10 +1225,10 @@ void MainView::timerCallback()
         refreshMidiChoices();
     if (mode == 1)
     {
-        // what moves: the rows' modulation dots, the lanes, the strip, the visuals
+        // what moves: the rows' modulation dots (the rows that changed), the lanes, the strip, the visuals
         for (auto& r : rows)
-            if (r->isVisible() && r->param >= 0)
-                r->repaint();
+            if (r->isVisible())
+                r->refreshIfChanged();
         strip.repaint();
         if (modView.isVisible()) modView.refresh();
         if (filterView.isVisible()) filterView.refresh();
@@ -1245,14 +1248,32 @@ void MainView::timerCallback()
             repaint (left);
         }
     }
-    else if (tick % 10 == 0)
+    else if (tick % 3 == 0)
         for (auto& r : rows)
             if (r->isVisible())
-                r->repaint();
-    clockStrip.repaint();
-    packTile.repaint();
-    repaint (bottom);
-    repaint (header.withWidth (84));
+                r->refreshIfChanged();
+    if (tick % 3 == 0)
+        clockStrip.repaint();
+    if (tick % 15 == 0)
+        packTile.repaint();
+    // the bottom bar: the meter when its reading changes, the status line when what it says may have
+    {
+        const float lvl = mode == 1 && ! sampling ? proc.player.outLevel.load() : proc.inputLevel();
+        const int meterNow = juce::roundToInt (juce::Decibels::gainToDecibels (lvl, -100.0f) * 10.0f);
+        if (meterNow != lastMeterShown)
+        {
+            lastMeterShown = meterNow;
+            repaint (meterArea);
+        }
+        const int voicesNow = proc.player.activeVoices.load();
+        if (sampling || status.busy || voicesNow != lastVoicesShown || tick % 15 == 0)
+        {
+            lastVoicesShown = voicesNow;
+            repaint (statusArea);
+        }
+    }
+    if (tick % 2 == 0)
+        repaint (header.withWidth (84));
     maybeShowUpdate();
 }
 

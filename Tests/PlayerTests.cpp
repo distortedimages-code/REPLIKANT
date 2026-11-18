@@ -717,6 +717,90 @@ static void testClock()
     CHECK (count == 36, "own clock at 90 bpm over a second: %d ticks", count);   // 1.5 beats x 24
 }
 
+//==============================================================================
+// No stairs: the settings move every 32 samples and the voices ramp in between (the cutoff, the pitch); a knob thrown
+// across glides instead of jumping
+static void testSmoothing()
+{
+    auto tone = instrumentOf (sine (230.0, 3.0), 48000, 96000);     // 230 cycles in its loop
+    auto resonant = [] (Player& p, float cutoff)
+    {
+        p.set (snd::fModel, 1.0f);           // MOOG
+        p.set (snd::cutoff, cutoff);
+        p.set (snd::reso, 0.7f);
+        p.set (snd::keyTrack, 0.0f);
+        p.set (snd::velCutoff, 0.0f);
+    };
+    // a slow sine on the cutoff (a quarter note at 120): stairs every 32 samples would be a sample-and-hold at 1.5 kHz,
+    // the tone's sidebands at 1500 -+ 230 Hz (away from its harmonics and theirs)
+    {
+        Player p;
+        plain (p);
+        p.setInstrument (tone.get());
+        resonant (p, 2000.0f);               // its peak sweeping well above the tone (no legitimate sidebands that far)
+        p.set (snd::m1Type, 0.0f);
+        p.set (snd::m1Shape, 0.0f);          // SINUS
+        p.set (snd::m1Div, 5.0f);            // 1/8
+        p.set (snd::tempo, 120.0f);
+        p.setRoute (0, snd::cutoff, 0.1f);
+        auto out = play (p, 1.5, { { 0.0, 60, 127 } });
+        const double t = toneLevel (out, 24000, 32768, 230.0);
+        const double side = std::max (toneLevel (out, 24000, 32768, 1270.0), toneLevel (out, 24000, 32768, 1730.0));
+        std::printf ("  cutoff swept by a sine: the 1.5 kHz stairs' sidebands at %.1f dB of the tone\n", db (side / t));
+        CHECK (db (side / t) < -110.0, "the stairs' sidebands at %.1f dB", db (side / t));
+    }
+    // vibrato: the pitch moved by a sine, the same sidebands
+    {
+        Player p;
+        plain (p);
+        p.setInstrument (tone.get());
+        p.set (snd::m1Type, 0.0f);
+        p.set (snd::m1Shape, 0.0f);
+        p.set (snd::m1Div, 6.0f);            // 1/16
+        p.set (snd::tempo, 120.0f);
+        p.setRoute (0, snd::fine, 0.3f);
+        auto out = play (p, 1.5, { { 0.0, 60, 127 } });
+        const double t = toneLevel (out, 24000, 32768, 230.0);
+        const double side = std::max (toneLevel (out, 24000, 32768, 1270.0), toneLevel (out, 24000, 32768, 1730.0));
+        std::printf ("  vibrato: the stairs' sidebands at %.1f dB of the tone\n", db (side / t));
+        CHECK (db (side / t) < -120.0, "vibrato stairs' sidebands at %.1f dB", db (side / t));
+    }
+    // the cutoff knob thrown from 400 Hz to 8 kHz while the note sounds: no click (the curvature of the output, its
+    // second difference, stays near the tone's own)
+    {
+        Player p;
+        plain (p);
+        p.setInstrument (tone.get());
+        resonant (p, 400.0f);
+        std::vector<float> out;
+        juce::AudioBuffer<float> buf (2, 256);
+        const int thrownAt = 94;
+        for (int b = 0; b < (int) (1.0 * sr / 256); ++b)
+        {
+            juce::MidiBuffer midi;
+            if (b == 0)
+                midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 127), 0);
+            if (b == thrownAt)
+                p.set (snd::cutoff, 8000.0f);
+            buf.clear();
+            p.render (buf, midi, {});
+            for (int i = 0; i < 256; ++i)
+                out.push_back (buf.getSample (0, i));
+        }
+        auto curvature = [&] (size_t from, size_t to)
+        {
+            double m = 0.0;
+            for (size_t i = from; i < to && i < out.size(); ++i)
+                m = std::max (m, (double) std::abs (out[i] - 2.0f * out[i - 1] + out[i - 2]));
+            return m;
+        };
+        const size_t at = (size_t) thrownAt * 256;
+        const double before = curvature (at - 9600, at), during = curvature (at, at + 4800), after = curvature (at + 12000, at + 24000);
+        std::printf ("  cutoff thrown across: curvature %.5f (before %.5f, after %.5f)\n", during, before, after);
+        CHECK (during < 2.0 * std::max (before, after), "a knob thrown across clicks: %.5f against %.5f", during, std::max (before, after));
+    }
+}
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI gui;
@@ -728,6 +812,7 @@ int main()
     testScenes();
     testVoices();
     testFilterModsFx();
+    testSmoothing();
     testStability();
     testClock();
     testCpu();

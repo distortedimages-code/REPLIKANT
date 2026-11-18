@@ -140,6 +140,7 @@ private:
     float zoom = 1.0f;
     bool dropping = false;
     juce::Rectangle<int> header, left, mapCard, waveCard, bottom, statusArea, meterArea, banner;
+    int lastMeterShown = -100000, lastVoicesShown = -1;     // what the bottom bar last drew (repainted on change)
     std::optional<Updater::News> pendingNews;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainView)

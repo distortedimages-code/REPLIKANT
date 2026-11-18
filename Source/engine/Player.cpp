@@ -378,6 +378,7 @@ void Player::startVoice (int note, int velocity, float fromPitch, const Chunk& c
         }
     }
     v.sinceGrain = 1.0e9f;
+    v.fresh = true;
     for (auto& g : v.grains)
         g.on = false;
     v.rng = 0x9E3779B9u ^ (uint32_t) (v.age * 2654435761u);
@@ -737,6 +738,25 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
     const float baseOct = c.cutoffOct + ktOct + velOct;
     const float fadeStep = 1.0f / (float) (0.004 * sr);
 
+    // from where the last chunk left them to where this one wants them, a sample at a time: the cutoff, the depth
+    // of its envelope, the step (the pitch). A direction turned round is taken at once (no ramp through zero)
+    if (v.fresh)
+    {
+        v.cutFrom = baseOct;
+        v.envFrom = c.envOct;
+        v.stepFrom = r.step;
+        v.fresh = false;
+    }
+    const float invN = 1.0f / (float) juce::jmax (1, n);
+    float cutNow = v.cutFrom, envNow = v.envFrom;
+    const float cutInc = (baseOct - cutNow) * invN, envInc = (c.envOct - envNow) * invN;
+    const bool turned = (v.stepFrom < 0.0) != (r.step < 0.0);
+    double stepNow = turned ? r.step : v.stepFrom;
+    const double stepInc = turned ? 0.0 : (r.step - stepNow) / (double) juce::jmax (1, n);
+    v.cutFrom = baseOct;
+    v.envFrom = c.envOct;
+    v.stepFrom = r.step;
+
     // elastic
     const double grainLen = juce::jmax (8.0, (double) c.v[snd::grain] * 0.001 * sr);   // output samples
     // aligned grains (WSOLA) need only two at a time; scattered ones (DISPERSION) are smoother four at a time
@@ -778,6 +798,9 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
 
     for (int i = 0; i < n; ++i)
     {
+        cutNow += cutInc;
+        envNow += envInc;
+        stepNow += stepInc;
         if (r.pm == 1)
         {
             v.pmPhase += r.pmInc;
@@ -830,7 +853,7 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
                 frame (g.pos, gl, gr);
                 xl += gl * w;
                 xr += gr * w;
-                g.pos += r.step;
+                g.pos += stepNow;
                 if (! r.loop && (g.pos >= (double) len || g.pos < 0.0))
                     g.on = false;
                 g.phase += g.inc;
@@ -885,11 +908,11 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
                     const float out = std::sin (1.5707963f * t), in = std::cos (1.5707963f * t);
                     xl = xl * in + gl * out;
                     xr = xr * in + gr * out;
-                    v.ghost += r.step;
+                    v.ghost += stepNow;
                     --v.ghostLeft;
                 }
                 const double before = v.pos;
-                v.pos += r.step;
+                v.pos += stepNow;
                 if (r.loop)
                 {
                     const double span = (double) (r.le - r.ls);
@@ -907,7 +930,7 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
                     // a loop that isn't the one found has an unprepared seam: smoothed
                     if (wrapped && r.moved)
                     {
-                        v.ghost = before + r.step;
+                        v.ghost = before + stepNow;
                         v.ghostLeft = spliceLength;
                     }
                 }
@@ -918,7 +941,7 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
         const float fe = tick (v.flt, c.flt, false);
         if (c.filterOn)
         {
-            const float oct = baseOct + c.envOct * fe;
+            const float oct = cutNow + envNow * fe;
             auto& f0 = v.filter[0];
             xl = v.os[0].process (xl, [&f0, oct] (float u) { return f0.tick (u, oct); });
             if (stereo)
@@ -951,7 +974,39 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
 }
 
 //============================================================================== modulators, settings
-void Player::modulate (int offset, int n, const Transport& t, Chunk& c)
+float Player::smoothed (int i, float k, bool snap)
+{
+    const float target = get (i);
+    const auto kind = snd::def (i).kind;
+    if (kind == snd::Kind::integer || kind == snd::Kind::choice || kind == snd::Kind::toggle)
+        return target;
+    if (snap || ! glidePrimed)
+    {
+        glideRaw[(size_t) i] = target;
+        gliding[(size_t) i] = false;
+        return target;
+    }
+    if (std::abs (target - glideRaw[(size_t) i]) > 0.0f)
+    {
+        if (! gliding[(size_t) i])
+            glideNorm[(size_t) i] = snd::toNorm (i, glideRaw[(size_t) i]);
+        glideRaw[(size_t) i] = target;
+        gliding[(size_t) i] = true;
+    }
+    if (! gliding[(size_t) i])
+        return target;
+    const float goal = snd::toNorm (i, target);
+    float& g = glideNorm[(size_t) i];
+    g += (goal - g) * k;
+    if (std::abs (goal - g) < 2.0e-4f)
+    {
+        gliding[(size_t) i] = false;
+        return target;
+    }
+    return snd::fromNorm (i, g);
+}
+
+void Player::modulate (int offset, int n, const Transport& t, Chunk& c, bool atRest)
 {
     const double bpm = t.playing && t.bpm > 0.0 ? t.bpm : (double) get (snd::tempo);
     const double ppq = t.playing ? t.ppq + (double) offset / sr * bpm / 60.0 : freePpq;
@@ -1039,9 +1094,10 @@ void Player::modulate (int offset, int n, const Transport& t, Chunk& c)
     const int sa = juce::jlimit (1, snd::numScenes, (int) get (snd::sceneA)) - 1;
     const int sb = juce::jlimit (1, snd::numScenes, (int) get (snd::sceneB)) - 1;
     const float xf = juce::jlimit (0.0f, 1.0f, get (snd::xfade) + (moved[snd::xfade] ? off[snd::xfade] : 0.0f));
+    const float glideK = 1.0f - std::exp (-(float) n / (float) (0.012 * sr));
     for (int i = 0; i < snd::count; ++i)
     {
-        const float raw = get (i);
+        const float raw = smoothed (i, glideK, atRest);
         const float la = scenes[(size_t) sa][(size_t) i].load (std::memory_order_relaxed);
         const float lb = scenes[(size_t) sb][(size_t) i].load (std::memory_order_relaxed);
         const bool scened = ! (std::isnan (la) && std::isnan (lb));
@@ -1067,6 +1123,7 @@ void Player::modulate (int offset, int n, const Transport& t, Chunk& c)
         shownMoved[(size_t) i].store (true, std::memory_order_relaxed);
     }
 
+    glidePrimed = true;
     c.n = n;
     c.elastic = c.v[snd::playMode] > 0.5f;
     c.loops = c.v[snd::loops] > 0.5f;
@@ -1259,7 +1316,10 @@ void Player::render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi
         }
         else
             inputLevel = 0.0f;
-        modulate (pos, end - pos, transport, c);
+        bool sounding = inputThroughFx;
+        for (auto& v : voices)
+            sounding = sounding || v.active;
+        modulate (pos, end - pos, transport, c, ! sounding);
         // the events at its start
         for (; it != midi.end(); ++it)
         {
@@ -1328,9 +1388,12 @@ void Player::render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi
             {
                 for (int ch = 0; ch < 2; ++ch)
                     inFilter[ch].set (c.fs);
-                const float oct = c.cutoffOct;
+                float oct = inCutFrom < 0.0f ? c.cutoffOct : inCutFrom;
+                const float inc = (c.cutoffOct - oct) / (float) m;
+                inCutFrom = c.cutoffOct;
                 for (int i = 0; i < m; ++i)
                 {
+                    oct += inc;
                     auto& f0 = inFilter[0];
                     auto& f1 = inFilter[1];
                     L[pos + i] += inOs[0].process (a[i], [&f0, oct] (float u) { return f0.tick (u, oct); });

@@ -158,6 +158,11 @@ private:
         // filter
         dsp::VAFilter filter[2];
         dsp::Oversampler os[2];
+        // where the last chunk left the cutoff, its envelope's depth and the step: the next chunk ramps from there
+        // a sample at a time (no stairs every 32 samples)
+        bool fresh = true;
+        float cutFrom = 0.0f, envFrom = 0.0f;
+        double stepFrom = 1.0;
         uint64_t age = 0;
         int originalLength = 0;
     };
@@ -172,7 +177,7 @@ private:
     void prepareRead (Voice&, const Chunk&, Read&) const;
     Voice* freeVoice();
     void limitPolyphony (int keep);
-    void modulate (int offset, int n, const Transport&, Chunk&);
+    void modulate (int offset, int n, const Transport&, Chunk&, bool atRest);
     void runChain (float* L, float* R, int n, const Chunk&);
     void setQuality (int factor);
 
@@ -192,6 +197,13 @@ private:
     // settings
     std::array<std::atomic<float>, snd::count> own;
     std::array<std::atomic<float>*, snd::count> values;
+    // the continuous settings glide (~12 ms, in their own scale) when they move while something sounds: a knob, an
+    // automation, a block's jump; at rest (nothing playing) they are taken as they are
+    float smoothed (int id, float k, bool snap);
+    std::array<float, snd::count> glideRaw {}, glideNorm {};
+    std::array<bool, snd::count> gliding {};
+    bool glidePrimed = false;
+    float inCutFrom = -1.0f;             // the input filter's cutoff (FX mode), ramped like the voices'
 
     // modulators
     std::array<dsp::Modulator, snd::numMods> mods;

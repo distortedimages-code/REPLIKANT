@@ -161,7 +161,7 @@ namespace dsp
     {
     public:
         void prepare (double sampleRate)       { sr = sampleRate; reset(); }
-        void reset()                           { held[0] = held[1] = 0; acc = 1.0; lp[0] = lp[1] = 0; }
+        void reset()                           { held[0] = held[1] = 0; acc = 1.0; lp[0] = lp[1] = 0; mix = target.mix; }
         void set (const CrushSettings& s)      { target = s; }
         void process (float* left, float* right, int n);
 
@@ -169,6 +169,7 @@ namespace dsp
         double sr = 48000.0, acc = 1.0, nextAt = 1.0;
         CrushSettings target;
         float held[2] {}, lp[2] {};
+        float mix = 0.0f;                      // gliding towards target.mix (no steps when it moves)
         uint32_t rng = 0xBADC0DEu;
     };
 }
