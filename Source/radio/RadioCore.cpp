@@ -649,6 +649,29 @@ void Engine::render (float* L, float* R, int n, const Settings& s, const Event* 
     }
     usedTake.store (take, std::memory_order_release);
 
+    // ON AIR off: no radio (what was heard stays as it was, the pads play on); back on, from where the receiver is
+    if (! s.on)
+    {
+        std::fill (L, L + n, 0.0f);
+        std::fill (R, R + n, 0.0f);
+        mode = -1;
+        heardLevel.store (0.0f, std::memory_order_relaxed);
+        gateOpen.store (1.0f, std::memory_order_relaxed);
+        loopPos.store (-1.0f, std::memory_order_relaxed);
+        int pos = 0;
+        for (int e = 0; e < numEvents; ++e)
+        {
+            const int at = std::max (pos, std::min (n, ev[e].at));
+            if (at > pos)
+                pads (L + pos, R + pos, at - pos, s);
+            pos = at;
+            if (ev[e].velocity > 0)
+                padOn (ev[e].note, ev[e].velocity, s);
+        }
+        if (pos < n)
+            pads (L + pos, R + pos, n - pos, s);
+        return;
+    }
     bank.advance (n, sr);
     listen (L, R, n, s);
 

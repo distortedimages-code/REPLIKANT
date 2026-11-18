@@ -234,7 +234,7 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     // some hosts hand back, as the input, the buffer just played (in place, nothing written into it since): our
     // own output again. Heard, it would add to itself block after block (every note forever, a buzz at the
     // block rate). Spotted by comparison with what went out lately, and taken as silence
-    const bool echoed = src != (int) Source::testSynth && isOwnOutput (input, n);
+    const bool echoed = src != (int) Source::testSynth && isOwnOutput (input, n, ! sampling);
     if (echoed)
     {
         input.clear();
@@ -264,9 +264,11 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     // the input, kept before the output is written over it (same buffer)
     // ÉCOUTE : DIRECT lets the input through only while capturing or with the capture page open (to hear the synth
     // being set up). Playing, never: some hosts hand back as the input the buffer just played, and passing it on
-    // would loop it for good (every note forever); with nothing let through, no host can close that loop
+    // would loop it for good (every note forever); with nothing let through, no host can close that loop.
+    // OFF (the default since 0.3.6) is OFF, a capture included: an input that hears the speakers (the Mac's own
+    // microphone, a track listening to its output) would howl
     const int monWanted = monitorAudio.load();
-    const int mon = sampling ? 1 : (monWanted == 1 && ! captureOpen.load() ? 0 : monWanted);
+    const int mon = sampling ? (monWanted > 0 ? 1 : 0) : (monWanted == 1 && ! captureOpen.load() ? 0 : monWanted);
     const float* kept[2] = { nullptr, nullptr };
     if (numIn > 0 && n <= inputCopy.getNumSamples())
     {
@@ -309,7 +311,10 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     // RADIO: the radio and its pads (the notes play them), then through the filter and the chain as the input would
     // go in FX mode; only the receiver listened to stays connected
     const bool radioOn = (int) player.get (snd::engine) == snd::radio;
-    radio.bank.use.store (radioOn && ! sampling ? 1 << juce::jlimit (0, radio::numRx - 1, (int) player.get (snd::rdRx)) : 0,
+    // (the capture page over the RADIO: the radio quiet, as the other modes are, its receiver kept connected)
+    const bool wanted = player.get (snd::rdOn) > 0.5f;
+    const bool onAir = wanted && ! captureOpen.load();
+    radio.bank.use.store (radioOn && wanted && ! sampling ? 1 << juce::jlimit (0, radio::numRx - 1, (int) player.get (snd::rdRx)) : 0,
                           std::memory_order_relaxed);
     if (! sampling && radioOn && n <= radioBuffer.getNumSamples())
     {
@@ -327,6 +332,7 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         // (its settings as the mods and the scenes move them, a block late)
         auto V = [this] (int id) { const float m = player.modulatedNorm (id); return m >= 0.0f ? snd::fromNorm (id, m) : player.get (id); };
         radio::Settings rs;
+        rs.on = onAir;
         rs.rx = (int) player.get (snd::rdRx);
         rs.mode = (int) player.get (snd::rdMode);
         rs.len = (int) player.get (snd::rdLen);
@@ -388,7 +394,7 @@ void ReplikantProcessor::rememberOutput (const juce::AudioBuffer<float>& out, in
         }
 }
 
-bool ReplikantProcessor::isOwnOutput (const juce::AudioBuffer<float>& in, int n) const
+bool ReplikantProcessor::isOwnOutput (const juce::AudioBuffer<float>& in, int n, bool scaledToo) const
 {
     const int len = juce::jmin (n, headLength);
     const int chans = juce::jmin (2, in.getNumChannels());
@@ -404,6 +410,22 @@ bool ReplikantProcessor::isOwnOutput (const juce::AudioBuffer<float>& in, int n)
             for (int i = 0; i < len && same; ++i)
                 same = in.getSample (c, i) == h.x[c][i];
         if (same)
+            return true;
+        // (0.3.6) or the same shape at another level (a host, a fader, a send handing it back a little louder or
+        // softer): a correlation of 0.9999 over the 64 first samples of each side, which a sound of its own never
+        // has with ours. Not while capturing: the synth is recorded as it comes
+        if (! scaledToo)
+            continue;
+        double xy = 0.0, xx = 0.0, yy = 0.0;
+        for (int c = 0; c < chans; ++c)
+            for (int i = 0; i < len; ++i)
+            {
+                const double x = in.getSample (c, i), y = h.x[c][i];
+                xy += x * y;
+                xx += x * x;
+                yy += y * y;
+            }
+        if (yy > 1.0e-8 && xx > 1.0e-8 && xy > 0.0 && xy * xy > 0.9998 * xx * yy && xx > 0.04 * yy && xx < 25.0 * yy)
             return true;
     }
     return false;
@@ -1066,6 +1088,9 @@ void ReplikantProcessor::setStateInformation (const void* data, int size)
     options.channel = juce::jlimit (1, 16, xml->getIntAttribute ("channel", options.channel));
     options.program = juce::jlimit (-1, 127, xml->getIntAttribute ("program", options.program));
     options.monitor = juce::jlimit (0, 2, xml->getIntAttribute ("monitor", options.monitor));
+    // (before 0.3.6, DIRECT was the default: kept by projects that never chose it. Back to OFF: no howl at CAPTURE)
+    if (options.monitor == 1 && Updater::isNewer ("0.3.6", xml->getStringAttribute ("version", "0.0.0")))
+        options.monitor = 0;
     options.thru = xml->getBoolAttribute ("thru", options.thru);
     cycleOptions.note = juce::jlimit (0, 127, xml->getIntAttribute ("cyNote", cycleOptions.note));
     cycleOptions.count = juce::jlimit (0, 3, xml->getIntAttribute ("cyCount", cycleOptions.count));

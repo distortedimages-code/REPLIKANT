@@ -30,7 +30,7 @@ public:
         juce::String midiPortName;
         int channel = 1;
         int program = -1;
-        int monitor = 1;                // the input: 0 not heard, 1 heard as it is, 2 through the effects (FX mode)
+        int monitor = 0;                // the input: 0 not heard (0.3.6: the default), 1 heard as it is, 2 through the effects (FX mode)
         bool thru = false;              // notes played into REPLIKANT go to the synth instead of the instrument
     };
 
@@ -207,7 +207,7 @@ private:
     std::atomic<juce::MidiOutput*> port { nullptr };
     std::atomic<bool> hostMidiOut { false };
     std::atomic<int> sourceAudio { 0 };      // Source, for the audio thread
-    std::atomic<int> monitorAudio { 1 };
+    std::atomic<int> monitorAudio { 0 };
 public:
     // the capture page open in the editor (it says so at each tick): only then, or while capturing, is the input
     // heard as it is (ÉCOUTE : DIRECT). Playing, the output is REPLIK8 alone (see processBlock)
@@ -225,7 +225,7 @@ private:
     std::array<Head, 4> sentHeads;
     int sentNext = 0;
     void rememberOutput (const juce::AudioBuffer<float>&, int n);
-    bool isOwnOutput (const juce::AudioBuffer<float>&, int n) const;
+    bool isOwnOutput (const juce::AudioBuffer<float>&, int n, bool scaledToo) const;
 
     double sampleRate = 48000.0;
     bool clockStartedBySampling = false;

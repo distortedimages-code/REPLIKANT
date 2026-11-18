@@ -151,6 +151,7 @@ namespace radio
     // what the listening is set to (the sound's settings, read once a block)
     struct Settings
     {
+        bool on = true;                            // ON AIR: off, the radio isn't heard (nor kept); the pads play on
         int rx = 0, mode = modeLive, len = 7;
         float squelch = 0.0f, grab = 0.25f, depth = 6.0f, tune = 0.0f, stat = 0.15f, level = 0.8f;
         float band = 0.0f, centre = 1000.0f, fade = 0.0f, fadeRate = 0.3f, whistle = 0.0f, crackle = 0.0f, drive = 0.0f;

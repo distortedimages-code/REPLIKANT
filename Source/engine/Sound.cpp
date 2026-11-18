@@ -216,6 +216,7 @@ namespace
         { "rdPadDecay","Decay",                       K::linear,  0, 1, 1, 1, nullptr, true, "rdc" },
         { "rdChoke",   "Choke",                       K::toggle,  0, 1, 0, 1, nullptr, false, "" },
         { "rdPadLevel","Level",                       K::linear,  0, 1, 0.8f, 1, nullptr, true, "%" },
+        { "rdOn",      "On air",                      K::toggle,  0, 1, 1, 1, nullptr, false, "" },
     };
 
     std::string fmt (const char* f, double v)
@@ -399,7 +400,7 @@ std::string longName (int id)
     if (id == tune)                return "Sampler " + name;
     if (in (subMode, subFollow))   return "Sub " + name;
     if (id == mxSub)               return "Mixer Sub";
-    if (in (rdRx, rdDrive))        return "Radio " + name;
+    if (in (rdRx, rdDrive) || id == rdOn) return "Radio " + name;
     if (in (rdTake, rdPads))       return "Radio " + name;
     if (in (rdPadTune, rdPadLevel)) return "Radio Pads " + name;
     return name;

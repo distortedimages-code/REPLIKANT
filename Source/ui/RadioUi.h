@@ -37,7 +37,7 @@ namespace te
     private:
         ReplikantProcessor& proc;
         std::function<void (const juce::String&, bool)> message;
-        juce::Rectangle<float> pads[radio::numPads], recKey, grabKey, takeKey, padKey;
+        juce::Rectangle<float> pads[radio::numPads], airKey, recKey, grabKey, takeKey, padKey;
         int held = -1;
         double lastPaint = 0.0;
         const radio::Take* cachedTake = nullptr;

@@ -74,6 +74,8 @@ namespace snd
         rdRx, rdMode, rdLen, rdSquelch, rdGrab, rdDepth, rdTune, rdStatic, rdLevel,
         rdBand, rdCentre, rdFade, rdRate, rdWhistle, rdCrackle, rdDrive,
         rdTake, rdSens, rdPads, rdPadTune, rdPadDecay, rdChoke, rdPadLevel,
+        // (0.3.6) RADIO: ON AIR (off: the radio not heard, the pads still played)
+        rdOn,
         count
     };
 

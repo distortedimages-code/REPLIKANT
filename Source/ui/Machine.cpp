@@ -2504,7 +2504,7 @@ void Machine::buildPages()
         v.clear();
         // TUNE: the receiver listened to (the tuner on the screen chooses its station, or its shortwave receiver), and a
         // shortwave receiver's frequency and mode at hand
-        Bank tb { "tune", { S (snd::rdRx) } };
+        Bank tb { "tune", { S (snd::rdOn), S (snd::rdRx) } };
         auto f = numberCtl ("Frequency", 10.0, 30000.0, 0.0,
                             [this, rxNow] { return proc.hasRadioNet() ? proc.radioNet().getSource (rxNow()).khz : 9420.0; },
                             [this, rxNow] (double khz)
@@ -2541,7 +2541,7 @@ void Machine::buildPages()
         tb.ctls.push_back (sep (S (snd::rdLevel)));
         tb.ctls.push_back (S (snd::rdStatic));
         v.push_back ({ "tune", "tune", { tb } });
-        v.push_back ({ "listen", "listen", { { "listen", { S (snd::rdMode), sep (S (snd::rdTune)), S (snd::rdLen, nullptr, loops),
+        v.push_back ({ "listen", "listen", { { "listen", { S (snd::rdOn), sep (S (snd::rdMode)), S (snd::rdTune), S (snd::rdLen, nullptr, loops),
                                                               S (snd::rdSquelch, nullptr, modeIs (radio::modeLive)), S (snd::rdGrab, nullptr, modeIs (radio::modeLoop)),
                                                               S (snd::rdDepth, nullptr, modeIs (radio::modeDig)), sep (S (snd::rdLevel)), S (snd::rdStatic) } } } });
         v.push_back ({ "air", "air", { { "air", { S (snd::rdBand), S (snd::rdCentre), sep (S (snd::rdFade)), S (snd::rdRate), sep (S (snd::rdWhistle)),
@@ -2561,6 +2561,7 @@ void Machine::buildPages()
                         if (c.param == id)
                             c.tip = t;
         };
+        rtip (snd::rdOn, "ON AIR : la radio écoutée. OFF : elle se tait (et lâche sa connexion au bout de 45 s), la prise et ses pads restent jouables."_fr);
         rtip (snd::rdRx, "Le récepteur écouté : quatre, chacun accordé dans la page TUNE (une station, ou une fréquence sur un récepteur ondes courtes). Seul celui qu'on écoute reste connecté."_fr);
         rtip (snd::rdMode, "LIVE : ce que joue le récepteur, maintenant. LOOP : sa dernière LENGTH rejouée en mesure, une nouvelle prise au hasard (GRAB). DIG : à chaque tour, LENGTH prise plus loin en arrière (DEPTH)."_fr);
         rtip (snd::rdTune, "En LIVE : le son décalé vers le haut ou le bas comme par un récepteur accordé à côté (±600 Hz, la voix de canard d'une BLU mal calée). En LOOP et DIG : la transposition, comme une bande."_fr);
@@ -3216,7 +3217,7 @@ void Machine::toggleSampling()
         return;
     }
     if (proc.options.source != ReplikantProcessor::Source::testSynth && proc.options.monitor == 0)
-        showMessage ("L'écoute est coupée : tu n'entendras pas le synthé pendant la session."_fr, true);
+        showMessage ("MONITOR sur OFF : la capture enregistre, mais tu n'entends pas ton synthé ici (DIRECT dans SETTINGS, au casque, pour l'écouter)."_fr, false);
     juce::String why;
     if (! (captureKind == cyclesKind ? proc.startCycles (why) : proc.startSampling (why)))
         showMessage (why, true);

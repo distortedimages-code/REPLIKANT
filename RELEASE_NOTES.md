@@ -1,3 +1,8 @@
+**REPLIK8 0.3.6** : plus de larsen à la capture, et la radio qu'on peut couper.
+
+- **MONITOR sur OFF par défaut** : l'entrée n'est plus renvoyée à la sortie quand la page CAPTURE s'ouvre, ni pendant une capture (elle enregistre quand même). Une entrée qui entend les enceintes (le micro du Mac, une piste qui écoute sa sortie) ne peut plus siffler. Les anciens réglages repassent sur OFF ; DIRECT reste dans SETTINGS, au casque
+- **ON AIR** : un interrupteur dans la RADIO. Coupée, elle se tait et lâche sa connexion au bout de 45 s ; la prise et ses pads restent jouables
+
 **REPLIK8 0.3.5** : la RADIO, un onglet à elle. Tu écoutes, tu samples, tu découpes, tu joues.
 
 - **RADIO** : quatre récepteurs, chacun accordé sur une station internet (l'annuaire libre des stations, en MP3) ou sur un récepteur ondes courtes partagé sur le réseau, à la fréquence que tu veux (AM, USB, LSB, CW, les bandes de radiodiffusion, les radioamateurs, les signaux horaires). Le flux garde toujours une seconde d'avance et son horloge reste calée sur celle de l'audio, sans dérive

@@ -126,7 +126,9 @@ void RadioScreen::paint (juce::Graphics& g, juce::Rectangle<float> r, ReplikantP
             g.setColour (col::sGreen);
             g.fillRect (bar.withWidth (bar.getWidth() * juce::jlimit (0.0f, 1.0f, lp)));
         }
-        if (st == radio::none && R.hw == 0)
+        if (P (p, snd::rdOn) < 0.5f)
+            text (g, "off air : la radio est coupée, les pads restent jouables"_fr, live, mono (12.0f), col::screenDim, juce::Justification::centred);
+        else if (st == radio::none && R.hw == 0)
             text (g, "page tune : accorde un récepteur sur une station ou une fréquence"_fr, live, mono (12.0f), col::screenDim, juce::Justification::centred);
     }
 
@@ -244,7 +246,7 @@ RadioStrip::RadioStrip (ReplikantProcessor& p, std::function<void (const juce::S
 void RadioStrip::layout()
 {
     auto r = getLocalBounds().toFloat();
-    auto right = r.removeFromRight (232.0f);
+    auto right = r.removeFromRight (300.0f);
     r.removeFromRight (12.0f);
     r.removeFromTop (24.0f);
     const float gap = 6.0f;
@@ -253,7 +255,10 @@ void RadioStrip::layout()
         pads[i] = { r.getX() + (float) (i % 8) * (pw + gap), r.getY() + (float) (i / 8) * (ph + gap), pw, ph };
     const float h = (right.getHeight() - 2.0f * 8.0f) / 3.0f;
     auto row = right.removeFromTop (h);
-    recKey = row.removeFromLeft ((row.getWidth() - 8.0f) * 0.5f);
+    const float kw = (row.getWidth() - 2.0f * 8.0f) / 3.0f;
+    airKey = row.removeFromLeft (kw);
+    row.removeFromLeft (8.0f);
+    recKey = row.removeFromLeft (kw);
     row.removeFromLeft (8.0f);
     grabKey = row;
     right.removeFromTop (8.0f);
@@ -296,7 +301,7 @@ void RadioStrip::paint (juce::Graphics& g)
     }
     // the line above: what the pads are, where they are on the keys
     {
-        auto top = getLocalBounds().toFloat().withTrimmedRight (244.0f).removeFromTop (20.0f);
+        auto top = getLocalBounds().toFloat().withTrimmedRight (312.0f).removeFromTop (20.0f);
         juce::String t = n > 0 ? juce::String ("pads : c1 – d#2 sur ton clavier · clique sur un pad pour le choisir"_fr)
                                : juce::String ("grab : les dernières secondes entendues · rec : à partir de maintenant"_fr);
         if (proc.radioSlicing())
@@ -333,7 +338,16 @@ void RadioStrip::paint (juce::Graphics& g)
             }
         }
     }
-    // REC, GRAB
+    // ON AIR, REC, GRAB
+    const bool onAir = P (proc, snd::rdOn) > 0.5f;
+    key (g, airKey, onAir ? KeyState::on : KeyState::normal, false, 10.0f);
+    {
+        auto t = airKey.withTrimmedBottom (3.0f);
+        auto lamp = juce::Rectangle<float> (t.getX() + 10.0f, t.getCentreY() - 4.0f, 8.0f, 8.0f);
+        g.setColour (onAir ? col::sRed : col::ink3.withAlpha (0.5f));
+        g.fillEllipse (lamp);
+        text (g, onAir ? "on air" : "off air", t.withTrimmedLeft (22.0f), mono (12.0f, 600), onAir ? col::keyOnInk : col::ink, juce::Justification::centred);
+    }
     const bool rec = e.recording();
     const bool blink = std::fmod (juce::Time::getMillisecondCounterHiRes(), 700.0) < 350.0;
     g.setColour (rec ? col::well : col::red);
@@ -345,12 +359,12 @@ void RadioStrip::paint (juce::Graphics& g)
             g.fillRect (t.getX(), t.getCentreY() - 6.0f, 12.0f, 12.0f);
         else
             g.fillEllipse (t.getX(), t.getCentreY() - 6.0f, 12.0f, 12.0f);
-        text (g, rec ? "stop " + juce::String (e.recSeconds(), 1) + " s" : juce::String ("rec"), t.withTrimmedLeft (20.0f), mono (13.0f, 600),
+        text (g, rec ? "stop " + juce::String (e.recSeconds(), 1) + " s" : juce::String ("rec"), t.withTrimmedLeft (20.0f), mono (12.0f, 600),
               rec ? col::screenText : juce::Colours::white);
     }
     key (g, grabKey, rec ? KeyState::off : KeyState::normal, false, 10.0f);
     text (g, "grab " + juce::String (juce::roundToInt (radio::takeSeconds ((int) P (proc, snd::rdTake)))) + " s", grabKey.withTrimmedBottom (3.0f),
-          mono (13.0f, 600), rec ? col::ink3 : col::ink, juce::Justification::centred);
+          mono (12.0f, 600), rec ? col::ink3 : col::ink, juce::Justification::centred);
     // what goes to the SAMPLER
     const bool hasTake = take != nullptr && take->audio != nullptr;
     key (g, takeKey, hasTake ? KeyState::accent : KeyState::off, false, 10.0f);
@@ -379,7 +393,19 @@ void RadioStrip::mouseDown (const juce::MouseEvent& e)
             return;
         }
     juce::String why;
-    if (recKey.contains (e.position))
+    if (airKey.contains (e.position))
+    {
+        if (auto* param = proc.params.getParameter (snd::def (snd::rdOn).id))
+        {
+            const bool on = param->getValue() > 0.5f;
+            param->beginChangeGesture();
+            param->setValueNotifyingHost (on ? 0.0f : 1.0f);
+            param->endChangeGesture();
+            message (on ? "Radio coupée : les pads et la prise restent jouables. ON AIR pour la rallumer."_fr
+                        : "Radio rallumée."_fr, false);
+        }
+    }
+    else if (recKey.contains (e.position))
     {
         const bool was = proc.radio.recording();
         if (! proc.radioRec (why))

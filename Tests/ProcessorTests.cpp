@@ -73,11 +73,18 @@ static void playAsAHost (double rate, int block)
 // A host that hands the plug-in the same buffer each time without clearing it (in place, nothing on the input):
 // what comes in is what went out the block before. Notes must still end: the sound back to silence after the
 // release, never piling up.
-static void playAsALazyHost (double rate, int block, int lag = 1, float hostGain = 1.0f)
+static void playAsALazyHost (double rate, int block, int lag = 1, float hostGain = 1.0f, bool directUnderCapture = false)
 {
     ReplikantProcessor proc;
     proc.setRateAndBufferSizeDetails (rate, block);
     proc.prepareToPlay (rate, block);
+    if (directUnderCapture)
+    {
+        // the input heard (DIRECT, the capture page open) and handed back a little softer: no loop either
+        proc.options.monitor = 1;
+        proc.settingsChanged();
+        proc.captureOpen = true;
+    }
     const int chans = juce::jmax (proc.getTotalNumInputChannels(), proc.getTotalNumOutputChannels());
     // (lag 2: two buffers taking turns, so what comes in went out two blocks before)
     std::vector<juce::AudioBuffer<float>> bufs ((size_t) lag, juce::AudioBuffer<float> (chans, block));
@@ -118,8 +125,8 @@ static void playAsALazyHost (double rate, int block, int lag = 1, float hostGain
             }
     }
     const double tailRms = std::sqrt (tail / juce::jmax (1, tailFrames));
-    std::printf ("  a lazy host at %.0f Hz, blocks of %d (input = output %d block%s before): peak %.2f, after the release %.5f rms\n",
-                 rate, block, lag, lag > 1 ? "s" : "", peak, tailRms);
+    std::printf ("  a lazy host at %.0f Hz, blocks of %d (input = output %d block%s before%s): peak %.2f, after the release %.5f rms\n",
+                 rate, block, lag, lag > 1 ? "s" : "", directUnderCapture ? ", DIRECT under CAPTURE" : "", peak, tailRms);
     CHECK (during > 0.05f && peak < 1.2f, "lazy host: notes at %.2f, peak %.2f (%.0f Hz / %d)", during, peak, rate, block);
     CHECK (tailRms < 1.0e-3, "lazy host: the notes end (%.5f rms left, %.0f Hz / %d)", tailRms, rate, block);
 }
@@ -217,6 +224,21 @@ static void radioAsAHost()
     const double pad = play (0.2, radio::firstPadNote + 2);
     std::printf ("  pads: %.4f rms quiet, %.4f with pad 3\n", quiet, pad);
     CHECK (quiet < 1.0e-4 && pad > 0.01, "pad 3 on D1: %.5f -> %.4f", quiet, pad);
+    // ON AIR off: the radio silent, the pads still played
+    proc->setSoundParam (snd::rdLevel, 0.8f);
+    proc->setSoundParam (snd::rdOn, 0.0f);
+    play (0.2);
+    const double offAir = play (0.2);
+    const double padOff = play (0.2, radio::firstPadNote + 2);
+    std::printf ("  off air: %.5f rms, pad 3 %.4f\n", offAir, padOff);
+    CHECK (offAir < 1.0e-4 && padOff > 0.01 && bank.use.load() == 0, "off air: %.5f, pad %.4f, receivers %d", offAir, padOff, bank.use.load());
+    proc->setSoundParam (snd::rdOn, 1.0f);
+    // the capture page over the radio: quiet (nothing to loop back through DIRECT), the receiver kept
+    proc->captureOpen = true;
+    play (0.2);
+    const double underCapture = play (0.2);
+    CHECK (underCapture < 1.0e-4 && bank.use.load() == 1, "under the capture page: %.5f rms, receivers %d", underCapture, bank.use.load());
+    proc->captureOpen = false;
     // the take into the SAMPLER: its instrument, the sampler playing it
     CHECK (proc->radioToSampler (-1, why), "to sampler: %s", why.toRawUTF8());
     CHECK ((int) proc->player.get (snd::engine) == snd::sampler, "the sampler shown");
@@ -267,6 +289,28 @@ int main()
     playAsALazyHost (48000.0, 512, 2);
     playAsALazyHost (48000.0, 1024, 1, 0.9999f);
     playAsALazyHost (44100.0, 256, 3, 1.0001f);
+    playAsALazyHost (48000.0, 512, 1, 0.97f, true);
+    playAsALazyHost (44100.0, 256, 2, 1.0f, true);
+
+    // MONITOR: OFF by default (an input that hears the speakers would howl), a capture included; a project from
+    // before 0.3.6 with DIRECT (the old default) opens with OFF
+    {
+        ReplikantProcessor proc;
+        CHECK (proc.options.monitor == 0, "monitor off by default: %d", proc.options.monitor);
+        juce::MemoryBlock st;
+        proc.options.monitor = 1;
+        proc.getStateInformation (st);
+        ReplikantProcessor again;
+        again.setStateInformation (st.getData(), (int) st.getSize());
+        CHECK (again.options.monitor == 1, "DIRECT chosen now is kept: %d", again.options.monitor);
+        auto xml = juce::AudioProcessor::getXmlFromBinary (st.getData(), (int) st.getSize());
+        xml->setAttribute ("version", "0.3.4");
+        juce::MemoryBlock old;
+        juce::AudioProcessor::copyXmlToBinary (*xml, old);
+        ReplikantProcessor before;
+        before.setStateInformation (old.getData(), (int) old.getSize());
+        CHECK (before.options.monitor == 0, "a 0.3.4 project's DIRECT back to OFF: %d", before.options.monitor);
+    }
 
     // the capture page open, a real input: ÉCOUTE DIRECT lets it through (and closed, it doesn't)
     for (bool open : { true, false })
@@ -275,6 +319,8 @@ int main()
         proc.setRateAndBufferSizeDetails (48000.0, 512);
         proc.prepareToPlay (48000.0, 512);
         proc.captureOpen = open;
+        proc.options.monitor = 1;                  // DIRECT (OFF is the default)
+        proc.settingsChanged();
         juce::AudioBuffer<float> buf (juce::jmax (proc.getTotalNumInputChannels(), proc.getTotalNumOutputChannels()), 512);
         double phase = 0.0, energy = 0.0;
         for (int b = 0; b < 40; ++b)
