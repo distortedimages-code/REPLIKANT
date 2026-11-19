@@ -493,6 +493,39 @@ int main()
         CHECK (before.options.monitor == 0, "a 0.3.4 project's DIRECT back to OFF: %d", before.options.monitor);
     }
 
+    // (0.4.5) a project from before: its six stages get ECHO before ESPACE; its ENV and FOLLOW stay one-way (+);
+    // WTF?!'s seed comes back
+    {
+        ReplikantProcessor proc;
+        auto set = [&proc] (int id, float v) { if (auto* q = proc.params.getParameter (snd::def (id).id)) q->setValueNotifyingHost (q->convertTo0to1 (v)); };
+        set (snd::m2Type, 4.0f);         // FOLLOW
+        set (snd::m2Polarity, 0.0f);
+        proc.player.setFxOrder ({ 0, 5, 1, 2, 3, 4, 6 });
+        proc.player.wtfSeed = 12345u;
+        juce::MemoryBlock st;
+        proc.getStateInformation (st);
+        ReplikantProcessor same;
+        same.setStateInformation (st.getData(), (int) st.getSize());
+        CHECK (same.player.fxOrder() == proc.player.fxOrder(), "the chain's order comes back");
+        CHECK (same.player.wtfSeed.load() == 12345u, "WTF?!'s seed comes back: %u", same.player.wtfSeed.load());
+        CHECK (same.player.get (snd::m2Polarity) < 0.5f, "a FOLLOW saved in ± stays ±");
+        // as a 0.4.4 project had them: six stages, no polarity mark
+        auto xml = juce::AudioProcessor::getXmlFromBinary (st.getData(), (int) st.getSize());
+        xml->setAttribute ("fxOrder", "[\"drive\", \"espace\", \"spectre\", \"pitch\", \"chorus\", \"crush\"]");
+        auto mods = juce::JSON::parse (xml->getStringAttribute ("routes"));
+        for (int m = 0; m < mods.size(); ++m)
+            if (auto* o = mods[m].getDynamicObject())
+                o->removeProperty ("polarity");
+        xml->setAttribute ("routes", juce::JSON::toString (mods, true));
+        juce::MemoryBlock old;
+        juce::AudioProcessor::copyXmlToBinary (*xml, old);
+        ReplikantProcessor before;
+        before.setStateInformation (old.getData(), (int) old.getSize());
+        const auto o = before.player.fxOrder();
+        CHECK (o[0] == 0 && o[1] == 6 && o[2] == 5 && o[3] == 1 && o[6] == 4, "ECHO in before ESPACE: %d %d %d %d %d %d %d", o[0], o[1], o[2], o[3], o[4], o[5], o[6]);
+        CHECK (before.player.get (snd::m2Polarity) > 0.5f, "an old FOLLOW stays one-way");
+    }
+
     // the capture page open, a real input: ÉCOUTE DIRECT lets it through (and closed, it doesn't)
     for (bool open : { true, false })
     {

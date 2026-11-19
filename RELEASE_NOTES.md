@@ -1,3 +1,16 @@
+**REPLIK8 0.4.6** : ECHO, un compresseur en sortie, la capture de cycles à l'écoute, et une machine qu'on prend en main.
+
+- **ECHO**, un septième bloc dans la chaîne : une bande et quatre têtes de lecture, réparties sur son temps (libre ou calé sur le tempo), chacune de son côté dans la stéréo. Elles lisent dans le sens de la bande, à l'envers, ou une sur deux à l'envers ; elles restent en place, se balancent (WOBBLE), glissent le long de la bande pour faire monter ou descendre chaque écho jusqu'à l'octave (SCAN), ou sautent ailleurs (JUMP). FEEDBACK jusqu'à 110 % sans jamais exploser, TONE, WEAR (pleurage, saturation, aigus usés). À l'écran : la bande, ses têtes, et l'endroit où tombent les échos
+- **COMP**, dans SETTINGS, à la toute fin de la chaîne : un seul bouton pour le seuil, le taux et le rattrapage, de rien du tout jusqu'au limiteur, puis au-delà, où les coups passent sous leurs propres queues (pompe, aspiration). Six attaques, cinq relâchements et AUTO pour les nappes, un gain d'entrée, une gate, un drive, un mélange parallèle. Il écoute le son lui-même, le sidechain du DAW, l'entrée, ou une seule piste du DRUM. Le volume reste à sa place quand on le tourne. À l'écran, sa courbe et ce qu'il retire
+- **CAPTURE CYCLES › LISTEN** : lance la capture, va à ton synthé, tiens une note en tournant un bouton. L'enregistrement part au seuil et s'arrête au silence (ou STOP) ; REPLIK8 suit la hauteur, garde les cycles là où le timbre bouge, les aligne entre eux et en fait la banque du synthé
+- **Des onglets** au bas de l'écran pour les banques de chaque page (une lampe pour chaque effet allumé dans FX)
+- **À la souris sur l'écran** : la courbe du filtre (coupure, résonance), les enveloppes, la pile de cycles, le début du sample, la bande de SPECTRE, la bande d'ECHO, la courbe du COMP. Maj pour aller fin, double-clic pour revenir
+- **La chaîne d'effets** : garde un bloc appuyé une seconde, il sort de son emplacement ; glisse-le, les autres se poussent ; lâche-le, il s'enfonce à sa place
+- **SPECTRE** : ses formes d'onde dessinées autour de leur potard
+- **Trois claviers**, dans SETTINGS : CLASSIC, PADS (deux rangées rétroéclairées), FLAT (une dalle sombre qui s'allume par en dessous)
+- **RADIO** : ON AIR, REC, GRAB et les envois vers le SAMPLER et le DRUM redessinés, avec leurs pictos
+- Quelques textes de l'écran mal affichés (des accents) corrigés
+
 **REPLIK8 0.4.5** : plus un clic, des effets qui gardent le volume, un suiveur qui écoute ce que tu veux.
 
 - **Plus de clics** : tous les potards glissent en douceur, échantillon par échantillon (les niveaux du mixer, le DRIVE, les positions dans les cycles, le filtre). Changer de modèle de drive ou de filtre, de forme d'onde dans SPECTRE ou de mode dans CHORUS passe par un fondu de quelques millisecondes

@@ -1859,8 +1859,8 @@ private:
         const auto& pat = d.pattern (d.playingPattern());
         const int sel = juce::jlimit (0, drum::numTracks - 1, proc().drumTrack.load());
         const auto& tk = pat.tr[sel];
-        const auto& lifted = m.drumEdit->lifted;
-        auto v = [&] (int param) { return lifted.empty() ? tk.p[param] : tk.at (lifted.front(), param); };
+        const auto& raised = m.drumEdit->lifted;
+        auto v = [&] (int param) { return raised.empty() ? tk.p[param] : tk.at (raised.front(), param); };
         auto stroke = [&] (const juce::Path& path, juce::Colour c, float t = 2.5f) { g.setColour (c); g.strokePath (path, juce::PathStrokeType (t, juce::PathStrokeType::curved)); };
         auto caption = [&] (const juce::String& t) { text (g, t, r.removeFromBottom (14.0f), mono (10.0f), col::screenDim, juce::Justification::centredLeft, true); };
         auto decaySeconds = [] (float dec) { return dec >= 0.99f ? 4.0f : 0.01f * std::pow (400.0f, dec); };

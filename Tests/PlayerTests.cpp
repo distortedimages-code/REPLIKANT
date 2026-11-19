@@ -626,7 +626,7 @@ static void testStability()
         p.set (snd::quality, 2.0f);
         p.set (snd::dModel, (float) (model % 3 + 1));
         p.set (snd::dAmt, 1.0f);
-        for (int fx : { snd::spOn, snd::piOn, snd::chOn, snd::crOn, snd::rvOn })
+        for (int fx : { snd::spOn, snd::piOn, snd::chOn, snd::crOn, snd::rvOn, snd::ecOn, snd::cpOn })
             p.set (fx, 1.0f);
         p.set (snd::rvShimmer, 1.0f);
         p.set (snd::rvDecay, 1.0f);
@@ -681,7 +681,7 @@ static void testCpu()
         p.set (snd::pmIndex, 40.0f);
         p.set (snd::playMode, (float) elastic);
         p.set (snd::dModel, 3.0f);
-        for (int fx : { snd::spOn, snd::piOn, snd::chOn, snd::crOn, snd::rvOn })
+        for (int fx : { snd::spOn, snd::piOn, snd::chOn, snd::crOn, snd::rvOn, snd::ecOn, snd::cpOn })
             p.set (fx, 1.0f);
         std::vector<Event> ev;
         for (int k = 0; k < 8; ++k)
@@ -704,7 +704,7 @@ static void testCpu()
         p.set (snd::pmBA, 0.5f);
         p.set (snd::subLevel, 0.3f);
         p.set (snd::dModel, 3.0f);
-        for (int fx : { snd::spOn, snd::piOn, snd::chOn, snd::crOn, snd::rvOn })
+        for (int fx : { snd::spOn, snd::piOn, snd::chOn, snd::crOn, snd::rvOn, snd::ecOn, snd::cpOn })
             p.set (fx, 1.0f);
         std::vector<Event> ev;
         for (int k = 0; k < 8; ++k)
