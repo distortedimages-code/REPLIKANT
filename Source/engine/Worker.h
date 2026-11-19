@@ -46,6 +46,12 @@ public:
     bool startCycleSession (const juce::String& name, const rk::Session&, const Recorder::Plan&, double sampleRate,
                             int channels, const juce::File& folder, std::shared_ptr<const Instrument> base);
     void stopSession();
+    // CAPTURE CYCLES, LISTEN: what it shows while it waits and records (`text`, `progress` 0..1, < 0: none; ended:
+    // nothing playing), then the take cut into `wanted` cycles (dsp::cyclesFromTake), the bank joined to `base` (a
+    // copy, saved in its folder) or to a new instrument, and published
+    void listening (const juce::String& text, float progress, bool ended = false);
+    void cyclesFromTake (std::vector<float> take, double sampleRate, int wanted, const juce::String& name, const rk::Session&,
+                         const juce::File& folder, std::shared_ptr<const Instrument> base);
     // renders the keys of `ins` (as its session says) and publishes it, first as it is, then with its keys
     void renderAndPublish (std::shared_ptr<Instrument> ins, bool publishFirst = true);
     // runs a task on the worker thread (load, export...), with a label for the status

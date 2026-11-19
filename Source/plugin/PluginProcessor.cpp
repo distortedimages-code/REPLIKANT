@@ -246,6 +246,8 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     }
     if (numIn > 0 && n <= synthBuffer.getNumSamples())
         recorder.capture (chans, numIn, n);
+    if (numIn > 0)
+        listener.process (chans, numIn, n);
 
     // the transport (the modulators and the clock follow it)
     Player::Transport transport;
@@ -526,6 +528,7 @@ InstrumentPtr ReplikantProcessor::getInstrument() const
 void ReplikantProcessor::timerCallback()
 {
     collectOldInstruments();
+    listenTick();
     resampleTick();
     radioTick();
     drumTick();
@@ -688,7 +691,8 @@ bool ReplikantProcessor::startCycles (juce::String& why)
         why = "Une session est en cours."_fr;
         return false;
     }
-    if (options.source != Source::testSynth && port.load() == nullptr && ! hostMidiOut.load())
+    const bool listen = cycleOptions.vary == 3;
+    if (! listen && options.source != Source::testSynth && port.load() == nullptr && ! hostMidiOut.load())
     {
         why = "Choisis la sortie MIDI qui va au synthé (SOURCE > MIDI)."_fr;
         return false;
@@ -697,6 +701,19 @@ bool ReplikantProcessor::startCycles (juce::String& why)
     {
         why = "Le sidechain n'est pas branché : choisis-le dans ton DAW, ou prends l'entrée principale."_fr;
         return false;
+    }
+    if (listen)
+    {
+        // LISTEN: armed; the take starts when the input goes over the threshold
+        if (! listener.arm (sampleRate, (float) juce::jlimit (-70.0, -6.0, cycleOptions.listenDb), 30.0))
+        {
+            why = "L'écoute n'a pas pu démarrer."_fr;
+            return false;
+        }
+        worker.listening ("EN ÉCOUTE · JOUE TA NOTE"_fr, 0.0f);
+        lastCaptureWasCycles = true;
+        sendChangeMessage();
+        return true;
     }
     const auto& c = cycleOptions;
     const int n = CycleOptions::countOf (c.count);
@@ -737,7 +754,48 @@ bool ReplikantProcessor::startCycles (juce::String& why)
 
 void ReplikantProcessor::stopSampling()
 {
+    if (listener.busy())
+    {
+        listener.stop();
+        return;
+    }
     worker.stopSession();
+}
+
+// LISTEN, on the message thread: what it shows while it waits and records; the take, once over, to the worker
+void ReplikantProcessor::listenTick()
+{
+    const int st = listener.state.load();
+    if (st == CycleListener::idle)
+    {
+        if (listenShown)
+        {
+            listenShown = false;
+            worker.listening ("ÉCOUTE ARRÊTÉE"_fr, -1.0f, true);       // (stopped before anything came)
+            sendChangeMessage();
+        }
+        return;
+    }
+    if (st == CycleListener::done)
+    {
+        listenShown = false;
+        auto take = listener.take();
+        auto base = getInstrument();
+        const auto folder = base != nullptr && base->folder.isDirectory() ? base->folder : Worker::uniqueFolder (instrumentsRoot(), instrumentName);
+        auto s = session;
+        s.loop = false;
+        s.normalise = rk::Normalise::off;
+        s.oneShot = false;
+        worker.cyclesFromTake (std::move (take), sampleRate, CycleOptions::countOf (cycleOptions.count), instrumentName, s, folder, base);
+        sendChangeMessage();
+        return;
+    }
+    listenShown = true;
+    if (st == CycleListener::waiting)
+        worker.listening ("EN ÉCOUTE · JOUE TA NOTE"_fr, 0.0f);
+    else
+        worker.listening ("ENREGISTREMENT "_fr + juce::String (listener.seconds(), 1) + " S · STOP OU SILENCE POUR FINIR",
+                          (float) (listener.seconds() / listener.maxSeconds()));
 }
 
 void ReplikantProcessor::newInstrument()
@@ -1117,6 +1175,7 @@ void ReplikantProcessor::getStateInformation (juce::MemoryBlock& dest)
     xml.setAttribute ("cyTo", cycleOptions.ccTo);
     xml.setAttribute ("cyHold", cycleOptions.hold);
     xml.setAttribute ("cySettle", cycleOptions.settle);
+    xml.setAttribute ("cyListen", cycleOptions.listenDb);
     xml.setAttribute ("rsLength", resampleOptions.length);
     xml.setAttribute ("rsSynced", resampleOptions.synced);
     xml.setAttribute ("rsRoot", resampleOptions.root);
@@ -1161,12 +1220,13 @@ void ReplikantProcessor::setStateInformation (const void* data, int size)
     options.thru = xml->getBoolAttribute ("thru", options.thru);
     cycleOptions.note = juce::jlimit (0, 127, xml->getIntAttribute ("cyNote", cycleOptions.note));
     cycleOptions.count = juce::jlimit (0, 3, xml->getIntAttribute ("cyCount", cycleOptions.count));
-    cycleOptions.vary = juce::jlimit (0, 2, xml->getIntAttribute ("cyVary", cycleOptions.vary));
+    cycleOptions.vary = juce::jlimit (0, 3, xml->getIntAttribute ("cyVary", cycleOptions.vary));
     cycleOptions.cc = juce::jlimit (0, 127, xml->getIntAttribute ("cyCc", cycleOptions.cc));
     cycleOptions.ccFrom = juce::jlimit (0, 127, xml->getIntAttribute ("cyFrom", cycleOptions.ccFrom));
     cycleOptions.ccTo = juce::jlimit (0, 127, xml->getIntAttribute ("cyTo", cycleOptions.ccTo));
     cycleOptions.hold = juce::jlimit (0.15, 4.0, xml->getDoubleAttribute ("cyHold", cycleOptions.hold));
     cycleOptions.settle = juce::jlimit (0.05, 4.0, xml->getDoubleAttribute ("cySettle", cycleOptions.settle));
+    cycleOptions.listenDb = juce::jlimit (-70.0, -6.0, xml->getDoubleAttribute ("cyListen", cycleOptions.listenDb));
     resampleOptions.length = juce::jlimit (0, 4, xml->getIntAttribute ("rsLength", resampleOptions.length));
     resampleOptions.synced = xml->getBoolAttribute ("rsSynced", resampleOptions.synced);
     resampleOptions.root = juce::jlimit (0, 127, xml->getIntAttribute ("rsRoot", resampleOptions.root));

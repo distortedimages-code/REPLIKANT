@@ -8,6 +8,7 @@
 #include "../engine/Instrument.h"
 #include "../engine/Recorder.h"
 #include "../engine/Worker.h"
+#include "../engine/Listener.h"
 #include "../engine/Player.h"
 #include "../engine/TestSynth.h"
 #include "../radio/RadioCore.h"
@@ -76,7 +77,8 @@ public:
     {
         int note = 36;               // low: more points to a period
         int count = 1;               // 8, 16, 32, 64 takes
-        int vary = 0;                // 0 a CC swept, 1 the velocity, 2 by hand (nothing sent)
+        int vary = 0;                // 0 a CC swept, 1 the velocity, 2 by hand (nothing sent), 3 LISTEN (one take, cut)
+        double listenDb = -40.0;     // LISTEN: what starts the take
         int cc = 74, ccFrom = 0, ccTo = 127;
         double hold = 0.5, settle = 0.2;    // each take held; the pause before it (the synth settles)
         static int countOf (int c)        { const int n[] = { 8, 16, 32, 64 }; return n[juce::jlimit (0, 3, c)]; }
@@ -84,7 +86,8 @@ public:
     bool startCycles (juce::String& whyNot);
     bool lastCaptureWasCycles = false;
     void stopSampling();
-    bool isSampling() const                          { return worker.isSampling() || recorder.isRunning(); }
+    bool isSampling() const                          { return worker.isSampling() || recorder.isRunning() || listener.busy(); }
+    CycleListener listener;                          // CAPTURE CYCLES, LISTEN
 
     InstrumentPtr getInstrument() const;
     void newInstrument();
@@ -175,6 +178,8 @@ public:
 private:
     struct Sink;
     void timerCallback() override;
+    void listenTick();
+    bool listenShown = false;
     void publish (std::shared_ptr<Instrument>);
     void collectOldInstruments();
     void loadGlobalSettings();

@@ -6,6 +6,8 @@
 #include "../Source/dsp/Drive.h"
 #include "../Source/dsp/Effects.h"
 #include "../Source/dsp/Modulators.h"
+#include "../Source/dsp/Cycles.h"
+#include "../Source/engine/Listener.h"
 #include "../Source/core/Analysis.h"
 
 #include <algorithm>
@@ -1162,6 +1164,101 @@ static void testComp()
     }
 }
 
+// CAPTURE CYCLES, LISTEN (0.4.5): the take starts at the threshold (with what came just before), ends in the silence;
+// cut into cycles that follow a sweep, at the note's pitch, lined up with each other
+static void testListen()
+{
+    const double sr = 48000.0, pi = 3.14159265358979;
+    // a note at 110 Hz, its brightness opening over 3 s (a saw through a one-pole whose cutoff climbs), 0.5 s of
+    // hiss before, 2 s after
+    std::vector<float> in ((size_t) (sr * 5.5), 0.0f);
+    std::mt19937 rng (5);
+    std::uniform_real_distribution<float> u (-1.0f, 1.0f);
+    double ph = 0.0, lp = 0.0;
+    for (size_t i = 0; i < in.size(); ++i)
+    {
+        in[i] = 0.0005f * u (rng);
+        const double t = (double) i / sr - 0.5;
+        if (t >= 0.0 && t < 3.0)
+        {
+            ph += 110.0 / sr;
+            ph -= std::floor (ph);
+            const double saw = 2.0 * ph - 1.0;
+            const double fc = 150.0 * std::pow (2.0, t * 2.2);
+            lp += (saw - lp) * (1.0 - std::exp (-2.0 * pi * fc / sr));
+            in[i] += (float) (0.4 * lp * std::min (1.0, t / 0.01));
+        }
+    }
+    CycleListener l;
+    CHECK (l.arm (sr, -40.0f, 30.0), "LISTEN armed");
+    for (size_t at = 0; at < in.size(); at += 256)
+    {
+        const float* chans[1] = { in.data() + at };
+        l.process (chans, 1, (int) std::min<size_t> (256, in.size() - at));
+    }
+    CHECK (l.state.load() == CycleListener::done, "LISTEN: the take ended in the silence (state %d)", l.state.load());
+    auto take = l.take();
+    const double secs = (double) take.size() / sr;
+    CHECK (secs > 2.9 && secs < 3.3, "LISTEN: the take holds the note, %.2f s", secs);
+    CHECK (l.state.load() == CycleListener::idle, "taken: idle again");
+
+    const double hint = findPeriod (take.data(), (int) take.size(), (int) (sr * 1.5), sr);
+    CHECK (std::abs (hint - sr / 110.0) < 2.0, "the period found: %.1f frames (%.1f)", hint, sr / 110.0);
+    std::vector<int> where;
+    auto cycles = cyclesFromTake (take.data(), (int) take.size(), sr, 16, &where);
+    CHECK (cycles.size() == 16, "16 cycles out of the take (%d)", (int) cycles.size());
+    if (cycles.size() == 16)
+    {
+        // brighter and brighter: the energy over the 4th harmonic, first against last
+        auto bright = [] (const std::vector<float>& c)
+        {
+            double hi = 0.0, all = 0.0;
+            const int n = (int) c.size();
+            for (int h = 1; h <= 40; ++h)
+            {
+                double re = 0.0, im = 0.0;
+                for (int t = 0; t < n; ++t)
+                {
+                    re += c[(size_t) t] * std::cos (2.0 * 3.14159265358979 * h * t / n);
+                    im += c[(size_t) t] * std::sin (2.0 * 3.14159265358979 * h * t / n);
+                }
+                const double m = re * re + im * im;
+                all += m;
+                if (h >= 4) hi += m;
+            }
+            return hi / (all + 1e-12);
+        };
+        CHECK (bright (cycles.back()) > 4.0 * bright (cycles.front()), "the sweep followed: %.3f to %.3f", bright (cycles.front()), bright (cycles.back()));
+        bool ordered = true;
+        for (size_t i = 1; i < where.size(); ++i)
+            ordered = ordered && where[i] > where[i - 1];
+        CHECK (ordered, "the cycles in their order");
+        // lined up: each close to the one before
+        double worst = 0.0;
+        for (size_t i = 1; i < cycles.size(); ++i)
+        {
+            double xy = 0.0, xx = 0.0, yy = 0.0;
+            for (size_t t = 0; t < cycles[i].size(); ++t)
+            {
+                xy += cycles[i][t] * cycles[i - 1][t];
+                xx += cycles[i][t] * cycles[i][t];
+                yy += cycles[i - 1][t] * cycles[i - 1][t];
+            }
+            worst = std::max (worst, 1.0 - xy / std::sqrt (xx * yy + 1e-30));
+        }
+        CHECK (worst < 0.35, "lined up (the worst neighbours %.3f apart)", worst);
+    }
+    // stopped while it waits: nothing taken
+    CycleListener w;
+    w.arm (sr, -20.0f, 30.0);
+    std::vector<float> quiet (512, 0.001f);
+    const float* qc[1] = { quiet.data() };
+    w.process (qc, 1, 512);
+    w.stop();
+    w.process (qc, 1, 512);
+    CHECK (w.state.load() == CycleListener::idle && w.take().empty(), "stopped before the threshold: nothing");
+}
+
 int main()
 {
     testOversampler();
@@ -1174,6 +1271,7 @@ int main()
     testEffectLevels();
     testEcho();
     testComp();
+    testListen();
     testModulators();
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;

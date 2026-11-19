@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <array>
 #include <complex>
 
 namespace dsp
@@ -233,7 +234,7 @@ std::shared_ptr<const CycleBank> CycleBank::basics()
     return bank;
 }
 
-std::vector<float> extractCycle (const float* x, int length, int at, double periodHint)
+std::vector<float> extractCycle (const float* x, int length, int at, double periodHint, double* periodOut)
 {
     if (x == nullptr || length <= 0 || periodHint < 2.0)
         return {};
@@ -283,6 +284,8 @@ std::vector<float> extractCycle (const float* x, int length, int at, double peri
         }
     if (start + period + 8.0 >= (double) length)
         return {};
+    if (periodOut != nullptr)
+        *periodOut = period;
     std::vector<float> c ((size_t) CycleBank::size);
     for (int i = 0; i < CycleBank::size; ++i)
         c[(size_t) i] = (float) lanczos (x, length, start + period * (double) i / CycleBank::size);
@@ -291,5 +294,236 @@ std::vector<float> extractCycle (const float* x, int length, int at, double peri
     for (int i = 0; i < CycleBank::size; ++i)
         c[(size_t) i] -= seam * (float) i / (float) CycleBank::size;
     return c;
+}
+
+double findPeriod (const float* x, int length, int at, double sampleRate)
+{
+    if (x == nullptr || sampleRate <= 0.0)
+        return 0.0;
+    const int d = std::max (1, (int) std::lround (sampleRate / 12000.0));
+    const double rate = sampleRate / d;
+    const int minLag = std::max (2, (int) std::floor (rate / 2000.0)), maxLag = (int) std::ceil (rate / 20.0);
+    const int win = 2 * maxLag;
+    if (at < 0 || at + (win + maxLag + 2) * d >= length)
+        return 0.0;
+    // brought down (an average of d frames)
+    std::vector<double> y ((size_t) (win + maxLag + 2));
+    for (size_t i = 0; i < y.size(); ++i)
+    {
+        double sum = 0.0;
+        for (int k = 0; k < d; ++k)
+            sum += x[at + (int) i * d + k];
+        y[i] = sum / d;
+    }
+    std::vector<double> score ((size_t) maxLag + 2, -2.0);
+    double best = -2.0;
+    for (int lag = minLag; lag <= maxLag; ++lag)
+    {
+        double xy = 0.0, xx = 0.0, yy = 0.0;
+        for (int i = 0; i < win; ++i)
+        {
+            xy += y[(size_t) i] * y[(size_t) (i + lag)];
+            xx += y[(size_t) i] * y[(size_t) i];
+            yy += y[(size_t) (i + lag)] * y[(size_t) (i + lag)];
+        }
+        const double sc = xx > 1.0e-12 && yy > 1.0e-12 ? xy / std::sqrt (xx * yy) : -2.0;
+        score[(size_t) lag] = sc;
+        best = std::max (best, sc);
+    }
+    if (best < 0.6)
+        return 0.0;
+    // the shortest lag that is a peak within 10 % of the best
+    for (int lag = minLag + 1; lag < maxLag; ++lag)
+    {
+        const double a = score[(size_t) lag - 1], b = score[(size_t) lag], c = score[(size_t) lag + 1];
+        if (b >= 0.9 * best && b >= a && b >= c)
+        {
+            double p = (double) lag;
+            const double den = a - 2.0 * b + c;
+            if (std::abs (den) > 1.0e-12)
+                p += std::clamp (0.5 * (a - c) / den, -0.5, 0.5);
+            return p * d;
+        }
+    }
+    return 0.0;
+}
+
+std::vector<std::vector<float>> cyclesFromTake (const float* x, int length, double sr, int wanted, std::vector<int>* where)
+{
+    std::vector<std::vector<float>> out;
+    if (x == nullptr || length < (int) (sr * 0.1) || wanted < 2)
+        return out;
+    // where it sounds: 10 ms frames within 30 dB of the loudest
+    const int hop = std::max (1, (int) (sr * 0.01));
+    const int frames = length / hop;
+    std::vector<float> rms ((size_t) frames);
+    float loudest = 0.0f;
+    int loudestAt = 0;
+    for (int f = 0; f < frames; ++f)
+    {
+        double e = 0.0;
+        for (int i = f * hop; i < (f + 1) * hop; ++i)
+            e += (double) x[i] * x[i];
+        rms[(size_t) f] = (float) std::sqrt (e / hop);
+        if (rms[(size_t) f] > loudest)
+        {
+            loudest = rms[(size_t) f];
+            loudestAt = f;
+        }
+    }
+    if (loudest < 1.0e-5f)
+        return out;
+    int first = 0, last = frames - 1;
+    while (first < frames && rms[(size_t) first] < loudest * 0.0316f) ++first;
+    while (last > first && rms[(size_t) last] < loudest * 0.0316f) --last;
+    const int from = std::min ((first + 3) * hop, length - 1);         // (past the attack's first 30 ms)
+    const int to = std::max (from, last * hop);
+
+    // the pitch where it is loudest, then followed from one place to the next
+    double hint = 0.0;
+    for (int tryAt : { loudestAt * hop, (from + to) / 2, from, to - (int) (sr * 0.2) })
+        if ((hint = findPeriod (x, length, std::max (0, tryAt), sr)) > 0.0)
+            break;
+    if (hint <= 0.0)
+        return out;
+    const int places = std::clamp (wanted * 4, 24, 256);
+    struct Found { int at; std::vector<float> c; };
+    std::vector<Found> found;
+    for (int k = 0; k < places; ++k)
+    {
+        const int at = from + (int) ((double) (to - from) * k / std::max (1, places - 1));
+        double period = 0.0;
+        auto c = extractCycle (x, length, at, hint, &period);
+        if (c.empty())
+        {
+            const double p = findPeriod (x, length, at, sr);
+            if (p > 0.0)
+                c = extractCycle (x, length, at, p, &period);
+        }
+        if (c.empty())
+            continue;
+        hint = period;
+        found.push_back ({ at, std::move (c) });
+    }
+    if (found.size() < 2)
+        return out;
+
+    // how much the timbre moves: the first 48 harmonics of each (log, the level taken out), one to the next
+    constexpr int harmonics = 48;
+    const int n = CycleBank::size;
+    std::vector<std::array<float, harmonics>> shape (found.size());
+    for (size_t i = 0; i < found.size(); ++i)
+    {
+        const auto& c = found[i].c;
+        std::array<double, harmonics> mag {};
+        double total = 1.0e-12;
+        for (int h = 1; h <= harmonics; ++h)
+        {
+            double re = 0.0, im = 0.0;
+            for (int t = 0; t < n; t += 2)            // (every other point: plenty for 48 harmonics)
+            {
+                const double ph = 2.0 * 3.14159265358979 * h * t / n;
+                re += c[(size_t) t] * std::cos (ph);
+                im += c[(size_t) t] * std::sin (ph);
+            }
+            mag[(size_t) h - 1] = re * re + im * im;
+            total += mag[(size_t) h - 1];
+        }
+        for (int h = 0; h < harmonics; ++h)
+            shape[i][(size_t) h] = (float) std::log10 (1.0e-5 + mag[(size_t) h] / total);
+    }
+    std::vector<double> travel (found.size(), 0.0);
+    for (size_t i = 1; i < found.size(); ++i)
+    {
+        double dd = 0.0;
+        for (int h = 0; h < harmonics; ++h)
+        {
+            const double v = shape[i][(size_t) h] - shape[i - 1][(size_t) h];
+            dd += v * v;
+        }
+        travel[i] = travel[i - 1] + std::sqrt (dd);
+    }
+    // the cycles kept: evenly along the way the timbre went (evenly in time when it hardly moved)
+    const int count = std::min (wanted, (int) found.size());
+    const bool still = travel.back() < 0.5;
+    std::vector<size_t> pick;
+    for (int j = 0; j < count; ++j)
+    {
+        const double u = count > 1 ? (double) j / (count - 1) : 0.0;
+        size_t best = 0;
+        if (still)
+            best = (size_t) std::lround (u * (double) (found.size() - 1));
+        else
+        {
+            const double aim = u * travel.back();
+            double gap = 1.0e30;
+            for (size_t i = 0; i < found.size(); ++i)
+                if (std::abs (travel[i] - aim) < gap)
+                {
+                    gap = std::abs (travel[i] - aim);
+                    best = i;
+                }
+        }
+        if (! pick.empty() && best <= pick.back())
+            best = std::min (found.size() - 1, pick.back() + 1);
+        if (pick.empty() || best > pick.back())
+            pick.push_back (best);
+    }
+    // each turned to line up with the one before: coarse on 256 points, then to the point
+    for (size_t j = 0; j < pick.size(); ++j)
+    {
+        auto c = found[pick[j]].c;
+        if (! out.empty())
+        {
+            const auto& prev = out.back();
+            constexpr int coarse = 256;
+            const int step = n / coarse;
+            std::vector<float> a ((size_t) coarse), b ((size_t) coarse);
+            for (int i = 0; i < coarse; ++i)
+            {
+                float sa = 0.0f, sb = 0.0f;
+                for (int k = 0; k < step; ++k)
+                {
+                    sa += prev[(size_t) (i * step + k)];
+                    sb += c[(size_t) (i * step + k)];
+                }
+                a[(size_t) i] = sa;
+                b[(size_t) i] = sb;
+            }
+            int bestShift = 0;
+            double bestScore = -1.0e30;
+            for (int sft = 0; sft < coarse; ++sft)
+            {
+                double sc = 0.0;
+                for (int i = 0; i < coarse; ++i)
+                    sc += a[(size_t) i] * b[(size_t) ((i + sft) % coarse)];
+                if (sc > bestScore)
+                {
+                    bestScore = sc;
+                    bestShift = sft;
+                }
+            }
+            int fine = bestShift * step;
+            bestScore = -1.0e30;
+            for (int sft = bestShift * step - step; sft <= bestShift * step + step; ++sft)
+            {
+                const int sh = ((sft % n) + n) % n;
+                double sc = 0.0;
+                for (int i = 0; i < n; i += 2)
+                    sc += prev[(size_t) i] * c[(size_t) ((i + sh) % n)];
+                if (sc > bestScore)
+                {
+                    bestScore = sc;
+                    fine = sh;
+                }
+            }
+            if (fine != 0)
+                std::rotate (c.begin(), c.begin() + fine, c.end());
+        }
+        out.push_back (std::move (c));
+        if (where != nullptr)
+            where->push_back (found[pick[j]].at);
+    }
+    return out;
 }
 }

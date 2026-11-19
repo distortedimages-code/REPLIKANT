@@ -47,5 +47,18 @@ namespace dsp
 
     // one cycle out of a recording: the period nearest `periodHint` frames found around `at` (autocorrelation),
     // started on a rising zero crossing, resampled to CycleBank::size points; empty if nothing periodic is there
-    std::vector<float> extractCycle (const float* x, int length, int at, double periodHint);
+    // (`period`: the period found, in frames)
+    std::vector<float> extractCycle (const float* x, int length, int at, double periodHint, double* period = nullptr);
+
+    // the period (frames) of what plays around `at`, any pitch from 20 Hz to 2 kHz (0: nothing periodic): the
+    // normalised autocorrelation of a copy brought down to about 12 kHz, its shortest lag scoring within 10 % of
+    // the best (not an octave down)
+    double findPeriod (const float* x, int length, int at, double sampleRate);
+
+    // LISTEN (0.4.5): `wanted` cycles out of a take (a note held while a knob turns): the pitch followed along it, a
+    // cycle every few milliseconds, then those kept spaced by how much the timbre moved (more where it changes, few
+    // where it holds), each turned to line up with the one before (circular cross-correlation): they morph without
+    // a jump. `where`: the frame each comes from
+    std::vector<std::vector<float>> cyclesFromTake (const float* x, int length, double sampleRate, int wanted,
+                                                    std::vector<int>* where = nullptr);
 }

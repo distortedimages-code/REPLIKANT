@@ -1511,6 +1511,40 @@ private:
         const int n = ReplikantProcessor::CycleOptions::countOf (o.count);
         const double each = o.hold + o.settle + 0.15;
         juce::String head, line;
+        if (o.vary == 3)
+        {
+            // LISTEN: what will happen, and the threshold over the input's level
+            auto top = r.removeFromTop (60.0f);
+            text (g, juce::String (n) + " cycles · à l'écoute"_fr, top.removeFromTop (34.0f), grotesk (24.0f, 300), col::screenText, juce::Justification::centredLeft, true);
+            text (g, "lance, va au synthé, tiens une note en tournant un bouton : l'enregistrement part au seuil, s'arrête au silence (ou STOP)"_fr,
+                  top, mono (11.0f), col::screenDim, juce::Justification::topLeft, true);
+            r.removeFromTop (10.0f);
+            auto meter = r.removeFromTop (16.0f);
+            const float lvl = juce::Decibels::gainToDecibels (proc().inputLevel(), -100.0f);
+            auto xOf = [meter] (float db) { return meter.getX() + meter.getWidth() * juce::jlimit (0.0f, 1.0f, (db + 72.0f) / 72.0f); };
+            g.setColour (col::screenLine);
+            g.fillRoundedRectangle (meter, 3.0f);
+            g.setColour (lvl >= (float) o.listenDb ? col::sRed : col::sGreen);
+            g.fillRoundedRectangle (meter.withRight (xOf (lvl)), 3.0f);
+            g.setColour (col::screenText);
+            g.fillRect (xOf ((float) o.listenDb) - 1.0f, meter.getY() - 5.0f, 2.0f, meter.getHeight() + 10.0f);
+            text (g, "seuil "_fr + juce::String (juce::roundToInt (o.listenDb)) + " dB", r.removeFromTop (22.0f).withX (xOf ((float) o.listenDb) - 40.0f).withWidth (120.0f),
+                  mono (10.0f), col::screenDim, juce::Justification::centredLeft);
+            // the steps: wait, record, cut
+            auto row = r.removeFromTop (juce::jmin (70.0f, r.getHeight()));
+            const char* steps[] = { "attend le seuil", "enregistre (30 s max)", "suit la hauteur", "garde les cycles où le timbre bouge" };
+            const float w = row.getWidth() / 4.0f;
+            for (int i = 0; i < 4; ++i)
+            {
+                auto cell = juce::Rectangle<float> (row.getX() + w * (float) i, row.getY() + 10.0f, w - 12.0f, 40.0f);
+                g.setColour (col::screenLine);
+                g.drawRoundedRectangle (cell, 6.0f, 1.0f);
+                text (g, juce::String::fromUTF8 (steps[i]), cell.reduced (6.0f, 2.0f), mono (10.0f), col::screenDim, juce::Justification::centred, true);
+                if (i < 3)
+                    text (g, "→"_fr, { cell.getRight(), cell.getY(), 12.0f, cell.getHeight() }, mono (11.0f), col::screenGhost, juce::Justification::centred, true);
+            }
+            return;
+        }
         head << n << " cycles · "_fr << lower (rk::noteName (o.note));
         if (o.vary == 0)
             line << "cc " << o.cc << " de "_fr << o.ccFrom << " à "_fr << o.ccTo;
@@ -3784,26 +3818,41 @@ void Machine::buildCyclePages()
     };
     Page pg { "cycles", "cycleplan", {} };
     Bank b { "cycles", {} };
+    // (LISTEN plays nothing: no note, no CC, no times; its threshold instead)
+    auto notListen = [this] { return proc.cycleOptions.vary != 3; };
+    auto listen = [this] { return proc.cycleOptions.vary == 3; };
+    auto played = [this] { return ! proc.isSampling(); };
     b.ctls.push_back (keep (numberCtl ("Note", 0.0, 127.0, 1.0, [&o] { return (double) o.note; }, [&o] (double v) { o.note = (int) v; },
-                                       [] (double v) { return lower (rk::noteName ((int) v)); })));
+                                       [] (double v) { return lower (rk::noteName ((int) v)); }), played));
+    b.ctls.back().shown = notListen;
     b.ctls.back().tip = "La note tenue à chaque prise. Grave, c'est mieux : plus de points par période (C1 par défaut)."_fr;
     b.ctls.push_back (keep (choiceCtl ("Takes", { "8", "16", "32", "64" }, [&o] { return o.count; }, [&o] (int v) { o.count = v; })));
     b.ctls.back().tip = "Combien de cycles dans la banque : un par prise."_fr;
-    b.ctls.push_back (keep (choiceCtl ("Sweep", { "cc", "velocity", "by hand" }, [&o] { return o.vary; }, [&o] (int v) { o.vary = v; })));
-    b.ctls.back().tip = "D'une prise à l'autre : un CC balayé (le filtre, une forme d'onde...), la vélocité de 1 à 127, ou rien, et tu tournes un bouton du synthé pendant la capture."_fr;
+    b.ctls.push_back (keep (choiceCtl ("Sweep", { "cc", "velocity", "by hand", "listen" }, [&o] { return o.vary; }, [&o] (int v) { o.vary = v; })));
+    b.ctls.back().tip = "D'une prise à l'autre : un CC balayé (le filtre, une forme d'onde...), la vélocité de 1 à 127, ou rien, et tu tournes un bouton du synthé pendant la capture. LISTEN : une seule prise, lancée par le son lui-même (au seuil), puis découpée en cycles."_fr;
+    b.ctls.push_back (keep (numberCtl ("Threshold", -70.0, -6.0, 1.0, [&o] { return o.listenDb; }, [&o] (double v) { o.listenDb = v; },
+                                       [] (double v) { return juce::String (juce::roundToInt (v)) + " dB"; }),
+                            [this] { return ! proc.isSampling(); }));
+    b.ctls.back().shown = listen;
+    b.ctls.back().tip = "LISTEN : le niveau qui lance l'enregistrement. Au-dessus du bruit de fond, en dessous de la note."_fr;
     auto ccOn = [this] { return ! proc.isSampling() && proc.cycleOptions.vary == 0; };
     b.ctls.push_back (keep (numberCtl ("CC", 0.0, 127.0, 1.0, [&o] { return (double) o.cc; }, [&o] (double v) { o.cc = (int) v; },
                                        [] (double v) { return juce::String ((int) v); }), ccOn));
+    b.ctls.back().shown = notListen;
     b.ctls.back().tip = "Le numéro du CC envoyé avant chaque prise (74 : souvent la brillance, le filtre)."_fr;
     b.ctls.push_back (keep (numberCtl ("From", 0.0, 127.0, 1.0, [&o] { return (double) o.ccFrom; }, [&o] (double v) { o.ccFrom = (int) v; },
                                        [] (double v) { return juce::String ((int) v); }), ccOn));
+    b.ctls.back().shown = notListen;
     b.ctls.push_back (keep (numberCtl ("To", 0.0, 127.0, 1.0, [&o] { return (double) o.ccTo; }, [&o] (double v) { o.ccTo = (int) v; },
                                        [] (double v) { return juce::String ((int) v); }), ccOn));
+    b.ctls.back().shown = notListen;
     b.ctls.push_back (keep (numberCtl ("Hold", 0.15, 4.0, 0.05, [&o] { return o.hold; }, [&o] (double v) { o.hold = v; },
-                                       [] (double v) { return seconds (v); }, true)));
+                                       [] (double v) { return seconds (v); }, true), played));
+    b.ctls.back().shown = notListen;
     b.ctls.back().tip = "Combien de temps chaque note est tenue : le cycle est pris aux deux tiers, une fois l'attaque passée."_fr;
     b.ctls.push_back (keep (numberCtl ("Pause", 0.05, 4.0, 0.05, [&o] { return o.settle; }, [&o] (double v) { o.settle = v; },
-                                       [] (double v) { return seconds (v); }, true)));
+                                       [] (double v) { return seconds (v); }, true), played));
+    b.ctls.back().shown = notListen;
     b.ctls.back().tip = "Le temps laissé au synthé pour suivre le CC avant la note."_fr;
     pg.banks.push_back (std::move (b));
     cyclePages.push_back (std::move (pg));

@@ -90,6 +90,71 @@ bool Worker::startCycleSession (const juce::String& name, const rk::Session& s, 
     return true;
 }
 
+void Worker::listening (const juce::String& text, float progress, bool ended)
+{
+    setStatus ([&] (Status& st)
+    {
+        st.sampling = ! ended;
+        st.busy = ! ended;
+        st.text = text;
+        st.progress = progress;
+        st.secondsLeft = 0.0;
+        if (! ended)
+        {
+            st.warning.clear();
+            st.last = nullptr;
+            st.recorded.clear();
+        }
+    });
+}
+
+void Worker::cyclesFromTake (std::vector<float> take, double sr, int wanted, const juce::String& name, const rk::Session& s,
+                             const juce::File& folder, std::shared_ptr<const Instrument> base)
+{
+    listening ("ANALYSE DES CYCLES"_fr, -1.0f);
+    post ({}, [this, take = std::move (take), sr, wanted, name, s, folder, base]
+    {
+        std::vector<int> where;
+        auto list = dsp::cyclesFromTake (take.data(), (int) take.size(), sr, wanted, &where);
+        if (list.size() < 2)
+        {
+            setStatus ([] (Status& st)
+            {
+                st.sampling = false;
+                st.busy = false;
+                st.progress = -1.0f;
+                st.text = "PAS ASSEZ DE CYCLES";
+                st.warning = "Le son enregistré ne se répète pas assez (bruit, ou trop court ?) : tiens une note plus longtemps."_fr;
+            });
+            return;
+        }
+        auto ins = base != nullptr ? std::make_shared<Instrument> (*base) : std::make_shared<Instrument>();
+        if (base == nullptr)
+        {
+            ins->name = name;
+            ins->session = s;
+            ins->sampleRate = sr;
+            ins->rebuildIndex();
+        }
+        ins->cycles = std::make_shared<const dsp::CycleBank> (list, true);
+        const auto into = base != nullptr && base->folder.isDirectory() ? base->folder : folder;
+        const auto res = instrumentio::save (*ins, into);
+        const int count = (int) list.size();
+        const double secs = (double) take.size() / sr;
+        setStatus ([&] (Status& st)
+        {
+            st.sampling = false;
+            st.busy = false;
+            st.progress = -1.0f;
+            st.text = juce::String (count) + " CYCLES · PRIS SUR "_fr + juce::String (secs, 1) + " S · ENREGISTRÉS"_fr;
+            if (res.failed())
+                st.warning = res.getErrorMessage();
+        });
+        if (onInstrument)
+            onInstrument (ins);
+    });
+}
+
 void Worker::stopSession()
 {
     recorder.stop();
