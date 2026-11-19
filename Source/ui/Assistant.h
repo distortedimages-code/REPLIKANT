@@ -47,6 +47,7 @@ namespace te
         void chooseForShot (int daw, int target);
         void tick (double seconds);
         void runTestForShot();
+        bool testRunning() const                        { return testing(); }
         void fakeForShot (int daw, const juce::String& hostName, const juce::String& format, const juce::String& track, bool devices);
 
         enum class Daw { live, logic, bitwig, reaper, cubase, studioOne, other };
@@ -93,18 +94,30 @@ namespace te
         juce::String applied;                // what was just set (shown a moment)
 
         // the test
-        enum class Test { idle, notes, cc, done };
+        enum class Test { idle, notes, cc, ccSearch, done };
         Test test = Test::idle;
+        bool testing() const                            { return test == Test::notes || test == Test::cc || test == Test::ccSearch; }
         double testFrom = 0.0;
         ReplikantProcessor::Probe notesResult, ccResult;
         bool ccWanted() const;
+        bool ccMoved (const ReplikantProcessor::Probe&) const;
         bool retried = false;
         bool ready = false;
         double readyAt = -10.0, doneAt = -10.0;
-        void startTest();
+        void startTest (bool byHand = true);
         void testTick();
         void finishTest();
-        juce::String fixNote;                // what the test changed by itself
+        void judge();                         // READY or not, from what was found (after a fix by hand too)
+        // what the test puts right by itself, then tests again; what it can't, it says how
+        juce::StringArray fixes;
+        int autoRuns = 0;
+        bool ccSearched = false;
+        std::vector<int> ccQueue;
+        int ccFirst = 74, ccTrying = -1;
+        bool nextCc();
+        struct Verdict { bool notesDone, timedOut, heard, loop, clip, clipFixed, low, steady, drone, ccOk; float lo, hi, mean; };
+        Verdict verdict() const;
+        void paintTodo (juce::Graphics&, juce::Rectangle<float>, const Verdict&);
         // the meters
         float level[2] {}, hold[2] {};
         double holdAt[2] {};

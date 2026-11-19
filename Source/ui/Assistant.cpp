@@ -466,7 +466,7 @@ void CaptureAssistant::open (int k)
     test = Test::idle;
     ready = false;
     retried = false;
-    fixNote.clear();
+    fixes.clear();
     applied.clear();
     notesResult = {};
     ccResult = {};
@@ -547,7 +547,7 @@ void CaptureAssistant::go (int s)
         case Step::wiring:  scan (true); applyHardware(); break;
         case Step::test:
             if (target == Target::test) applyTest();
-            if (test != Test::notes && test != Test::cc) { test = Test::idle; ready = false; }
+            if (! testing()) { test = Test::idle; ready = false; }
             break;
         case Step::daw:
         case Step::target:
@@ -730,8 +730,15 @@ bool CaptureAssistant::ccWanted() const
     return kind == 1 && proc.cycleOptions.vary == 0;
 }
 
-void CaptureAssistant::startTest()
+void CaptureAssistant::startTest (bool byHand)
 {
+    if (byHand)
+    {
+        fixes.clear();
+        autoRuns = 0;
+        ccSearched = false;
+        retried = false;
+    }
     juce::String why;
     if (! proc.startProbe (false, why))
     {
@@ -747,86 +754,191 @@ void CaptureAssistant::startTest()
     echoSeen = false;
 }
 
+bool CaptureAssistant::ccMoved (const ReplikantProcessor::Probe& p) const
+{
+    return p.state == ReplikantProcessor::Probe::done && p.ccMoved;
+}
+
+// the next CC to try, among the ones synths answer most often
+bool CaptureAssistant::nextCc()
+{
+    while (! ccQueue.empty())
+    {
+        ccTrying = ccQueue.front();
+        ccQueue.erase (ccQueue.begin());
+        proc.cycleOptions.cc = ccTrying;
+        juce::String why;
+        if (proc.startProbe (true, why))
+        {
+            test = Test::ccSearch;
+            testFrom = now;
+            return true;
+        }
+    }
+    proc.cycleOptions.cc = ccFirst;          // (none: as it was)
+    ccTrying = -1;
+    return false;
+}
+
 void CaptureAssistant::testTick()
 {
-    if (test != Test::notes && test != Test::cc)
+    if (! testing())
         return;
     const auto p = proc.probe();
     if (test == Test::notes)
         notesResult = p;
-    else
+    else if (test == Test::cc)
         ccResult = p;
-    if (p.state == ReplikantProcessor::Probe::done)
-    {
-        if (test == Test::notes)
-        {
-            // nothing came back where REPLIK8 listens, but something came by the other door: that one taken
-            auto& o = proc.options;
-            if (p.heard == 0 && ! retried && o.source != Src::testSynth)
-            {
-                if ((p.heardOn & 2) != 0 && o.source == Src::input)
-                {
-                    o.source = Src::sidechain;
-                    fixNote = "Le son arrivait par le sidechain : SOURCE réglée sur SIDECHAIN."_fr;
-                }
-                else if ((p.heardOn & 1) != 0 && o.source == Src::sidechain)
-                {
-                    o.source = Src::input;
-                    fixNote = "Le son arrivait par l'entrée principale : SOURCE réglée sur INPUT."_fr;
-                }
-                if (fixNote.isNotEmpty())
-                {
-                    retried = true;
-                    proc.settingsChanged();
-                    if (onSettingsChanged)
-                        onSettingsChanged();
-                    startTest();
-                    return;
-                }
-            }
-            if (ccWanted() && p.heard > 0)
-            {
-                juce::String why;
-                if (proc.startProbe (true, why))
-                {
-                    test = Test::cc;
-                    testFrom = now;
-                    return;
-                }
-            }
-        }
-        finishTest();
-    }
-    else if (now - testFrom > 12.0)
-    {
+    const bool over = p.state == ReplikantProcessor::Probe::done;
+    if (! over && now - testFrom <= 12.0)
+        return;
+    if (! over)
         proc.stopProbe();
-        test = Test::done;
+    if (test == Test::ccSearch)
+    {
+        if (over && ccMoved (p))
+        {
+            ccResult = p;
+            fixes.add ("Le CC "_fr + juce::String (ccFirst) + " ne changeait rien ; le CC "_fr + juce::String (ccTrying)
+                       + " change le son : CYCLES › CC réglé sur "_fr + juce::String (ccTrying) + ".");
+            ccTrying = -1;
+            proc.settingsChanged();
+            if (onSettingsChanged)
+                onSettingsChanged();
+            finishTest();
+        }
+        else if (! nextCc())
+            finishTest();
+        return;
+    }
+    if (! over)
+    {
+        test = Test::done;              // (timed out: no audio)
         doneAt = now;
         ready = false;
-        notesResult.state = ReplikantProcessor::Probe::idle;     // (timed out)
+        notesResult.state = ReplikantProcessor::Probe::idle;
+        return;
     }
+    if (test == Test::notes)
+    {
+        // nothing came back where REPLIK8 listens, but something came by the other door: that one taken
+        auto& o = proc.options;
+        if (p.heard == 0 && ! retried && o.source != Src::testSynth)
+        {
+            juce::String fixed;
+            if ((p.heardOn & 2) != 0 && o.source == Src::input)
+            {
+                o.source = Src::sidechain;
+                fixed = "Le son arrivait par le sidechain : SOURCE réglée sur SIDECHAIN."_fr;
+            }
+            else if ((p.heardOn & 1) != 0 && o.source == Src::sidechain)
+            {
+                o.source = Src::input;
+                fixed = "Le son arrivait par l'entrée principale : SOURCE réglée sur INPUT."_fr;
+            }
+            if (fixed.isNotEmpty())
+            {
+                fixes.add (fixed);
+                retried = true;
+                proc.settingsChanged();
+                if (onSettingsChanged)
+                    onSettingsChanged();
+                startTest (false);
+                return;
+            }
+        }
+        if (ccWanted() && p.heard > 0)
+        {
+            juce::String why;
+            if (proc.startProbe (true, why))
+            {
+                test = Test::cc;
+                testFrom = now;
+                return;
+            }
+        }
+    }
+    finishTest();
+}
+
+CaptureAssistant::Verdict CaptureAssistant::verdict() const
+{
+    Verdict v {};
+    const auto& n = notesResult;
+    v.notesDone = n.state == ReplikantProcessor::Probe::done && test != Test::notes && test != Test::idle;
+    v.timedOut = test == Test::done && ! v.notesDone;
+    v.heard = n.heard >= 2;
+    v.loop = n.echoed || echoSeen;
+    v.clipFixed = n.clipped && target != Target::hardware && proc.session.fileBits == 32;
+    v.clip = n.clipped && ! v.clipFixed;
+    v.low = n.peakDb < -30.0f;
+    v.lo = 1.0e9f;
+    v.hi = 0.0f;
+    float sum = 0.0f;
+    for (int i = 0; i < n.heard; ++i)
+    {
+        v.lo = juce::jmin (v.lo, n.latencyMs[i]);
+        v.hi = juce::jmax (v.hi, n.latencyMs[i]);
+        sum += n.latencyMs[i];
+    }
+    v.mean = n.heard > 0 ? sum / (float) n.heard : 0.0f;
+    v.drone = n.drone;
+    v.steady = n.heard > 0 && v.hi - v.lo < 1.0f && ! n.drone;
+    v.ccOk = ! ccWanted() || ccMoved (ccResult);
+    return v;
+}
+
+void CaptureAssistant::judge()
+{
+    const auto v = verdict();
+    const bool was = ready;
+    ready = test == Test::done && v.notesDone && v.heard && ! v.loop && ! v.clip && v.ccOk;
+    if (ready && ! was)
+        readyAt = now;
 }
 
 void CaptureAssistant::finishTest()
 {
     test = Test::done;
     doneAt = now;
-    const auto& r = notesResult;
-    const bool heard = r.heard >= 2;
-    const bool ccOk = ! ccWanted() || std::abs (ccResult.ccDb) > 1.5f || std::abs (ccResult.ccBright) > 0.12f;
-    ready = heard && ! r.echoed && ! r.clipped && ccOk;
-    if (ready)
-        readyAt = now;
-    // the calibration: a steady latency, every note set on it; else each attack looked for
-    if (kind == 0 && heard)
+    auto v = verdict();
+    // what REPLIK8 can put right by itself: done, and the test again (twice at most)
+    if (v.heard && v.loop && proc.options.monitor != 0 && autoRuns < 2)
     {
-        float lo = 1.0e9f, hi = 0.0f;
-        for (int i = 0; i < r.heard; ++i)
-        {
-            lo = juce::jmin (lo, r.latencyMs[i]);
-            hi = juce::jmax (hi, r.latencyMs[i]);
-        }
-        proc.session.align = hi - lo < 1.0f && ! r.drone ? rk::Align::fixedLatency : rk::Align::perNote;
+        proc.options.monitor = 0;
+        fixes.add ("Sa propre sortie revenait dans son entrée : MONITOR coupé, la boucle est cassée. Je refais le test."_fr);
+        ++autoRuns;
+        proc.settingsChanged();
+        if (onSettingsChanged)
+            onSettingsChanged();
+        startTest (false);
+        return;
+    }
+    if (v.heard && notesResult.clipped && target != Target::hardware && proc.session.fileBits != 32)
+    {
+        proc.session.fileBits = 32;
+        fixes.add ("Le plugin dépasse 0 dB : fichiers en 32 bits flottants, rien n'est écrêté (la normalisation ramène le niveau)."_fr);
+        proc.settingsChanged();
+        if (onSettingsChanged)
+            onSettingsChanged();
+        v = verdict();
+    }
+    if (v.heard && ccWanted() && ! v.ccOk && ! ccSearched)
+    {
+        ccSearched = true;
+        ccFirst = proc.cycleOptions.cc;
+        ccQueue.clear();
+        for (int c : { 74, 71, 1, 73, 70, 76, 72, 75, 77, 16 })
+            if (c != ccFirst)
+                ccQueue.push_back (c);
+        if (nextCc())
+            return;
+    }
+    judge();
+    // the calibration: a steady latency, every note set on it; else each attack looked for
+    if (kind == 0 && v.heard)
+    {
+        proc.session.align = v.steady ? rk::Align::fixedLatency : rk::Align::perNote;
         proc.settingsChanged();
         if (onSettingsChanged)
             onSettingsChanged();
@@ -858,7 +970,8 @@ void CaptureAssistant::tick (double dt)
     }
     mainLed = juce::jmax (juce::jmax (h.main[0], h.main[1]), mainLed * fall);
     sideLed = juce::jmax (juce::jmax (h.side[0], h.side[1]), sideLed * fall);
-    echoSeen = echoSeen || h.echoed;
+    if (testing())
+        echoSeen = echoSeen || h.echoed;      // (only while the test plays: what it found, and nothing after)
     const float railTarget = (float) at;
     railShown += (railTarget - railShown) * juce::jlimit (0.0f, 1.0f, (float) dt * 9.0f);
     repaint();
@@ -1085,8 +1198,8 @@ void CaptureAssistant::paintFooter (juce::Graphics& g, juce::Rectangle<float> r)
             bigKey (g, next, "lancer la capture", hot (next), true);
             hit (next, [this] { auto f = onStart; close(); if (f) f(); });
         }
-        else if (test == Test::notes || test == Test::cc)
-            bigKey (g, next, "test en cours…"_fr, false, false);
+        else if (testing())
+            bigKey (g, next, test == Test::ccSearch ? "je cherche un CC…"_fr : "test en cours…"_fr, false, false);
         else
         {
             bigKey (g, next, test == Test::done ? "refaire le test" : "tester", hot (next), true);
@@ -1785,6 +1898,126 @@ void CaptureAssistant::paintTrackMock (juce::Graphics& g, juce::Rectangle<float>
     }
 }
 
+//============================================================================== what to do, when REPLIK8 can't put it right itself
+void CaptureAssistant::paintTodo (juce::Graphics& g, juce::Rectangle<float> r, const Verdict& v)
+{
+    const auto& o = proc.options;
+    const bool hw = target == Target::hardware;
+    const auto bus = iacName();
+    juce::String title;
+    juce::StringArray ls;
+    struct Act { juce::String name; std::function<void()> f; };
+    std::vector<Act> acts;
+    auto noteKey = [this] { return Act { "jouer une note", [this] { proc.sendTestNote(); } }; };
+    if (v.timedOut)
+    {
+        title = "REPLIK8 ne reçoit pas d'audio"_fr;
+        if (daw == 1)
+            ls = { "[[Sélectionne la piste]] où est REPLIK8 : Logic ne fait tourner en direct que la piste sélectionnée (ou armée)."_fr };
+        else
+            ls = { "Le moteur audio de ton logiciel tourne-t-il ? Regarde ses réglages audio : la carte son, la fréquence."_fr,
+                   "La piste de REPLIK8 n'est ni désactivée, ni gelée."_fr };
+    }
+    else if (! v.heard)
+    {
+        title = "Rien n'est revenu"_fr;
+        if (hw)
+        {
+            ls = { "Le synthé a-t-il joué pendant le test ? [[Non]] : le câble MIDI de l'interface ([[OUT]]) vers le synthé ([[IN]]), et son canal sur [["_fr
+                       + juce::String (o.channel) + "]] (ou omni).",
+                   inApp ? "[[Oui]] : l'appli enregistre-t-elle l'entrée où il est branché ? (étape BRANCHEMENTS)"_fr
+                         : "[[Oui]] : la piste audio écoute-t-elle [["_fr + inputName (true) + "]], monitoring allumé, et REPLIK8 est-il dessus ?"_fr };
+        }
+        else
+            switch (daw)
+            {
+                case 0:  ls = { "Joue une note et regarde le [[témoin MIDI]] de la piste du synthé. Éteint : [[Cmd+,]] › Link, Tempo & MIDI, entrée « "_fr + bus
+                                    + " » : [[Track]] sur [[On]] ; puis [[MIDI From]] = l'IAC et [[Monitor]] = [[In]].",
+                                "Il clignote, mais rien ne revient : [[REPLIK8]] doit être [[après le synthé]], sur cette même piste."_fr }; break;
+                case 1:  ls = { "La piste du synthé est-elle [[sélectionnée]] (ou son [[R]] allumé) ? Logic n'envoie qu'à elle le MIDI de l'IAC."_fr,
+                                "[[REPLIK8]] est-il dans un slot [[Audio FX]] de cette même tranche, sous le synthé ?"_fr }; break;
+                case 2:  ls = { "La piste du synthé est-elle [[armée]] ? Settings › Controllers : le [[MIDI Keyboard]] branché sur l'IAC est-il là ?"_fr,
+                                "[[REPLIK8]] est-il après le synthé dans sa chaîne ?"_fr }; break;
+                case 3:  ls = { "Piste [[armée]], entrée [[MIDI › "_fr + bus + "]], monitoring [[On]] ? Settings › MIDI Inputs : l'IAC sur [[Enable input]] ?"_fr,
+                                "[[REPLIK8]] est-il sous le synthé, dans ses FX ?"_fr }; break;
+                default: ls = { "La piste du synthé écoute-t-elle [["_fr + bus + "]] (son entrée MIDI), monitoring allumé ou piste armée ?"_fr,
+                                "[[REPLIK8]] est-il en insert après le synthé, sur la même piste ?"_fr }; break;
+            }
+        acts.push_back (noteKey());
+    }
+    else if (v.loop)
+    {
+        title = "La sortie de REPLIK8 revient dans son entrée"_fr;
+        ls = { daw == 0 ? "La piste où est REPLIK8 n'écoute pas sa propre sortie : [[Audio From]] ni sur elle-même, ni sur [[Resampling]]."_fr
+                        : "La piste où est REPLIK8 n'écoute pas sa propre sortie : pas d'envoi d'elle vers elle, pas de bus qui revient."_fr,
+               "Tout est juste ? Refais le test : une fausse alerte ne revient pas."_fr };
+    }
+    else if (v.clip)
+    {
+        title = "Ça sature avant REPLIK8"_fr;
+        ls = { "Baisse le [[volume du synthé]] ou le [[gain de l'entrée]] de ta carte son : vise une crête vers [[−12 dB]] sur les vumètres."_fr,
+               "Puis refais le test."_fr };
+        acts.push_back (noteKey());
+    }
+    else if (! v.ccOk)
+    {
+        const int cc = proc.cycleOptions.cc;
+        title = "Aucun CC courant ne change ce son"_fr;
+        ls = { "Dans ton synthé, mets un bouton (le filtre, la forme d'onde) en [[MIDI learn]], puis appuie sur [[envoyer le CC "_fr + juce::String (cc) + "]] : il l'apprend.",
+               "Ou balaie autre chose : la [[vélocité]], ou [[à la main]] (tu tournes un bouton pendant la capture)."_fr };
+        acts.push_back ({ "envoyer le CC " + juce::String (cc), [this] { proc.sendCcSweep (proc.cycleOptions.cc); } });
+        acts.push_back ({ "SWEEP : velocity", [this]
+        {
+            proc.cycleOptions.vary = 1;
+            proc.settingsChanged();
+            fixes.add ("CYCLES › SWEEP sur VELOCITY : chaque prise un peu plus fort."_fr);
+            if (onSettingsChanged)
+                onSettingsChanged();
+            judge();
+        } });
+        acts.push_back ({ "SWEEP : by hand", [this]
+        {
+            proc.cycleOptions.vary = 2;
+            proc.settingsChanged();
+            fixes.add ("CYCLES › SWEEP sur BY HAND : tourne un bouton du synthé pendant la capture."_fr);
+            if (onSettingsChanged)
+                onSettingsChanged();
+            judge();
+        } });
+    }
+    if (title.isEmpty())
+        return;
+
+    // the panel: what to do, in gold what to touch, and the keys that help
+    const float pulseK = 0.5f + 0.5f * std::sin ((float) now * 3.0f);
+    const float k = easeOut ((float) ((now - doneAt - 0.3) / 0.35));
+    auto box = r.reduced (4.0f, 6.0f).translated (0.0f, (1.0f - k) * 14.0f);
+    juce::Graphics::ScopedSaveState state (g);
+    g.beginTransparencyLayer (k);
+    g.setColour (col::screenGrid.brighter (0.2f));
+    g.fillRoundedRectangle (box, 12.0f);
+    g.setColour (col::sBlue.withAlpha (0.45f + 0.35f * pulseK));
+    g.drawRoundedRectangle (box, 12.0f, 1.6f);
+    auto in = box.reduced (18.0f, 14.0f);
+    write (g, "À FAIRE CHEZ TOI"_fr, in.removeFromTop (16.0f), grotesk (10.5f, 700), col::sBlue);
+    write (g, title, in.removeFromTop (30.0f), grotesk (18.0f, 600), col::screenText);
+    in.removeFromTop (6.0f);
+    auto keys = in.removeFromBottom (30.0f);
+    in.removeFromTop (lines (g, in, ls));
+    float x = keys.getX();
+    for (auto& a : acts)
+    {
+        const float w = chipWidth (a.name) + 6.0f;
+        auto c = juce::Rectangle<float> (x, keys.getY(), w, 28.0f);
+        if (c.getRight() > keys.getRight())
+            break;
+        chip (g, c, a.name, false, hot (c));
+        hit (c, a.f);
+        x += w + 8.0f;
+    }
+    g.endTransparencyLayer();
+}
+
 //============================================================================== TEST
 void CaptureAssistant::paintTest (juce::Graphics& g, juce::Rectangle<float> left, juce::Rectangle<float> right)
 {
@@ -1794,7 +2027,7 @@ void CaptureAssistant::paintTest (juce::Graphics& g, juce::Rectangle<float> left
     auto r = heading (g, left, "ÉTAPE "_fr + juce::String (at + 1) + " · TEST"_fr, "Le test",
                       juce::String::fromUTF8 ("Trois notes (C3) envoyées ") + route + juce::String::fromUTF8 (" : j'écoute ce qui revient et je mesure la latence.")
                           + (ccWanted() ? juce::String::fromUTF8 (" Puis le CC ") + juce::String (proc.cycleOptions.cc) + juce::String::fromUTF8 (" balayé.") : juce::String()));
-    const bool running = test == Test::notes || test == Test::cc;
+    const bool running = testing();
     // the big round key
     auto keyArea = r.removeFromLeft (150.0f).removeFromTop (150.0f);
     auto key = keyArea.withSizeKeepingCentre (124.0f, 124.0f);
@@ -1805,15 +2038,15 @@ void CaptureAssistant::paintTest (juce::Graphics& g, juce::Rectangle<float> left
     g.drawEllipse (key.reduced (2.0f), 2.0f);
     if (running)
     {
-        const auto& p = test == Test::cc ? ccResult : notesResult;
-        const float progress = test == Test::cc ? 0.5f + 0.5f * clamp01 ((float) ((now - testFrom) / 1.6))
+        const auto& p = test == Test::notes ? notesResult : ccResult;
+        const float progress = test != Test::notes ? 0.5f + 0.5f * clamp01 ((float) ((now - testFrom) / 1.6))
                                                 : 0.5f * clamp01 (((float) p.played + clamp01 ((float) std::fmod (now - testFrom, 0.9) / 0.9f)) / (float) juce::jmax (1, p.hits));
         const float done = ccWanted() ? progress : juce::jmin (1.0f, progress * 2.0f);
         juce::Path arc;
         arc.addCentredArc (key.getCentreX(), key.getCentreY(), 60.0f, 60.0f, 0.0f, 0.0f, done * juce::MathConstants<float>::twoPi, true);
         g.setColour (col::sRed);
         g.strokePath (arc, juce::PathStrokeType (3.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-        write (g, test == Test::cc ? juce::String ("CC") : juce::String (juce::jmin (p.played + 1, juce::jmax (1, p.hits))) + " / " + juce::String (juce::jmax (1, p.hits)),
+        write (g, test == Test::ccSearch ? "CC " + juce::String (ccTrying) : test == Test::cc ? juce::String ("CC") : juce::String (juce::jmin (p.played + 1, juce::jmax (1, p.hits))) + " / " + juce::String (juce::jmax (1, p.hits)),
                key, grotesk (22.0f, 600), col::screenText, juce::Justification::centred);
     }
     else
@@ -1822,62 +2055,56 @@ void CaptureAssistant::paintTest (juce::Graphics& g, juce::Rectangle<float> left
         hit (key, [this] { startTest(); });
     }
 
-    // what it found
+    // what it found: each line, and what was put right
     auto list = r.withTrimmedLeft (16.0f);
     struct Check { int state; juce::String name, detail; };    // state: 0 waiting, 1 ok, 2 warning, 3 wrong, 4 running
     std::vector<Check> checks;
+    const auto v = verdict();
     const auto& n = notesResult;
-    const bool measured = test == Test::done && n.state == ReplikantProcessor::Probe::done;
-    const bool timedOut = test == Test::done && ! measured;
-    auto st = [&] (bool ok, bool warn = false) { return ! measured ? (running ? 4 : 0) : (ok ? 1 : (warn ? 2 : 3)); };
-    checks.push_back ({ synthTest ? 1 : (o.midiPortName.isNotEmpty() ? 1 : 3), "MIDI", synthTest ? juce::String ("synthé de test"_fr) : lower (o.midiPortName) + " · canal "_fr + juce::String (o.channel) });
+    const bool hw = target == Target::hardware;
+    const int wait = running ? 4 : 0;
+    checks.push_back ({ synthTest ? 1 : (o.midiPortName.isNotEmpty() ? 1 : 3), "MIDI",
+                        synthTest ? juce::String ("synthé de test"_fr) : lower (o.midiPortName) + " · canal "_fr + juce::String (o.channel) });
+    if (v.timedOut)
+        checks.push_back ({ 3, "le son revient", "pas de réponse de l'audio"_fr });
+    else
+        checks.push_back ({ v.notesDone ? (v.heard ? 1 : 3) : wait, "le son revient",
+                            v.notesDone ? juce::String (n.heard) + " / " + juce::String (n.played) + " notes revenues" : juce::String() });
+    if (v.notesDone && v.heard)
     {
-        juce::String d = measured ? juce::String (n.heard) + " / " + juce::String (n.played) + juce::String::fromUTF8 (n.heard == n.played ? " notes revenues" : " notes revenues seulement") : juce::String();
-        if (timedOut) d = juce::String::fromUTF8 ("pas de réponse de l'audio : le DAW joue-t-il ?");
-        checks.push_back ({ timedOut ? 3 : st (n.heard >= 2), "le son revient", d });
+        if (v.clipFixed)      checks.push_back ({ 1, "niveau", juce::String (n.peakDb, 1) + " dB : au-dessus de 0, gardé en 32 bits flottants"_fr });
+        else if (v.clip)      checks.push_back ({ 3, "niveau", "ça sature à l'entrée"_fr });
+        else if (v.low)       checks.push_back ({ hw ? 2 : 1, "niveau", juce::String (n.peakDb, 1) + (hw ? " dB crête : faible"_fr : " dB crête : faible, normalisé ensuite"_fr) });
+        else                  checks.push_back ({ 1, "niveau", juce::String (n.peakDb, 1) + " dB crête"_fr });
+        checks.push_back ({ v.loop ? 3 : 1, "pas de boucle", v.loop ? juce::String ("REPLIK8 entend sa propre sortie") : "l'entrée n'est pas la sortie"_fr });
+        juce::String lat = juce::String (v.mean, 1) + " ms";
+        if (v.steady)          lat += kind == 0 ? " · stable : notes calées dessus"_fr : " · stable"_fr;
+        else if (v.drone)      lat += kind == 0 ? " · le son ne s'arrête pas : approximative"_fr : " · sans effet sur les cycles"_fr;
+        else                   lat += " · ±"_fr + juce::String ((v.hi - v.lo) * 0.5f, 1) + (kind == 0 ? " ms : chaque attaque recalée"_fr : " ms : sans effet sur les cycles"_fr);
+        checks.push_back ({ v.drone && kind == 0 ? 2 : 1, "latence", lat });
     }
-    if (measured && n.heard > 0)
-    {
-        const bool low = n.peakDb < -30.0f;
-        checks.push_back ({ st (! n.clipped && ! low, low && ! n.clipped), "niveau",
-                            n.clipped ? juce::String::fromUTF8 ("ça sature : baisse le synthé (crête sous −1 dB)")
-                                      : juce::String (n.peakDb, 1) + (low ? " dB crête : faible, monte le synthé vers −12 dB"_fr : " dB crête"_fr) });
-        checks.push_back ({ st (! n.echoed && ! echoSeen), "pas de boucle", n.echoed || echoSeen ? juce::String::fromUTF8 ("REPLIK8 entend sa propre sortie") : juce::String ("l'entrée n'est pas la sortie"_fr) });
-        float lo = 1.0e9f, hi = 0.0f, sum = 0.0f;
-        for (int i = 0; i < n.heard; ++i)
-        {
-            lo = juce::jmin (lo, n.latencyMs[i]);
-            hi = juce::jmax (hi, n.latencyMs[i]);
-            sum += n.latencyMs[i];
-        }
-        const bool steady = hi - lo < 1.0f && ! n.drone;
-        checks.push_back ({ st (steady, true), "latence",
-                            juce::String (sum / (float) n.heard, 1) + " ms"
-                                + (steady ? (kind == 0 ? " · stable : notes calées dessus"_fr : " · stable"_fr)
-                                          : (n.drone ? juce::String::fromUTF8 (" · le son ne s'arrête pas entre les notes")
-                                                     : juce::String::fromUTF8 (" · variable (") + juce::String (lo, 1) + "–"_fr + juce::String (hi, 1)
-                                                           + (kind == 0 ? ") : chaque attaque cherchée"_fr : juce::String (")")))) });
-        if (ccWanted())
-        {
-            const bool ccDone = ccResult.state == ReplikantProcessor::Probe::done;
-            const bool moved = std::abs (ccResult.ccDb) > 1.5f || std::abs (ccResult.ccBright) > 0.12f;
-            checks.push_back ({ ccDone ? (moved ? 1 : 3) : 0, "CC " + juce::String (proc.cycleOptions.cc),
-                                ccDone ? (moved ? "brillance " + juce::String (juce::roundToInt (ccResult.ccBright * 100.0f)) + " %, niveau " + juce::String (ccResult.ccDb, 1) + " dB"
-                                                : juce::String::fromUTF8 ("ne change rien : assigne-le au filtre dans ton synthé (MIDI learn)"))
-                                       : juce::String() });
-        }
-    }
-    else if (running || ! measured)
-    {
+    else
         for (auto* nm : { "niveau", "pas de boucle", "latence" })
-            checks.push_back ({ running ? 4 : 0, nm, {} });
+            checks.push_back ({ v.notesDone || v.timedOut ? 0 : wait, nm, {} });
+    if (ccWanted())
+    {
+        const int cc = proc.cycleOptions.cc;
+        if (test == Test::cc || test == Test::ccSearch)
+            checks.push_back ({ 4, "CC " + juce::String (test == Test::ccSearch ? ccTrying : cc),
+                                test == Test::ccSearch ? "le CC "_fr + juce::String (ccFirst) + " ne bouge rien : j'en essaie un autre" : juce::String() });
+        else if (test == Test::done && v.heard)
+            checks.push_back ({ v.ccOk ? 1 : 3, "CC " + juce::String (cc),
+                                v.ccOk ? "brillance " + juce::String (juce::roundToInt (ccResult.ccBright * 100.0f)) + " %, niveau " + juce::String (ccResult.ccDb, 1) + " dB"
+                                       : "aucun CC courant ne change le son"_fr });
+        else
+            checks.push_back ({ wait, "CC " + juce::String (cc), {} });
     }
     for (size_t i = 0; i < checks.size(); ++i)
     {
-        auto row = list.removeFromTop (34.0f);
+        auto row = list.removeFromTop (32.0f);
         const auto& c = checks[i];
         auto icon = row.removeFromLeft (26.0f).withSizeKeepingCentre (22.0f, 22.0f);
-        const float k = measured ? easeBack ((float) ((now - doneAt - 0.12 * (double) i) / 0.35)) : 1.0f;
+        const float k = test == Test::done ? easeBack ((float) ((now - doneAt - 0.1 * (double) i) / 0.35)) : 1.0f;
         if (c.state == 4)
         {
             juce::Path arc;
@@ -1902,35 +2129,22 @@ void CaptureAssistant::paintTest (juce::Graphics& g, juce::Rectangle<float> left
             else                   crossMark (g, icon.getCentre(), 12.0f * k, colour, 1.8f);
         }
         row.removeFromLeft (10.0f);
-        write (g, c.name, row.removeFromLeft (120.0f), grotesk (14.0f, 600), c.state == 0 ? col::screenDim : col::screenText);
+        write (g, c.name, row.removeFromLeft (116.0f), grotesk (14.0f, 600), c.state == 0 ? col::screenDim : col::screenText);
         write (g, c.detail, row, grotesk (13.0f, 400), c.state == 3 ? col::sRed : col::screenDim);
     }
-    // what went wrong, what to look at
-    if (measured && ! ready)
+    // what was put right by itself
+    list = left.withTop (juce::jmax (list.getY(), keyArea.getBottom()) + 6.0f);
+    for (int i = juce::jmax (0, fixes.size() - 3); i < fixes.size(); ++i)
     {
-        juce::String why;
-        if (n.heard < 2)
-        {
-            if (target == Target::hardware)
-                why = "Le synthé a-t-il joué ? Oui : regarde l'entrée de la carte son, la piste audio et son monitoring. Non : le câble MIDI et le canal du synthé ("_fr
-                      + juce::String (o.channel) + ").";
-            else if (target == Target::plugin)
-                why = "Rien n'est revenu. La piste du synthé écoute-t-elle « "_fr + iacName() + " » ? Son témoin MIDI doit clignoter pendant le test. REPLIK8 est-il bien après le synthé, sur la même piste ?"_fr;
-            else
-                why = "Rien n'est revenu : la piste où REPLIK8 est posé reçoit-elle le son du synthé ?"_fr;
-        }
-        else if (n.echoed || echoSeen)
-            why = "La piste où REPLIK8 est posé se réécoute elle-même : son entrée doit être le synthé, pas sa propre sortie."_fr;
-        else if (n.clipped)
-            why = "Baisse le volume du synthé (ou le gain de ta carte son) jusqu'à ce que la crête reste sous −1 dB, puis refais le test."_fr;
-        else if (ccWanted())
-            why = "Le CC ne bouge pas le son : dans ton synthé, assigne le CC "_fr + juce::String (proc.cycleOptions.cc)
-                  + " au filtre ou à la forme d'onde (MIDI learn), ou choisis un autre CC dans CYCLES."_fr;
-        list.removeFromTop (6.0f);
-        drawRich (g, rich (why, 13.5f, col::sBlue, col::screenText), list.removeFromTop (60.0f));
+        auto row = list;
+        auto tag = row.removeFromLeft (78.0f).removeFromTop (20.0f);
+        g.setColour (col::sGreen.withAlpha (0.16f));
+        g.fillRoundedRectangle (tag.reduced (0.0f, 1.0f), 9.0f);
+        write (g, "CORRIGÉ"_fr, tag, grotesk (10.0f, 700), col::sGreen, juce::Justification::centred);
+        row.removeFromLeft (10.0f);
+        const float h = drawRich (g, rich (fixes[i], 13.0f, col::screenText, col::sGreen), row.withTrimmedTop (1.0f));
+        list.removeFromTop (juce::jmax (22.0f, h) + 6.0f);
     }
-    if (fixNote.isNotEmpty())
-        write (g, fixNote, list.removeFromTop (20.0f), grotesk (12.5f, 500), col::sGreen);
 
     //---------------------------------------------------------------- the right side: meters, the latency, READY
     auto meters = right.removeFromLeft (120.0f);
@@ -1968,9 +2182,9 @@ void CaptureAssistant::paintTest (juce::Graphics& g, juce::Rectangle<float> left
     // where the sound comes in: two small lights
     {
         auto lights = meters.removeFromBottom (32.0f);
-        auto lamp = [&] (juce::Rectangle<float> a, const juce::String& s, float v)
+        auto lamp = [&] (juce::Rectangle<float> a, const juce::String& s, float amount)
         {
-            const bool on = v > 0.003f;
+            const bool on = amount > 0.003f;
             auto d = a.removeFromLeft (12.0f).withSizeKeepingCentre (8.0f, 8.0f);
             g.setColour (on ? col::sGreen : col::screenLine);
             g.fillEllipse (d);
@@ -2020,7 +2234,7 @@ void CaptureAssistant::paintTest (juce::Graphics& g, juce::Rectangle<float> left
         }
     }
 
-    // READY: stamped once all is well
+    // READY: stamped once all is well; else what to do (what REPLIK8 couldn't put right itself)
     if (ready)
     {
         const float k = easeBack ((float) ((now - readyAt - 0.5) / 0.45));
@@ -2041,10 +2255,9 @@ void CaptureAssistant::paintTest (juce::Graphics& g, juce::Rectangle<float> left
             write (g, "REPLIK8 peut capturer"_fr, stamp.withTrimmedTop (70.0f).translated (0.0f, -8.0f), grotesk (12.5f, 600), col::sGreen.withAlpha (a), juce::Justification::centred);
         }
     }
-    else if (! running && test == Test::idle)
-    {
-        auto c = right.withTrimmedBottom (110.0f);
-        write (g, "appuie sur TEST"_fr, c, grotesk (16.0f, 400), col::screenGhost.brighter (0.6f), juce::Justification::centred);
-    }
+    else if (test == Test::done)
+        paintTodo (g, right.withTrimmedBottom (8.0f), v);
+    else if (! running)
+        write (g, "appuie sur TEST"_fr, right.withTrimmedBottom (110.0f), grotesk (16.0f, 400), col::screenGhost.brighter (0.6f), juce::Justification::centred);
 }
 }

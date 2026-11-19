@@ -4,6 +4,12 @@
 
 **Page de téléchargement** : https://distortedimages-code.github.io/REPLIKANT/
 
+## La version 0.4.9 : l'assistant corrige
+
+- **Après le test** (`CaptureAssistant::finishTest`) : une boucle entendue avec MONITOR allumé le coupe et refait le test (deux fois au plus) ; un plugin au-dessus de 0 dB passe les fichiers en 32 bits flottants (`Worker` ne signale plus la saturation dans ce cas) ; un CC sans effet lance la recherche (`nextCc` : 74, 71, 1, 73, 70, 76, 72, 75, 77, 16), le premier qui bouge le son est gardé. Le reste : `paintTodo`, une procédure par logiciel et des touches (`sendTestNote`, `sendCcSweep`, SWEEP). `judge` : PRÊT seulement sans ligne rouge, la boucle comptée pendant le test seulement.
+- **`isOwnOutput`** : une entrée plate (un courant continu) n'est jamais prise pour notre sortie ; la correspondance à un gain près demande du détail (seconde différence au-dessus de 10⁻⁴ de l'énergie) et une entrée qui ne prolonge pas la précédente (extrapolation linéaire du dernier bloc). `ProcessorTests` : une note grave et un courant continu passés en DIRECT, aucune boucle vue.
+- **Le test du CC** : A au FROM, B au TO, C au FROM de nouveau (0,15 s chacun, après 0,5 s puis 0,3 s) ; l'écart de B au milieu de A et C, en niveau et en brillance, doit dépasser 1,5 dB ou 12 % et la dérive de A à C (`Probe::ccMoved`). Le plancher : la plus petite crête sur des fenêtres de 10 ms ; un « all notes off » avant.
+
 ## La version 0.4.8 : l'assistant de capture
 
 - **Assistant** (`te::CaptureAssistant`, `Source/ui/Assistant.cpp`) : un panneau sur l'écran et les encodeurs, des étapes selon le chemin (logiciel, source, MIDI ou branchements, piste, test), glissées à l'entrée (0,32 s), un rail en haut. L'hôte vient de `juce::PluginHostType` et de `wrapperType` (`ReplikantProcessor::hostInfo`), le nom de la piste de `updateTrackProperties` quand l'hôte le donne. Le bus IAC est cherché parmi les sorties MIDI chaque seconde ; les entrées audio viennent de Core Audio (`audioInputs`, dans un DAW : les noms seulement ; dans l'appli : l'appareil en service, réglable par `useAudioInput`). Les réglages de capture (source, sortie MIDI, canal, MONITOR) sont posés au fil des étapes ; les pages de capture sont refaites quand un port apparaît.

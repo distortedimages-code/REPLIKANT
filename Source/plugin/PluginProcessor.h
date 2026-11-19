@@ -108,6 +108,7 @@ public:
     void setMidiPort (const juce::String& identifier, const juce::String& name);
     juce::String midiPortStatus() const;            // empty when fine
     void sendTestNote();
+    void sendCcSweep (int cc);                      // CC `cc` from 0 to 127 in a second (a synth's MIDI learn catches it)
 
     // the editor's keyboard
     void audition (int note, int velocity, bool on);
@@ -154,8 +155,10 @@ public:
         float peakDb = -100.0f, floorDb = -100.0f;
         bool clipped = false, echoed = false, drone = false;
         int heardOn = 0;                    // bit 1: the main input, bit 2: the sidechain
-        float ccDb = 0.0f, ccBright = 0.0f; // the CC test: the level moved (dB), the brightness (ratio, 0 = none)
-        float ccLevelA = 0.0f, ccLevelB = 0.0f;
+        // the CC test: the sound at FROM, at TO, at FROM again; what TO changed beyond the drift of the note itself
+        // (its envelope going on): the level (dB), the brightness (ratio, 0 = none); and whether that's the CC
+        float ccDb = 0.0f, ccBright = 0.0f;
+        bool ccMoved = false;
     };
     bool startProbe (bool ccTest, juce::String& whyNot);
     void stopProbe();
@@ -293,13 +296,13 @@ private:
     struct ProbeRun
     {
         enum Phase { off, floor, quiet, noteOn, held, noteOff, gap,
-                     ccFrom, ccSettle, ccNote, ccWaitA, ccMeasureA, ccTo, ccWaitB, ccMeasureB, ccOff };
+                     ccFrom, ccSettle, ccNote, ccWaitA, ccMeasureA, ccTo, ccWaitB, ccMeasureB, ccBack, ccWaitC, ccMeasureC, ccOff };
         Phase phase = off;
         int t = 0, quietFor = 0, onset = -1;
         float floorPeak = 0.0f, thr = 0.001f, peak = 0.0f, mainPeak = 0.0f, sidePeak = 0.0f;
-        double sumA = 0.0, diffA = 0.0, sumB = 0.0, diffB = 0.0;
-        float lastX = 0.0f;
-        int countA = 0, countB = 0;
+        double sumA = 0.0, diffA = 0.0, sumB = 0.0, diffB = 0.0, sumC = 0.0, diffC = 0.0;
+        float lastX = 0.0f, winPeak = 0.0f, floorMin = 1.0e9f;
+        int countA = 0, countB = 0, countC = 0, winCount = 0;
         int note = 60, channel = 1, cc = 74, ccFromValue = 0, ccToValue = 127;
         bool dirty = false;
         Probe result;
@@ -323,6 +326,10 @@ private:
     int sentNext = 0;
     void rememberOutput (const juce::AudioBuffer<float>&, int n);
     bool isOwnOutput (const juce::AudioBuffer<float>&, int n, bool scaledToo) const;
+    // (0.4.8) the end of the last input: an input that carries on from it smoothly is a sound of its own (a low note
+    // passed straight through looks like what went out, 64 samples at a time)
+    float lastIn[2][2] {};
+    bool lastInValid = false;
 
     double sampleRate = 48000.0;
     bool clockStartedBySampling = false;

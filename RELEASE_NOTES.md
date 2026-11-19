@@ -1,3 +1,12 @@
+**REPLIK8 0.4.9** : quand le test de l'assistant trouve un problème, il le corrige, ou il dit quoi faire.
+
+- **Ce que REPLIK8 peut corriger, il le corrige** et refait le test (marqué CORRIGÉ) : sa propre sortie qui revient dans son entrée (MONITOR coupé), un plugin qui dépasse 0 dB (fichiers en 32 bits flottants, rien d'écrêté), le son arrivé par l'autre entrée (SOURCE changée), un CC qui ne change rien au son (il essaie les CC courants l'un après l'autre et garde celui qui marche)
+- **Ce qui dépend de ton logiciel ou de ton matériel** : un encadré À FAIRE CHEZ TOI, la marche à suivre en deux ou trois lignes pour ton logiciel, et les touches qui aident : jouer une note (pour voir le témoin MIDI de la piste), envoyer le CC (pour le MIDI learn du synthé), passer le balayage en vélocité ou à la main
+- **Fausse alerte corrigée** : « REPLIK8 entend sa propre sortie » s'affichait avec un synthé qui laisse un tout petit courant continu quand il se tait (beaucoup de synthés logiciels). Et PRÊT ne s'affiche plus à côté d'une ligne rouge
+- **Le test du CC** écoute le son avant, pendant et après le CC : l'enveloppe de la note qui continue d'évoluer n'est plus prise pour un effet du CC
+- **Une latence qui varie un peu** n'est plus un avertissement : pour les notes, chaque attaque est recalée ; pour les cycles, elle ne compte pas
+- Le test commence par couper les notes restées en l'air, et mesure le bruit de fond sur les 10 ms les plus calmes
+
 **REPLIK8 0.4.8** : un assistant de capture, pas à pas, jusqu'à PRÊT.
 
 - **L'assistant de capture** : dans CAPTURE, choisis NOTES ou CYCLES (ou sa touche ? ASSISTANT) : il prend l'écran et te mène pas à pas, en cinq étapes au plus. LOGICIEL : il reconnaît Live, Logic, Bitwig, Reaper, Cubase ou Studio One (et le format, AU ou VST3), ou tu le choisis. SOURCE : un plugin dans ton logiciel, un synthé hardware, ou le synthé de test

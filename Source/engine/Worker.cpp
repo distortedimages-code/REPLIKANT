@@ -429,6 +429,7 @@ void Worker::processJob (int jobIndex, int64_t noteOn, int64_t noteOff, int64_t 
     auto last = std::make_shared<rk::Sample> (session.samples.back());
     const int lat = r.latency;
     const bool clipped = r.clipped;
+    const bool floatFiles = session.settings.fileBits == 32;
     setStatus ([&] (Status& st)
     {
         st.recorded.push_back (job);
@@ -436,7 +437,7 @@ void Worker::processJob (int jobIndex, int64_t noteOn, int64_t noteOff, int64_t 
         st.progress = (float) (jobIndex + 1) / (float) juce::jmax (1, st.total);
         st.last = last;
         st.latency = lat;
-        if (clipped)
+        if (clipped && ! floatFiles)      // (in 32-bit float files nothing is cut: the normalising brings it back)
             st.warning = "Saturation sur " + juce::String (rk::noteName (job.note)) + " v" + juce::String (job.velocity) + " : baisse le niveau du synthé ou le gain d'entrée."_fr;
     });
 }

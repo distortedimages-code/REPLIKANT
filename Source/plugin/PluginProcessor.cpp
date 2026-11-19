@@ -242,6 +242,15 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     // own output again. Heard, it would add to itself block after block (every note forever, a buzz at the
     // block rate). Spotted by comparison with what went out lately, and taken as silence
     const bool echoed = src != (int) Source::testSynth && isOwnOutput (input, n, ! sampling);
+    if (n >= 2 && input.getNumChannels() > 0)
+    {
+        for (int c = 0; c < juce::jmin (2, input.getNumChannels()); ++c)
+        {
+            lastIn[c][0] = input.getSample (c, n - 2);
+            lastIn[c][1] = input.getSample (c, n - 1);
+        }
+        lastInValid = true;
+    }
     if (echoed)
     {
         input.clear();
@@ -511,6 +520,40 @@ bool ReplikantProcessor::isOwnOutput (const juce::AudioBuffer<float>& in, int n,
     const int chans = juce::jmin (2, in.getNumChannels());
     if (len <= 0 || chans <= 0)
         return false;
+    // the input's detail (its second difference against its level), and whether it carries on from the last one
+    double d2 = 0.0, e = 0.0;
+    for (int c = 0; c < chans; ++c)
+        for (int i = 2; i < len; ++i)
+        {
+            const double x = in.getSample (c, i), d = x - 2.0 * in.getSample (c, i - 1) + in.getSample (c, i - 2);
+            d2 += d * d;
+            e += x * x;
+        }
+    const bool detailed = d2 > 1.0e-4 * e;
+    // a flat input (a synth's own tiny DC, left while it's silent) is the same numbers block after block: nothing
+    // to tell from it, and nothing to hear if it did loop
+    {
+        bool flat = true;
+        for (int c = 0; c < chans && flat; ++c)
+        {
+            float lo = in.getSample (c, 0), hi = lo;
+            for (int i = 1; i < len; ++i)
+            {
+                lo = juce::jmin (lo, in.getSample (c, i));
+                hi = juce::jmax (hi, in.getSample (c, i));
+            }
+            flat = hi - lo <= 1.0e-6f + 1.0e-3f * juce::jmax (std::abs (lo), std::abs (hi));
+        }
+        if (flat)
+            return false;
+    }
+    bool continues = lastInValid;
+    for (int c = 0; c < chans && continues; ++c)
+    {
+        const float p0 = lastIn[c][0], p1 = lastIn[c][1], x0 = in.getSample (c, 0);
+        const float tol = 0.02f * juce::jmax (std::abs (p1), std::abs (x0)) + 2.0f * std::abs (p1 - p0) + 1.0e-4f;
+        continues = std::abs (x0 - (2.0f * p1 - p0)) <= tol && std::abs (x0) + std::abs (p1) > 1.0e-5f;
+    }
     for (const auto& h : sentHeads)
     {
         // (the very same numbers: a real input never repeats what went out, sample for sample)
@@ -524,8 +567,10 @@ bool ReplikantProcessor::isOwnOutput (const juce::AudioBuffer<float>& in, int n,
             return true;
         // (0.3.6) or the same shape at another level (a host, a fader, a send handing it back a little louder or
         // softer): a correlation of 0.9999 over the 64 first samples of each side, which a sound of its own never
-        // has with ours. Not while capturing: the synth is recorded as it comes
-        if (! scaledToo)
+        // has with ours. Not while capturing: the synth is recorded as it comes. (0.4.8) Nor when the input carries
+        // on smoothly from the last one, or is too smooth to tell (a low note: 64 samples of it are a near straight
+        // line, like any other 64 samples of it, ours included when it is passed straight through)
+        if (! scaledToo || ! detailed || continues)
             continue;
         double xy = 0.0, xx = 0.0, yy = 0.0;
         for (int c = 0; c < chans; ++c)
@@ -1346,6 +1391,7 @@ void ReplikantProcessor::probeBegin (Recorder::MidiSink& sink, int n)
         r.result.hits = want == 2 ? 1 : 3;
         r.phase = ProbeRun::floor;
         r.dirty = true;
+        sink.send (juce::MidiMessage::allNotesOff (r.channel));      // (a note left hanging would hide the attacks)
     }
     switch ((int) r.phase)
     {
@@ -1388,21 +1434,37 @@ void ReplikantProcessor::probeBegin (Recorder::MidiSink& sink, int n)
             r.phase = ProbeRun::ccWaitB;
             r.t = 0;
             break;
+        case ProbeRun::ccBack:
+            sink.send (juce::MidiMessage::controllerEvent (r.channel, r.cc, r.ccFromValue));
+            r.phase = ProbeRun::ccWaitC;
+            r.t = 0;
+            break;
         case ProbeRun::ccOff:
         {
             sink.send (juce::MidiMessage::noteOff (r.channel, r.note));
+            sink.send (juce::MidiMessage::controllerEvent (r.channel, r.cc, r.ccToValue));     // (left where the sweep ends)
             auto& res = r.result;
             res.played = 1;
-            const double a = r.countA > 0 ? std::sqrt (r.sumA / r.countA) : 0.0;
-            const double b = r.countB > 0 ? std::sqrt (r.sumB / r.countB) : 0.0;
-            res.ccLevelA = (float) a;
-            res.ccLevelB = (float) b;
-            res.heard = a > 1.0e-4 || b > 1.0e-4 ? 1 : 0;
-            res.ccDb = a > 1.0e-6 && b > 1.0e-6 ? (float) (20.0 * std::log10 (b / a)) : 0.0f;
-            // brightness: the slope's share of the signal (what a first difference keeps grows with the highs)
-            const double ba = r.sumA > 1.0e-12 ? std::sqrt (r.diffA / r.sumA) : 0.0;
-            const double bb = r.sumB > 1.0e-12 ? std::sqrt (r.diffB / r.sumB) : 0.0;
-            res.ccBright = ba > 1.0e-9 ? (float) (bb / ba - 1.0) : 0.0f;
+            auto level = [] (double sum, int count) { return count > 0 ? std::sqrt (sum / count) : 0.0; };
+            auto bright = [] (double sum, double diff) { return sum > 1.0e-12 ? std::sqrt (diff / sum) : 0.0; };
+            const double a = level (r.sumA, r.countA), b = level (r.sumB, r.countB), c = level (r.sumC, r.countC);
+            res.heard = a > 1.0e-4 || b > 1.0e-4 || c > 1.0e-4 ? 1 : 0;
+            if (a > 1.0e-6 && b > 1.0e-6 && c > 1.0e-6)
+            {
+                // TO against the middle of FROM before and FROM after: the note's own drift cancels out
+                const double da = 20.0 * std::log10 (a), db = 20.0 * std::log10 (b), dc = 20.0 * std::log10 (c);
+                const double dLevel = db - 0.5 * (da + dc), drift = std::abs (dc - da);
+                const double ba = bright (r.sumA, r.diffA), bb = bright (r.sumB, r.diffB), bc = bright (r.sumC, r.diffC);
+                double dBright = 0.0, driftB = 0.0;
+                if (ba > 1.0e-9 && bb > 1.0e-9 && bc > 1.0e-9)
+                {
+                    dBright = std::log (bb) - 0.5 * (std::log (ba) + std::log (bc));
+                    driftB = std::abs (std::log (bc) - std::log (ba));
+                }
+                res.ccDb = (float) dLevel;
+                res.ccBright = (float) (std::exp (dBright) - 1.0);
+                res.ccMoved = (std::abs (dLevel) > 1.5 && std::abs (dLevel) > drift) || (std::abs (dBright) > 0.12 && std::abs (dBright) > driftB);
+            }
             res.peakDb = juce::Decibels::gainToDecibels (r.peak, -100.0f);
             res.clipped = r.peak >= 0.995f;
             if (r.mainPeak > 0.003f) res.heardOn |= 1;
@@ -1445,9 +1507,20 @@ void ReplikantProcessor::probeListen (const float* const* chans, int numIn, int 
         {
             case ProbeRun::floor:
             case ProbeRun::ccSettle:
-                r.floorPeak = juce::jmax (r.floorPeak, a);
-                if (r.t >= secs (0.15f))
+                // the floor: the quietest 10 ms (a tail still dying away isn't the floor)
+                r.winPeak = juce::jmax (r.winPeak, a);
+                if (++r.winCount >= secs (0.01f))
                 {
+                    r.floorMin = juce::jmin (r.floorMin, r.winPeak);
+                    r.winPeak = 0.0f;
+                    r.winCount = 0;
+                }
+                if (r.t >= secs (r.phase == ProbeRun::floor ? 0.4f : 0.25f))
+                {
+                    r.floorPeak = r.floorMin < 1.0e8f ? r.floorMin : r.winPeak;
+                    r.floorMin = 1.0e9f;
+                    r.winPeak = 0.0f;
+                    r.winCount = 0;
                     r.thr = juce::jmax (r.floorPeak * 4.0f, 0.001f);
                     r.result.floorDb = juce::Decibels::gainToDecibels (r.floorPeak, -100.0f);
                     r.phase = r.result.ccTest ? (r.phase == ProbeRun::floor ? ProbeRun::ccFrom : ProbeRun::ccNote) : ProbeRun::quiet;
@@ -1468,8 +1541,10 @@ void ReplikantProcessor::probeListen (const float* const* chans, int numIn, int 
             case ProbeRun::held:
             case ProbeRun::ccWaitA:
             case ProbeRun::ccWaitB:
+            case ProbeRun::ccWaitC:
             case ProbeRun::ccMeasureA:
             case ProbeRun::ccMeasureB:
+            case ProbeRun::ccMeasureC:
                 if (r.phase == ProbeRun::held && r.onset < 0 && a > r.thr)
                     r.onset = r.t - 1;
                 r.peak = juce::jmax (r.peak, a);
@@ -1477,18 +1552,20 @@ void ReplikantProcessor::probeListen (const float* const* chans, int numIn, int 
                     r.mainPeak = juce::jmax (r.mainPeak, std::abs (mainIn.getSample (c, i)));
                 for (int c = 0; c < juce::jmin (2, sideCh); ++c)
                     r.sidePeak = juce::jmax (r.sidePeak, std::abs (side->getSample (c, i)));
-                if (r.phase == ProbeRun::ccMeasureA || r.phase == ProbeRun::ccMeasureB)
                 {
                     const double d = mono - r.lastX;
-                    if (r.phase == ProbeRun::ccMeasureA) { r.sumA += mono * mono; r.diffA += d * d; ++r.countA; }
-                    else                                  { r.sumB += mono * mono; r.diffB += d * d; ++r.countB; }
+                    if (r.phase == ProbeRun::ccMeasureA)      { r.sumA += mono * mono; r.diffA += d * d; ++r.countA; }
+                    else if (r.phase == ProbeRun::ccMeasureB) { r.sumB += mono * mono; r.diffB += d * d; ++r.countB; }
+                    else if (r.phase == ProbeRun::ccMeasureC) { r.sumC += mono * mono; r.diffC += d * d; ++r.countC; }
                 }
                 if (r.phase == ProbeRun::held && r.t >= secs (0.4f))
                     r.phase = ProbeRun::noteOff;
-                else if (r.phase == ProbeRun::ccWaitA && r.t >= secs (0.35f))     { r.phase = ProbeRun::ccMeasureA; r.t = 0; }
-                else if (r.phase == ProbeRun::ccMeasureA && r.t >= secs (0.2f))   r.phase = ProbeRun::ccTo;
-                else if (r.phase == ProbeRun::ccWaitB && r.t >= secs (0.35f))     { r.phase = ProbeRun::ccMeasureB; r.t = 0; }
-                else if (r.phase == ProbeRun::ccMeasureB && r.t >= secs (0.2f))   r.phase = ProbeRun::ccOff;
+                else if (r.phase == ProbeRun::ccWaitA && r.t >= secs (0.5f))      { r.phase = ProbeRun::ccMeasureA; r.t = 0; }
+                else if (r.phase == ProbeRun::ccMeasureA && r.t >= secs (0.15f))  r.phase = ProbeRun::ccTo;
+                else if (r.phase == ProbeRun::ccWaitB && r.t >= secs (0.3f))      { r.phase = ProbeRun::ccMeasureB; r.t = 0; }
+                else if (r.phase == ProbeRun::ccMeasureB && r.t >= secs (0.15f))  r.phase = ProbeRun::ccBack;
+                else if (r.phase == ProbeRun::ccWaitC && r.t >= secs (0.3f))      { r.phase = ProbeRun::ccMeasureC; r.t = 0; }
+                else if (r.phase == ProbeRun::ccMeasureC && r.t >= secs (0.15f))  r.phase = ProbeRun::ccOff;
                 break;
             case ProbeRun::gap:
                 if (r.t >= secs (0.2f))
@@ -1515,6 +1592,19 @@ void ReplikantProcessor::probeListen (const float* const* chans, int numIn, int 
     }
     if (r.dirty)
         probePublish();
+}
+
+void ReplikantProcessor::sendCcSweep (int cc)
+{
+    const int ch = juce::jlimit (1, 16, options.channel);
+    cc = juce::jlimit (0, 127, cc);
+    for (int i = 0; i <= 32; ++i)
+        juce::Timer::callAfterDelay (i * 30, [this, ch, cc, i]
+        {
+            auto m = juce::MidiMessage::controllerEvent (ch, cc, juce::jmin (127, i * 4));
+            m.setTimeStamp (juce::Time::getMillisecondCounterHiRes() * 0.001);
+            toSynth.addMessageToQueue (m);
+        });
 }
 
 void ReplikantProcessor::audition (int note, int velocity, bool on)

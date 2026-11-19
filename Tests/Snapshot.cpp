@@ -366,6 +366,47 @@ int main (int argc, char** argv)
         shoot ("69-assistant-test-pret.png");
         const auto pr = proc.probe();
         std::printf ("assistant test: %d/%d heard, %.1f ms, peak %.1f dB\n", pr.heard, pr.played, pr.latencyMs[0], pr.peakDb);
+        auto testThrough = [&]
+        {
+            for (int b = 0; b < 40000 && (proc.probing() || as->testRunning()); ++b)
+            {
+                buf.clear();
+                midi.clear();
+                proc.processBlock (buf, midi);
+                if (b % 20 == 0)
+                    as->tick (0.02);
+            }
+            for (int i = 0; i < 8; ++i)
+                as->tick (0.3);
+            pump (60);
+        };
+        // nothing comes back: what to do, in Live
+        as->fakeForShot (0, "Ableton Live", "VST3", "Synthe", true);
+        as->chooseForShot (0, (int) A::Target::plugin);
+        as->showStepNamed ("test");
+        proc.options.source = ReplikantProcessor::Source::input;
+        proc.setMidiPort ("host", "DAW");
+        as->runTestForShot();
+        testThrough();
+        shoot ("70-assistant-rien-revient.png");
+        // CYCLES: a CC that moves nothing, another found by itself
+        view->setCaptureKind (te::Machine::cyclesKind);
+        view->openAssistant();
+        as->fakeForShot (0, "Ableton Live", "VST3", "Synthe", true);
+        as->chooseForShot (0, (int) A::Target::test);
+        proc.cycleOptions.vary = 0;
+        proc.cycleOptions.cc = 20;
+        as->showStepNamed ("test");
+        as->runTestForShot();
+        testThrough();
+        shoot ("71-assistant-cycles-cc-trouve.png");
+        {
+            const auto q = proc.probe();
+            std::printf ("assistant CC search: CC %d (last probe: cc %d, %d/%d heard, peak %.1f, floor %.1f, drone %d, src %d)\n", proc.cycleOptions.cc,
+                         (int) q.ccTest, q.heard, q.played, q.peakDb, q.floorDb, (int) q.drone, (int) proc.options.source);
+        }
+        proc.cycleOptions.cc = 74;
+        view->setCaptureKind (te::Machine::notesKind);
         as->close();
     }
 

@@ -548,7 +548,14 @@ int main()
         runUntilDone();
         p = proc.probe();
         CHECK (p.state == Probe::done && p.ccTest && p.played == 1 && p.heard == 1, "the CC test: the note held, heard (%d)", p.heard);
-        CHECK (std::isfinite (p.ccDb) && std::isfinite (p.ccBright), "the CC test measures: %.2f dB, %.2f", p.ccDb, p.ccBright);
+        CHECK (std::isfinite (p.ccDb) && std::isfinite (p.ccBright) && p.ccMoved, "CC 74 moves the test synth: %.2f dB, %.2f", p.ccDb, p.ccBright);
+        // a CC the synth doesn't answer: its own envelope going on isn't taken for it
+        proc.cycleOptions.cc = 20;
+        CHECK (proc.startProbe (true, why), "the CC test starts: %s", why.toRawUTF8());
+        runUntilDone();
+        p = proc.probe();
+        CHECK (p.state == Probe::done && ! p.ccMoved, "CC 20 moves nothing: %.2f dB, %.2f", p.ccDb, p.ccBright);
+        proc.cycleOptions.cc = 74;
         // nothing coming back: the notes go out to the host all the same, none heard
         proc.options.source = ReplikantProcessor::Source::input;
         proc.setMidiPort ("host", "DAW");
@@ -561,6 +568,42 @@ int main()
         CHECK (! proc.startProbe (false, why) && why.isNotEmpty(), "no MIDI out: no test");
         auto h = proc.hostInfo();
         CHECK (h.format.isNotEmpty() && h.host == ReplikantProcessor::Host::other, "the host: %s %s", h.hostName.toRawUTF8(), h.format.toRawUTF8());
+    }
+
+    // (0.4.8) a low note coming in, passed straight through (MONITOR DIRECT, the capture page open), isn't taken for
+    // our own output handed back: 64 samples of it look like any other 64 samples of it
+    for (int test = 0; test < 6; ++test)
+    {
+        const int block = test % 3 == 0 ? 64 : (test % 3 == 1 ? 256 : 1024);
+        const bool dc = test >= 3;            // (or a synth's own tiny DC, left when it's silent)
+        ReplikantProcessor proc;
+        proc.options.source = ReplikantProcessor::Source::input;
+        proc.options.monitor = 1;
+        proc.settingsChanged();
+        proc.captureOpen = true;
+        proc.setRateAndBufferSizeDetails (48000.0, block);
+        proc.prepareToPlay (48000.0, block);
+        juce::AudioBuffer<float> buf (juce::jmax (proc.getTotalNumInputChannels(), proc.getTotalNumOutputChannels()), block);
+        double ph = 0.0;
+        bool echo = false;
+        float outPeak = 0.0f;
+        for (int pos = 0; pos < 96000; pos += block)
+        {
+            for (int i = 0; i < block; ++i)
+            {
+                const float x = dc ? 0.001f
+                                   : 0.5f * (float) (2.0 * ph - 1.0) * 0.6f + 0.2f * (float) std::sin (juce::MathConstants<double>::twoPi * ph);   // C1, a soft saw
+                ph = std::fmod (ph + 32.7 / 48000.0, 1.0);
+                for (int c = 0; c < buf.getNumChannels(); ++c)
+                    buf.setSample (c, i, c < 2 ? x : 0.0f);
+            }
+            juce::MidiBuffer midi;
+            proc.processBlock (buf, midi);
+            echo = echo || proc.heard().echoed;
+            if (pos > 48000)
+                outPeak = juce::jmax (outPeak, buf.getMagnitude (0, 0, block));
+        }
+        CHECK (! echo && outPeak > (dc ? 0.0005f : 0.2f), "%s passed through, block %d: no loop seen (%d), heard (%.4f)", dc ? "a DC" : "a low note", block, (int) echo, outPeak);
     }
 
     // (0.4.5) a project from before: its six stages get ECHO before ESPACE; its ENV and FOLLOW stay one-way (+);
