@@ -38,6 +38,10 @@ namespace drum
     constexpr int firstNote = 36;               // C1: track 1 on the keys (C1 .. G1)
 
     enum Source { synth = 0, sample, slices };
+    enum Play { oneShot = 0, wave, grains };
+    enum Osc2 { fm = 0, mix, ring };
+    constexpr int numTables = 8;                // BASIC, CAPTURED, then the drums' own (DrumTables.h)
+    constexpr int numModels = 10;
 
     // a track's settings, each one lockable on a step
     enum Param
@@ -49,6 +53,14 @@ namespace drum
         pLevel, pPan, pChoke,
         pVel, pProb, pMicro, pRetrig, pCount, pCurve, pRVel,
         pStereo,                                  // (0.4.12) a sound in stereo (PAN its balance), else mono (PAN places it)
+        // (0.4.17) MODEL (a starting point: the window sets the settings from it, the sound doesn't read it); the
+        // second oscillator (its table, where it starts, FM, MIX or RING it with the first); each oscillator's scan
+        // (how far and which way its place in the table travels after the hit, in how long); BURST (the click and
+        // the noise struck again, GAP apart: a clap); VEL > SCAN (a soft hit scans less); PLAY (a sound: as it is,
+        // read as a wavetable, or in grains, its pitch apart from its time); STUTTER (the hit's envelopes, and a
+        // sound's place, started again, LENGTH apart)
+        pModel, pTable2, pPos2, pScan, pScanTime, pScan2, pScanTime2, pO2Mode,
+        pBurst, pBurstGap, pVelMod, pPlay, pStutter, pStutLen,
         numParams
     };
     enum class Kind { linear, log, integer, choice, toggle };
@@ -90,6 +102,10 @@ namespace drum
         void reset();
         int length16() const;                     // in 16ths at 1x
     };
+
+    // (0.4.17) MODEL: a track's sound set to a starting point (the synth, its tables, scans, sweep, layers, filter);
+    // its level, pan, choke, trigs and locks kept. CUSTOM: nothing changed
+    void applyModel (Track& t, int model);
 
     // a track's sound when it isn't a synth: a sample, or a take and its slices
     struct Sound
@@ -137,7 +153,7 @@ namespace drum
         void setWtf (const float* pulls)          { for (int j = 0; j < numWtf; ++j) wtf[(size_t) j] = pulls[j]; }
         // (0.4.7) what the mods add to each track's settings (normalised; track * modStride + setting), once a
         // block: taken at each hit, and followed while a hit rings by the settings that can move under it
-        static constexpr int modStride = 48;
+        static constexpr int modStride = 64;    // (0.4.17: from 48, the settings past it)
         void setMods (const float* offsets)       { std::copy (offsets, offsets + numTracks * modStride, mods.begin()); }
 
         // ---- the screen
@@ -178,7 +194,15 @@ namespace drum
             int fromStep = -1;                    // (the step it came from; -1: a key)
             double pos = 0.0, step = 1.0;         // SAMPLE / SLICES: where it reads, how fast (frames)
             int from = 0, to = 0;                 // the frames it plays
-            double phase = 0.0, mphase = 0.0;     // SYNTH: the oscillator; PMOD's sine
+            double phase = 0.0, mphase = 0.0;     // SYNTH: the oscillator; PMOD's sine (0.4.17: the second oscillator)
+            float scanEnv[2] { 1.0f, 1.0f }, scanCoef[2] { 1.0f, 1.0f };   // (0.4.17) each oscillator's scan, 1 .. 0
+            int burstLeft = 0, burstT = 0, burstGap = 0;
+            float noiseCoefShort = 1.0f;
+            int stutLeft = 0, stutT = 0, stutLen = 0;
+            double stutFrom = 0.0;
+            double wPhase = 0.0, wBase[2] {}, gPos[2] {};                  // WAVE: its two heads; GRAINS: theirs
+            int gAge[2] {}, gLife = 1;
+            float dcX[2] {}, dcY[2] {};            // (WAVE: its cycles carry what's under them; taken away)
             float hz = 65.0f, t = 0.0f;           // its pitch; the time since the hit (seconds)
             float env = 0.0f, att = 0.0f, attInc = 1.0f, decCoef = 1.0f, swEnv = 1.0f, swCoef = 1.0f;
             float clickEnv = 0.0f, noiseEnv = 0.0f, noiseCoef = 1.0f, nz = 0.0f;
@@ -193,6 +217,7 @@ namespace drum
         void hit (int track, int step, float velMul, bool retrig);
         void startVoice (int track, const float* p, float vel, const float* base = nullptr, int step = -1);
         void renderVoice (Voice&, float* L, float* R, float* F, int n);   // F: its track's own (mono, added)
+        const dsp::CycleBank* tableAt (int index) const;
         std::array<std::vector<float>, numTracks> trackOut;
         int trackFrames = 0;
 

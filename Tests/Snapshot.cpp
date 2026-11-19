@@ -759,6 +759,36 @@ int main (int argc, char** argv)
             view->showPage (1);
             run (90);
             shoot ("43-drum-slices.png");
+            // (0.4.17) the sound read in GRAINS, scanned, stuttering
+            auto& t5 = d.pattern (d.playingPattern()).tr[5];
+            t5.p[drum::pPlay] = drum::grains;
+            t5.p[drum::pScan] = 0.5f;
+            t5.p[drum::pScanTime] = 0.4f;
+            t5.p[drum::pStutter] = 3.0f;
+            view->showPage (1);
+            view->showBank (3);
+            run (60);
+            shoot ("79-drum-son-grains.png");
+            t5.p[drum::pPlay] = drum::oneShot;
+            t5.p[drum::pScan] = 0.0f;
+            t5.p[drum::pStutter] = 0.0f;
+        }
+        // (0.4.17) the models: a KICK, its first oscillator; a HAT, its second
+        {
+            auto& pat0 = d.pattern (d.playingPattern());
+            drum::applyModel (pat0.tr[0], 1);
+            drum::applyModel (pat0.tr[2], 4);
+            proc.drumTrack = 0;
+            view->showPage (1);
+            view->showBank (1);
+            run (90);
+            shoot ("77-drum-kick.png");
+            proc.drumTrack = 2;
+            view->showPage (1);
+            view->showBank (2);
+            run (90);
+            shoot ("78-drum-hat.png");
+            view->showBank (0);
         }
         proc.setClockRunning (false);
         run (40);

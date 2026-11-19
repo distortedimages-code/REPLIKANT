@@ -4,6 +4,7 @@
 
 #include <tuple>
 #include "../Source/drum/DrumCore.h"
+#include "../Source/drum/DrumTables.h"
 #include "../Source/radio/RadioSlicer.h"
 
 #include <chrono>
@@ -11,6 +12,11 @@
 #include <cstdio>
 #include <random>
 #include <vector>
+#include <numeric>
+#include <functional>
+#include <cstdlib>
+#include <cstring>
+#include <string>
 
 static int failures = 0, checks = 0;
 #define CHECK(cond, ...) do { ++checks; if (! (cond)) { ++failures; std::printf ("FAIL %s:%d  %s  ", __FILE__, __LINE__, #cond); std::printf (__VA_ARGS__); std::printf ("\n"); } } while (0)
@@ -625,8 +631,264 @@ static void testMods()
     (void) b1; (void) q0; (void) q1; (void) l2; (void) l3;
 }
 
+// (0.4.17) the sound of the settings that were there before: the same, frame for frame. DRUM_GOLDEN=write <file> keeps
+// it, DRUM_GOLDEN=<file> compares (for the change of the voice; not a test of the suite unless asked)
+static void testGolden()
+{
+    const char* g = std::getenv ("DRUM_GOLDEN");
+    if (g == nullptr)
+        return;
+    const bool writing = std::strncmp (g, "write ", 6) == 0;
+    const std::string path = writing ? std::string (g + 6) : std::string (g);
+    std::vector<float> all;
+    auto take = [&all] (Rig& r) { all.insert (all.end(), r.L.begin(), r.L.end()); all.insert (all.end(), r.R.begin(), r.R.end()); };
+    auto tone = std::make_shared<radio::Take::Audio>();
+    tone->sampleRate = sr;
+    for (int i = 0; i < 24000; ++i)
+    {
+        tone->l.push_back ((float) (0.5 * std::sin (6.2831853 * 300.0 * i / sr) * std::exp (-i / 9000.0)));
+        tone->r.push_back ((float) (0.4 * std::sin (6.2831853 * 450.0 * i / sr)));
+    }
+    Sound snd;
+    snd.audio = tone;
+    struct Cfg { int src; float bank, pos, sweep, swt, pmod, ratio, tune, decay, attack, start, rev, stereo, filt, cut, reso, fenv, drive; };
+    const Cfg cfgs[] = {
+        { 0, 0, 0.0f, 0, 0.05f, 0, 1.41f, 0, 0.5f, 0, 0, 0, 1, 0, 20000, 0, 0, 0 },
+        { 0, 0, 0.4f, 24, 0.04f, 0, 1.41f, -5, 0.4f, 0, 0, 0, 1, 0, 20000, 0, 0, 0 },
+        { 0, 0, 0.7f, -12, 0.2f, 0.6f, 2.3f, 3, 0.6f, 0.2f, 0, 0, 1, 0, 3000, 0.4f, 0.5f, 0.3f },
+        { 0, 0, 0.2f, 48, 0.01f, 1.0f, 0.5f, 0, 0.3f, 0, 0, 0, 1, 2, 800, 0.7f, -0.3f, 0.8f },
+        { 1, 0, 0, 0, 0.05f, 0, 1.41f, 0, 1.0f, 0, 0.1f, 0, 1, 0, 20000, 0, 0, 0 },
+        { 1, 0, 0, 12, 0.08f, 0.3f, 1.41f, -7, 0.7f, 0, 0.3f, 1, 0, 1, 500, 0.2f, 0, 0.2f },
+        { 1, 0, 0, 0, 0.05f, 0, 1.41f, 5, 0.5f, 0.1f, 0, 0, 1, 0, 2000, 0, 0.6f, 0 },
+    };
+    for (const auto& c : cfgs)
+    {
+        Rig r;
+        r.e.setSound (0, &snd);
+        auto& tk = r.e.pattern (0).tr[0];
+        tk.p[pSource] = (float) c.src; tk.p[pBank] = c.bank; tk.p[pPosition] = c.pos; tk.p[pSweep] = c.sweep; tk.p[pSweepTime] = c.swt;
+        tk.p[pPmod] = c.pmod; tk.p[pRatio] = c.ratio; tk.p[pTune] = c.tune; tk.p[pDecay] = c.decay; tk.p[pAttack] = c.attack;
+        tk.p[pStart] = c.start; tk.p[pReverse] = c.rev; tk.p[pStereo] = c.stereo; tk.p[pFilter] = c.filt; tk.p[pCutoff] = c.cut;
+        tk.p[pReso] = c.reso; tk.p[pFEnv] = c.fenv; tk.p[pDrive] = c.drive; tk.p[pLevel] = 0.7f;
+        r.play (0.5, 120.0, 0.5f, { { 100, firstNote, 110 } }, false);
+        take (r);
+    }
+    if (writing)
+    {
+        if (auto* f = std::fopen (path.c_str(), "wb")) { std::fwrite (all.data(), sizeof (float), all.size(), f); std::fclose (f); }
+        std::printf ("  golden: %zu frames kept\n", all.size());
+        return;
+    }
+    std::vector<float> was (all.size(), 0.0f);
+    size_t got = 0;
+    if (auto* f = std::fopen (path.c_str(), "rb")) { got = std::fread (was.data(), sizeof (float), was.size(), f); std::fclose (f); }
+    double worst = 0.0;
+    size_t at = 0;
+    for (size_t i = 0; i < all.size(); ++i)
+        if (std::abs ((double) all[i] - was[i]) > worst) { worst = std::abs ((double) all[i] - was[i]); at = i; }
+    std::printf ("  golden: worst difference %.3g at %zu\n", worst, at);
+    CHECK (got == all.size() && worst < 1.0e-4, "the old settings sound the same: %.3g (frame %zu of %zu)", worst, at, all.size());
+}
+
+//==============================================================================
+// (0.4.17) the drums' wavetables and their scans, the second oscillator, BURST, STUTTER, a sound read as a wave or
+// in grains, VEL > SCAN
+static double rms (const float* x, int n)
+{
+    double e = 0;
+    for (int i = 0; i < n; ++i) e += (double) x[i] * x[i];
+    return std::sqrt (e / n);
+}
+static double toneAt (const std::vector<float>& x, size_t from, size_t n, double hz)
+{
+    double re = 0, im = 0;
+    for (size_t i = 0; i < n; ++i)
+    {
+        const double w = 0.5 - 0.5 * std::cos (6.283185307 * (double) i / (double) n);
+        re += w * x[from + i] * std::cos (6.283185307 * hz * (double) i / sr);
+        im += w * x[from + i] * std::sin (6.283185307 * hz * (double) i / sr);
+    }
+    return std::sqrt (re * re + im * im) / (double) n;
+}
+// how bright: the share of the energy in the first difference (a high pass, crude)
+static double brightness (const std::vector<float>& x, size_t from, size_t n)
+{
+    double d = 0, e = 0;
+    for (size_t i = from + 1; i < from + n; ++i) { d += (double) (x[i] - x[i - 1]) * (x[i] - x[i - 1]); e += (double) x[i] * x[i]; }
+    return e > 0 ? d / e : 0.0;
+}
+static void testWavetables()
+{
+    // the six tables: twelve cycles each, bounded, each one unlike its neighbour
+    for (int t = 0; t < 6; ++t)
+    {
+        const auto* b = ownTable (t);
+        CHECK (b != nullptr && b->count() == 12, "table %d: %d cycles", t, b != nullptr ? b->count() : 0);
+        double diff = 0, peak = 0;
+        for (int c = 0; c + 1 < b->count(); ++c)
+            for (int i = 0; i < dsp::CycleBank::size; ++i)
+            {
+                diff = std::max (diff, (double) std::abs (b->cycle (c)[i] - b->cycle (c + 1)[i]));
+                peak = std::max (peak, (double) std::abs (b->cycle (c)[i]));
+            }
+        CHECK (peak > 0.5 && peak < 1.01 && diff > 0.01, "table %d: peak %.3f, change %.3f", t, peak, diff);
+    }
+    auto synthTrack = [] (Rig& g)
+    {
+        auto& tk = g.e.pattern (0).tr[0];
+        tk.p[pSource] = synth;
+        tk.p[pNote] = 60;
+        tk.p[pDecay] = 1.0f;
+        tk.p[pLevel] = 0.5f;
+        return std::ref (tk);
+    };
+    // SCAN: FOLD from its softest to its hardest in 0.3 s: brighter as it goes; without the scan, it stays
+    {
+        Rig g;
+        Track& tk = synthTrack (g);
+        tk.p[pBank] = 3;
+        tk.p[pPosition] = 0.0f;
+        tk.p[pScan] = 1.0f;
+        tk.p[pScanTime] = 0.3f;
+        g.play (0.6, 120.0, 0.5f, { { 0, firstNote, 127 } }, false);
+        const double early = brightness (g.L, 200, 2400), late = brightness (g.L, 21600, 2400);
+        Rig h;
+        Track& tk2 = synthTrack (h);
+        tk2.p[pBank] = 3;
+        h.play (0.6, 120.0, 0.5f, { { 0, firstNote, 127 } }, false);
+        const double still = brightness (h.L, 21600, 2400), stillEarly = brightness (h.L, 200, 2400);
+        std::printf ("  scan: brightness %.4f -> %.4f (no scan: %.4f -> %.4f)\n", early, late, stillEarly, still);
+        CHECK (late > 4.0 * early && std::abs (still - stillEarly) < 0.2 * stillEarly, "scanned: %.4f -> %.4f, still %.4f / %.4f", early, late, stillEarly, still);
+        // VEL > SCAN at full: a soft hit scans less
+        tk.p[pVelMod] = 1.0f;
+        g.play (0.6, 120.0, 0.5f, { { 0, firstNote, 40 } }, false);
+        CHECK (brightness (g.L, 21600, 2400) < 0.5 * late, "a soft hit scans less: %.4f", brightness (g.L, 21600, 2400));
+    }
+    // the second oscillator: MIX alone (no first) sounds at RATIO; RING gives the sum and the difference
+    {
+        Rig g;
+        Track& tk = synthTrack (g);
+        tk.p[pBody] = 0.0f;
+        tk.p[pO2Mode] = mix;
+        tk.p[pPmod] = 0.8f;
+        tk.p[pRatio] = 2.0f;
+        g.play (0.3, 120.0, 0.5f, { { 0, firstNote, 127 } }, false);
+        const double f0 = 440.0 * std::exp2 ((60.0 - 69.0 - 24.0) / 12.0);
+        const double at2 = toneAt (g.L, 2400, 8192, 2.0 * f0), at1 = toneAt (g.L, 2400, 8192, f0);
+        CHECK (at2 > 10.0 * at1 && at2 > 0.01, "MIX alone at its ratio: %.4f (%.4f at the note)", at2, at1);
+        tk.p[pBody] = 1.0f;
+        tk.p[pO2Mode] = ring;
+        tk.p[pPmod] = 1.0f;
+        tk.p[pRatio] = 3.0f;
+        g.play (0.3, 120.0, 0.5f, { { 0, firstNote, 127 } }, false);
+        const double sum = toneAt (g.L, 2400, 8192, 4.0 * f0), dif = toneAt (g.L, 2400, 8192, 2.0 * f0), plain = toneAt (g.L, 2400, 8192, f0);
+        CHECK (sum > 5.0 * plain && dif > 5.0 * plain, "RING: %.4f %.4f over %.4f", sum, dif, plain);
+    }
+    // BURST: four taps of noise, 12 ms apart (a clap)
+    {
+        Rig g;
+        Track& tk = synthTrack (g);
+        tk.p[pBody] = 0.0f;
+        tk.p[pNoise] = 1.0f;
+        tk.p[pDecay] = 0.3f;
+        tk.p[pBurst] = 4.0f;
+        tk.p[pBurstGap] = 0.012f;
+        g.play (0.15, 120.0, 0.5f, { { 0, firstNote, 127 } }, false);
+        int taps = 0;
+        double last = 0;
+        for (size_t w = 0; w + 96 < 4 * 576 + 400; w += 96)
+        {
+            const double e = std::sqrt (std::inner_product (g.L.begin() + (long) w, g.L.begin() + (long) w + 96, g.L.begin() + (long) w, 0.0) / 96.0);
+            if (e > 2.0 * last && e > 0.02)
+                ++taps;
+            last = e;
+        }
+        CHECK (taps == 4, "BURST: %d taps", taps);
+    }
+    // STUTTER: the click struck again three times, 50 ms apart (the volume going on)
+    {
+        Rig g;
+        Track& tk = synthTrack (g);
+        tk.p[pBody] = 0.0f;
+        tk.p[pClick] = 1.0f;
+        tk.p[pStutter] = 3.0f;
+        tk.p[pStutLen] = 0.05f;
+        g.play (0.3, 120.0, 0.5f, { { 0, firstNote, 127 } }, false);
+        int clicks = 0;
+        for (int k = 0; k < 5; ++k)
+            if (rms (g.L.data() + (size_t) (k * 2400), 200) > 0.01)
+                ++clicks;
+        CHECK (clicks == 4, "STUTTER: %d clicks (the hit and three)", clicks);
+    }
+    // a sound read as a WAVE: at the key's pitch, whatever it was recorded at
+    auto noisy = std::make_shared<radio::Take::Audio>();
+    noisy->sampleRate = sr;
+    {
+        std::mt19937 r (5);
+        std::uniform_real_distribution<float> u (-0.4f, 0.4f);
+        for (int i = 0; i < 48000; ++i)
+            noisy->l.push_back (u (r) * 0.3f + 0.4f * (float) std::sin (6.283185307 * 97.0 * i / sr));
+        noisy->r = noisy->l;
+    }
+    Sound ns;
+    ns.audio = noisy;
+    {
+        Rig g;
+        g.e.setSound (0, &ns);
+        auto& tk = g.e.pattern (0).tr[0];
+        tk.p[pPlay] = wave;
+        tk.p[pDecay] = 1.0f;
+        tk.p[pLevel] = 0.5f;
+        tk.p[pNote] = 60;
+        g.play (0.8, 120.0, 0.5f, { { 0, firstNote, 127 } }, false);
+        const double key = 261.6256;
+        // (its cycle repeats at the key: alike a period apart, not beside it; and nothing under it)
+        auto ac = [&g] (double lag)
+        {
+            const int l = (int) std::lround (lag);
+            double a = 0, e = 0;
+            for (size_t i = 12000; i < 30000; ++i) { a += (double) g.L[i] * g.L[i + (size_t) l]; e += (double) g.L[i] * g.L[i]; }
+            return a / e;
+        };
+        double mean = 0;
+        for (size_t i = 12000; i < 30000; ++i) mean += g.L[i];
+        mean /= 18000.0;
+        const double onKey = ac (sr / key), off = ac (sr / key / 1.06);
+        std::printf ("  wave: alike a period apart %.3f, beside %.3f, offset %.4f\n", onKey, off, mean);
+        CHECK (onKey > 0.8 && off < onKey - 0.3 && std::abs (mean) < 0.01, "WAVE on the key: %.3f vs %.3f, offset %.4f", onKey, off, mean);
+        // GRAINS: frozen in place (no scan), an octave up (TUNE +12): 600 Hz from a 300 Hz tone, held
+        auto t300 = std::make_shared<radio::Take::Audio>();
+        t300->sampleRate = sr;
+        for (int i = 0; i < 24000; ++i)
+            t300->l.push_back (0.4f * (float) std::sin (6.283185307 * 300.0 * i / sr));
+        t300->r = t300->l;
+        Sound ts;
+        ts.audio = t300;
+        g.e.setSound (0, &ts);
+        tk.p[pPlay] = grains;
+        tk.p[pTune] = 12.0f;
+        tk.p[pStart] = 0.3f;
+        g.play (2.0, 120.0, 0.5f, { { 0, firstNote, 127 } }, false);
+        const double up = toneAt (g.L, 72000, 16384, 600.0), was = toneAt (g.L, 72000, 16384, 300.0);
+        CHECK (up > 10.0 * was && rms (g.L.data() + 90000, 4800) > 0.05, "GRAINS: 600 Hz %.4f (300: %.4f), still sounding after 1.9 s", up, was);
+        // STUTTER on a sound as it is: its jumps without a click
+        tk.p[pPlay] = oneShot;
+        tk.p[pTune] = 0.0f;
+        tk.p[pStart] = 0.0f;
+        tk.p[pStutter] = 4.0f;
+        tk.p[pStutLen] = 0.037f;
+        g.play (0.3, 120.0, 0.5f, { { 0, firstNote, 127 } }, false);
+        float jump = 0.0f;
+        for (size_t i = 1; i < g.L.size(); ++i)
+            jump = std::max (jump, std::abs (g.L[i] - g.L[i - 1]));
+        CHECK (jump < 0.06f, "STUTTER on a sound, no click: %.4f", (double) jump);
+    }
+}
+
 int main()
 {
+    testGolden();
+    testWavetables();
     testParams();
     testSteps();
     testRolls();

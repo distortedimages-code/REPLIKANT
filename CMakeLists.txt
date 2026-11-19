@@ -5,7 +5,7 @@ if(APPLE)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Universal binary")
 endif()
 
-project(REPLIKANT VERSION 0.4.16 LANGUAGES C CXX)
+project(REPLIKANT VERSION 0.4.17 LANGUAGES C CXX)
 
 # GitHub repository whose releases the plug-in checks for updates (public releases).
 set(RK_UPDATE_REPO "distortedimages-code/REPLIKANT" CACHE STRING "owner/repo checked for updates (empty = no update check)")
@@ -62,7 +62,8 @@ add_library(rk_core STATIC
     Source/radio/RadioDec.cpp
     Source/radio/RadioSlicer.cpp
     # DRUM: eight tracks, their voices and their sequencer
-    Source/drum/DrumCore.cpp)
+    Source/drum/DrumCore.cpp
+    Source/drum/DrumTables.cpp)
 target_compile_features(rk_core PUBLIC cxx_std_17)
 # Signalsmith Stretch and Linear (MIT), vendored in ThirdParty
 target_include_directories(rk_core PUBLIC ThirdParty)

@@ -1,6 +1,7 @@
 #include "Machine.h"
 #include "Assistant.h"
 #include "RadioUi.h"
+#include "../drum/DrumTables.h"
 #include "DrumUi.h"
 #include "../dsp/Modulators.h"
 #include "../dsp/VAFilter.h"
@@ -230,7 +231,7 @@ public:
         for (int b = 0; b < (int) tabs.size(); ++b)
             if (tabs[(size_t) b].contains (e.position))
             {
-                m.showBank (b);
+                m.showBank (b < (int) tabBanks.size() ? tabBanks[(size_t) b] : b);
                 repaint();
                 return;
             }
@@ -525,6 +526,7 @@ public:
     struct Zone { juce::Rectangle<float> area; int xId = -1, yId = -1; float xSpan = 1.0f, ySpan = 1.0f; };
     std::vector<Zone> zones;
     std::vector<std::pair<juce::Rectangle<float>, int>> switches;     // (0.4.16) on/off settings clicked on the screen
+    std::vector<int> tabBanks;                                         // (0.4.17) each tab's bank
     int zoneOn = -1;
     float zoneFrom[2] {};
     bool cubeShown = false, cubing = false;
@@ -1083,11 +1085,19 @@ private:
     {
         auto& pages = m.pagesShown();
         const int pi = m.pageIndex();
-        if (pi < 0 || pi >= (int) pages.size() || pages[(size_t) pi].banks.size() < 2)
+        tabBanks.clear();
+        if (pi < 0 || pi >= (int) pages.size())
             return;
         const auto& pg = pages[(size_t) pi];
-        const int nb = (int) pg.banks.size();
-        const int bank = juce::jlimit (0, nb - 1, m.bankOf[pg.name + juce::String (m.capture ? 9 : m.mode)]);
+        // (0.4.17) the banks shown (a DRUM track's synth or sound): their tabs only
+        std::vector<int> shownBanks;
+        for (int b = 0; b < (int) pg.banks.size(); ++b)
+            if (pg.banks[(size_t) b].shown())
+                shownBanks.push_back (b);
+        if (shownBanks.size() < 2)
+            return;
+        const int nb = (int) shownBanks.size();
+        const int bank = juce::jlimit (0, (int) pg.banks.size() - 1, m.bankOf[pg.name + juce::String (m.capture ? 9 : m.mode)]);
         auto strip = in.removeFromBottom (28.0f);
         in.removeFromBottom (8.0f);
         g.setColour (col::screenLine);
@@ -1113,16 +1123,18 @@ private:
         std::vector<float> widths;
         for (int b = 0; b < nb; ++b)
         {
-            widths.push_back ((float) juce::GlyphArrangement::getStringWidthInt (mono (11.5f, 500), themed (pg.banks[(size_t) b].name)) + (fxPage ? 34.0f : 24.0f));
+            widths.push_back ((float) juce::GlyphArrangement::getStringWidthInt (mono (11.5f, 500), themed (pg.banks[(size_t) shownBanks[(size_t) b]].name)) + (fxPage ? 34.0f : 24.0f));
             total += widths.back();
         }
         const float squeeze = juce::jmin (1.0f, (strip.getWidth() - 4.0f * (float) (nb - 1)) / total);
         float x = strip.getX();
-        for (int b = 0; b < nb; ++b)
+        for (int sb = 0; sb < nb; ++sb)
         {
-            const auto cell = juce::Rectangle<float> (x, strip.getY() + 3.0f, widths[(size_t) b] * squeeze, strip.getHeight() - 3.0f);
+            const int b = shownBanks[(size_t) sb];
+            const auto cell = juce::Rectangle<float> (x, strip.getY() + 3.0f, widths[(size_t) sb] * squeeze, strip.getHeight() - 3.0f);
             x += cell.getWidth() + 4.0f;
             tabs.push_back (cell);
+            tabBanks.push_back (b);
             const bool on = b == bank;
             juce::Path tab;
             tab.addRoundedRectangle (cell.getX(), cell.getY(), cell.getWidth(), cell.getHeight(), 5.0f, 5.0f, false, false, true, true);
@@ -2277,9 +2289,187 @@ private:
         }
         else if (viz == "dsrc")
         {
+            // (0.4.17) what the hit will do: the table in relief, the way its scan goes lit (the second one beside, when
+            // it's heard), or the sound and where it's read; under it, the envelopes on one time line
             const int src = juce::jlimit (0, 2, (int) std::lround (v (drum::pSource)));
-            const Picto pic = src == drum::synth ? Picto::cycles : (src == drum::sample ? Picto::cassette : Picto::slice);
-            picto (g, pic, r.withSizeKeepingCentre (70.0f, 70.0f), col::sOrange, 1.8f);
+            auto name = [&] (int param) { return juce::String::fromUTF8 (drum::text (param, v (param)).c_str()); };
+            auto tableOf = [this] (int t) -> const dsp::CycleBank* { return t >= 2 ? drum::ownTable (t - 2) : &bankOf (proc(), t); };
+            const float scanT = juce::jmax (0.005f, v (drum::pScanTime));
+            const float atk = 0.2f * v (drum::pAttack) * v (drum::pAttack), dec = decaySeconds (v (drum::pDecay));
+            const float swt = juce::jmax (0.002f, v (drum::pSweepTime));
+            const int stut = (int) std::lround (v (drum::pStutter)), burst = (int) std::lround (v (drum::pBurst));
+            const float span = juce::jlimit (0.05f, 3.0f, juce::jmax (atk + dec * 3.0f, juce::jmax (scanT * 1.2f, swt * 4.0f)));
+            // the caption
+            juce::String cap;
+            if (src == drum::synth)
+            {
+                if ((int) std::lround (v (drum::pModel)) > 0)
+                    cap << name (drum::pModel) << " · "_fr;
+                cap << name (drum::pBank);
+                if (std::abs (v (drum::pScan)) > 0.005f)
+                    cap << " scan "_fr << name (drum::pScan) << " in "_fr << name (drum::pScanTime);
+                if (v (drum::pPmod) > 0.005f)
+                    cap << " · "_fr << name (drum::pO2Mode) << " " << name (drum::pTable2) << " " << juce::String (v (drum::pRatio), 2) << "x";
+            }
+            else
+            {
+                cap << name (drum::pPlay) << " · start "_fr << name (drum::pStart);
+                if (std::abs (v (drum::pScan)) > 0.005f)
+                    cap << " · scan "_fr << name (drum::pScan) << " in "_fr << name (drum::pScanTime);
+            }
+            if (stut > 0)
+                cap << " · stutter "_fr << stut << "x";
+            if (burst > 1)
+                cap << " · burst "_fr << burst;
+            caption (cap);
+            auto envArea = r.removeFromBottom (juce::jmax (36.0f, r.getHeight() * 0.3f));
+            r.removeFromBottom (6.0f);
+            // a table in relief: its cycles one behind the other (up and to the right), those the scan goes through lit
+            auto relief = [&] (const dsp::CycleBank& bank, juce::Rectangle<float> a, float from, float to, juce::Colour lit)
+            {
+                const int n = bank.count();
+                if (n <= 0)
+                    return;
+                const int K = juce::jmin (14, n);
+                const float dx = a.getWidth() * 0.18f / (float) K, dy = a.getHeight() * 0.5f / (float) K;
+                const float w = a.getWidth() - dx * (float) K, h = a.getHeight() * 0.42f;
+                const float lo = juce::jmin (from, to), hi = juce::jmax (from, to);
+                for (int k = K - 1; k >= 0; --k)
+                {
+                    const int c = K > 1 ? juce::roundToInt ((float) k * (float) (n - 1) / (float) (K - 1)) : 0;
+                    const float pc = n > 1 ? (float) c / (float) (n - 1) : 0.0f;
+                    const float x0 = a.getX() + dx * (float) k, y0 = a.getBottom() - h * 0.5f - 4.0f - dy * (float) k;
+                    juce::Path path;
+                    const float* cyc = bank.cycle (c);
+                    for (int i = 0; i <= 64; ++i)
+                    {
+                        const float y = y0 - cyc[(i * dsp::CycleBank::size / 64) % dsp::CycleBank::size] * h * 0.5f;
+                        const float x = x0 + w * (float) i / 64.0f;
+                        if (i == 0) path.startNewSubPath (x, y); else path.lineTo (x, y);
+                    }
+                    const float half = 0.5f / (float) juce::jmax (1, K - 1);
+                    const bool atStart = std::abs (pc - from) <= half, atEnd = std::abs (pc - to) <= half && hi - lo > 0.01f;
+                    const bool onWay = pc >= lo - half && pc <= hi + half;
+                    g.setColour (atStart ? col::screenText : (atEnd ? lit : (onWay ? lit.withAlpha (0.55f) : col::screenDim.withAlpha (0.28f))));
+                    g.strokePath (path, juce::PathStrokeType (atStart || atEnd ? 1.8f : 1.0f));
+                }
+            };
+            if (src == drum::synth)
+            {
+                const float s1 = v (drum::pPosition), e1 = juce::jlimit (0.0f, 1.0f, s1 + v (drum::pScan));
+                const bool two = v (drum::pPmod) > 0.005f;
+                auto a1 = two ? r.removeFromLeft (r.getWidth() * 0.66f) : r;
+                if (const auto* b1 = tableOf ((int) std::lround (v (drum::pBank))))
+                    relief (*b1, a1.reduced (2.0f, 0.0f), s1, e1, col::sOrange);
+                if (two)
+                {
+                    const float s2 = v (drum::pPos2), e2 = juce::jlimit (0.0f, 1.0f, s2 + v (drum::pScan2));
+                    r.removeFromLeft (8.0f);
+                    text (g, name (drum::pO2Mode), r.removeFromTop (12.0f), mono (9.0f, 600), col::sBlue, juce::Justification::centredLeft);
+                    if (const auto* b2 = tableOf ((int) std::lround (v (drum::pTable2))))
+                        relief (*b2, r.reduced (2.0f, 0.0f), s2, e2, col::sBlue);
+                }
+            }
+            else if (const auto* snd = proc().drum.soundInUse (sel); snd != nullptr && snd->audio != nullptr && snd->length() > 1)
+            {
+                // the sound (its slice, for SLICES): its peaks, START, the scan's way, STUTTER's repeats
+                const auto& A = *snd->audio;
+                int a = 0, b = snd->length();
+                if (src == drum::slices && ! snd->slices.empty())
+                {
+                    const int sl = juce::jlimit (0, (int) snd->slices.size() - 1, (int) std::lround (v (drum::pSlice)));
+                    a = juce::jlimit (0, b - 1, snd->slices[(size_t) sl].start);
+                    b = juce::jlimit (a + 1, b, snd->slices[(size_t) sl].end);
+                }
+                const int cols = juce::jmax (1, (int) r.getWidth());
+                std::vector<float> pks ((size_t) cols, 0.0f);
+                float top = 1.0e-6f;
+                for (int x = 0; x < cols; ++x)
+                {
+                    const int i0 = a + (int) ((int64_t) (b - a) * x / cols), i1 = juce::jmax (i0 + 1, a + (int) ((int64_t) (b - a) * (x + 1) / cols));
+                    for (int i = i0; i < i1; i += juce::jmax (1, (i1 - i0) / 16))
+                        pks[(size_t) x] = juce::jmax (pks[(size_t) x], std::abs (A.l[(size_t) i]));
+                    top = juce::jmax (top, pks[(size_t) x]);
+                }
+                g.setColour (col::screenText.withAlpha (0.6f));
+                for (int x = 0; x < cols; ++x)
+                {
+                    const float hh = pks[(size_t) x] / top * r.getHeight() * 0.45f;
+                    g.fillRect (r.getX() + (float) x, r.getCentreY() - hh, 1.0f, juce::jmax (1.0f, 2.0f * hh));
+                }
+                const float st = v (drum::pStart), en = juce::jlimit (0.0f, 1.0f, st + v (drum::pScan));
+                const float xs = r.getX() + r.getWidth() * st, xe = r.getX() + r.getWidth() * en;
+                g.setColour (col::sOrange.withAlpha (0.18f));
+                g.fillRect (juce::Rectangle<float>::leftTopRightBottom (juce::jmin (xs, xe), r.getY(), juce::jmax (xs, xe), r.getBottom()));
+                g.setColour (col::screenText);
+                g.fillRect (xs - 1.0f, r.getY(), 2.0f, r.getHeight());
+                if (std::abs (xe - xs) > 4.0f)
+                {
+                    g.setColour (col::sOrange);
+                    g.drawArrow ({ xs, r.getY() + 8.0f, xe, r.getY() + 8.0f }, 1.4f, 7.0f, 7.0f);
+                }
+                if (stut > 0 && (int) std::lround (v (drum::pPlay)) == drum::oneShot)
+                {
+                    const float segW = r.getWidth() * v (drum::pStutLen) * (float) A.sampleRate / (float) juce::jmax (1, b - a);
+                    g.setColour (col::sViolet.withAlpha (0.8f));
+                    g.fillRect (xs, r.getBottom() - 4.0f, juce::jmin (segW, r.getRight() - xs), 4.0f);
+                }
+            }
+            else
+                text (g, "no sound on this track", r, mono (11.0f), col::screenDim, juce::Justification::centred);
+            // the envelopes: the volume (green), the pitch's sweep (pink), the scan's way (orange); BURST's taps,
+            // STUTTER's starts
+            g.setColour (col::screenLine);
+            g.drawRect (envArea, 1.0f);
+            auto X = [&] (float t) { return envArea.getX() + envArea.getWidth() * t / span; };
+            juce::Path amp, sw, sc;
+            const float sweep = v (drum::pSweep), scan = v (drum::pScan);
+            for (int i = 0; i <= 120; ++i)
+            {
+                const float t = span * (float) i / 120.0f;
+                float tt = t;
+                if (stut > 0)
+                {
+                    const float len = juce::jmax (0.01f, v (drum::pStutLen));
+                    if (t < len * (float) stut)
+                        tt = std::fmod (t, len);
+                    else
+                        tt = t - len * (float) stut;
+                }
+                const float a = t < atk ? t / juce::jmax (1.0e-4f, atk) : (v (drum::pDecay) >= 0.99f ? 1.0f : std::exp (-(t - atk) / dec));
+                const float sweepNow = std::abs (sweep) > 0.01f ? std::exp (-tt / swt) : 0.0f;
+                const float scanNow = std::abs (scan) > 0.005f ? 1.0f - std::exp (-3.0f * tt / scanT) : 0.0f;
+                const float x = envArea.getX() + envArea.getWidth() * (float) i / 120.0f;
+                const float ya = envArea.getBottom() - a * (envArea.getHeight() - 4.0f);
+                const float ys = envArea.getBottom() - sweepNow * (envArea.getHeight() - 4.0f);
+                const float yc = envArea.getBottom() - scanNow * (envArea.getHeight() - 4.0f);
+                if (i == 0) { amp.startNewSubPath (x, ya); sw.startNewSubPath (x, ys); sc.startNewSubPath (x, yc); }
+                else { amp.lineTo (x, ya); sw.lineTo (x, ys); sc.lineTo (x, yc); }
+            }
+            auto fill = amp;
+            fill.lineTo (envArea.getRight(), envArea.getBottom());
+            fill.lineTo (envArea.getX(), envArea.getBottom());
+            fill.closeSubPath();
+            g.setColour (col::sGreen.withAlpha (0.14f));
+            g.fillPath (fill);
+            stroke (amp, col::sGreen, 1.6f);
+            if (std::abs (sweep) > 0.01f)
+                stroke (sw, col::sPink, 1.3f);
+            if (std::abs (scan) > 0.005f)
+                stroke (sc, col::sOrange, 1.6f);
+            if (burst > 1)
+            {
+                g.setColour (col::sYellow);
+                for (int k = 0; k < burst; ++k)
+                    g.fillRect (X ((float) k * v (drum::pBurstGap)) - 1.0f, envArea.getY(), 2.0f, 6.0f);
+            }
+            if (stut > 0)
+            {
+                g.setColour (col::sViolet);
+                for (int k = 1; k <= stut; ++k)
+                    g.fillRect (X ((float) k * v (drum::pStutLen)) - 0.5f, envArea.getY(), 1.0f, envArea.getHeight());
+            }
+            text (g, "vol", envArea.reduced (4.0f, 2.0f), mono (9.0f), col::sGreen, juce::Justification::topRight);
         }
     }
 
@@ -4124,13 +4314,56 @@ void Machine::buildPages()
         v.clear();
         v.push_back ({ "trig", "dtrig", { { "trig", { D (drum::pVel), D (drum::pProb), D (drum::pMicro), sep (D (drum::pRetrig)), D (drum::pCount, nullptr, retrigOn),
                                                        D (drum::pCurve, nullptr, retrigOn), D (drum::pRVel, nullptr, retrigOn) } } } });
-        v.push_back ({ "source", "dsrc", { { "source", { D (drum::pSource), sep (D (drum::pBank, nullptr, srcIs ({ drum::synth }))),
-                                                           D (drum::pPosition, nullptr, srcIs ({ drum::synth })), D (drum::pSlice, nullptr, srcIs ({ drum::slices })),
-                                                           D (drum::pStart, nullptr, srcIs ({ drum::sample, drum::slices })),
-                                                           D (drum::pReverse, nullptr, srcIs ({ drum::sample, drum::slices })),
-                                                           D (drum::pStereo, nullptr, srcIs ({ drum::sample, drum::slices })), sep (D (drum::pChoke)) } } } });
+        // (0.4.17) SOURCE: the source and its MODEL (a starting point), then the synth's two oscillators (a table each,
+        // scanned after the hit) or the sound's playing; the hit's own (STUTTER, BURST)
+        auto synthOnly = srcIs ({ drum::synth });
+        auto soundOnly = srcIs ({ drum::sample, drum::slices });
+        auto modelCtl = as (D (drum::pModel, nullptr, synthOnly), Ctl::Look::display);
+        modelCtl.setNorm = [this, trackNow] (float t)
+        {
+            auto* tk = trackNow();
+            if (tk == nullptr)
+                return;
+            drum::applyModel (*tk, (int) drum::legal (drum::pModel, drum::fromNorm (drum::pModel, juce::jlimit (0.0f, 1.0f, t))));
+            proc.drum.pattern (proc.drum.playingPattern()).used = 1;
+            if (! proc.drum.runningNow.load())
+            {
+                const int note = drum::firstNote + juce::jlimit (0, drum::numTracks - 1, proc.drumTrack.load());
+                proc.audition (note, 110, true);
+                proc.audition (note, 0, false);
+            }
+        };
+        modelCtl.tip = "Un point de départ : KICK, SNARE, TOM, HAT, METAL, CLAP, ZAP, BLIP, VOX. Il règle les deux oscillateurs, leurs tables et leurs balayages, la chute de hauteur, le bruit, le clic, le filtre (le niveau, le pan, les trigs et les p-locks restent). À toi de tourner ensuite."_fr;
+        auto tipped = [] (Ctl c, const juce::String& t) { c.tip = t; return c; };
+        const auto tableTip = "La table d'ondes lue : BASIC, CAPTURED (tes cycles), SKIN (une peau, de ronde à sèche), FOLD (repliée, de douce à saturée), METAL, VOX (les voyelles), DIGI (les vieilles machines), GRIT (un spectre au hasard à chaque cycle)."_fr;
+        const auto startTip = "Où la lecture commence dans la table, au coup."_fr;
+        const auto scanTip = "Jusqu'où la lecture voyage dans la table après le coup, et dans quel sens (+ vers la fin, - vers le début) : le son change en tombant."_fr;
+        const auto timeTip = "En combien de temps le balayage arrive (il ralentit en arrivant)."_fr;
+        Bank srcBank { "source", { D (drum::pSource), modelCtl, sep (D (drum::pSlice, nullptr, srcIs ({ drum::slices }))),
+                                   tipped (D (drum::pPlay, nullptr, soundOnly), "ONE SHOT : le son tel qu'il est (sa hauteur fait sa vitesse). WAVE : le son lu comme une table d'ondes, un cycle de lui joué à la hauteur de la note, l'endroit lu balayé par SCAN. GRAINS : le son en grains, sa hauteur à part de son temps (SCAN le fait avancer, la note et SWEEP le font monter ou descendre)."_fr),
+                                   D (drum::pStereo, nullptr, soundOnly), sep (D (drum::pChoke)) } };
+        Bank osc1 { "osc 1", { tipped (as (D (drum::pBank, "Table"), Ctl::Look::display), tableTip), tipped (D (drum::pPosition, "Start"), startTip),
+                               tipped (D (drum::pScan), scanTip), tipped (D (drum::pScanTime, "Time"), timeTip),
+                               sep (tipped (D (drum::pBody, "Level"), "Le niveau du premier oscillateur."_fr)),
+                               sep (tipped (D (drum::pVelMod), "Un coup doux balaie moins (et prend moins du second oscillateur) : à fond, la vélocité ouvre le son."_fr)) } };
+        osc1.when = synthOnly;
+        Bank osc2 { "osc 2", { tipped (as (D (drum::pTable2, "Table"), Ctl::Look::display), tableTip), tipped (D (drum::pPos2, "Start"), startTip),
+                               tipped (D (drum::pScan2, "Scan"), scanTip), tipped (D (drum::pScanTime2, "Time"), timeTip),
+                               sep (tipped (D (drum::pO2Mode, "Mode"), "Ce que fait le second oscillateur au premier. FM : il pousse sa phase (le son se tord, s'éteint avec le coup). MIX : il s'ajoute. RING : il le multiplie (des fréquences en plus, métalliques)."_fr)),
+                               tipped (D (drum::pRatio), "La hauteur du second oscillateur, en fois celle du premier (1.47, 2.76 : des rapports de cloche, de peau)."_fr),
+                               tipped (D (drum::pPmod, "Amount"), "Combien du second oscillateur : la profondeur de la FM, son niveau en MIX, le dosage du RING."_fr) } };
+        osc2.when = synthOnly;
+        Bank playBank { "play", { D (drum::pStart), tipped (D (drum::pScan), "Jusqu'où l'endroit lu voyage dans le son après le coup (en WAVE et GRAINS) : le son se transforme pendant qu'il sonne."_fr),
+                                  tipped (D (drum::pScanTime, "Time"), timeTip), sep (D (drum::pReverse)),
+                                  sep (tipped (D (drum::pVelMod), "Un coup doux balaie moins : à fond, la vélocité ouvre le son."_fr)) } };
+        playBank.when = soundOnly;
+        Bank hitBank { "hit", { tipped (D (drum::pStutter), "Le coup qui bégaie : sa chute de hauteur, ses balayages, son clic (et l'endroit lu d'un son) repartent, autant de fois, LENGTH à part ; le volume continue de tomber."_fr),
+                                tipped (D (drum::pStutLen), "L'écart entre deux reprises du bégaiement."_fr),
+                                sep (tipped (D (drum::pBurst), "Le clic et le bruit frappés plusieurs fois, GAP à part : un clap (4 coups, 9 ms)."_fr)),
+                                tipped (D (drum::pBurstGap), "L'écart entre les coups de BURST."_fr) } };
+        v.push_back ({ "source", "dsrc", { srcBank, osc1, osc2, playBank, hitBank } });
         v.push_back ({ "pitch", "dpitch", { { "pitch", { D (drum::pNote), D (drum::pTune), sep (D (drum::pSweep)), D (drum::pSweepTime),
-                                                           sep (D (drum::pPmod, nullptr, srcIs ({ drum::synth }))), D (drum::pRatio, nullptr, srcIs ({ drum::synth })) } } } });
+                                                           sep (D (drum::pPmod, nullptr, soundOnly)), D (drum::pRatio, nullptr, soundOnly) } } } });
         v.push_back ({ "amp", "damp", { { "amp", { D (drum::pAttack), D (drum::pDecay), sep (D (drum::pBody)), D (drum::pClick), D (drum::pNoise),
                                                     sep (D (drum::pLevel)), D (drum::pPan) } } } });
         auto fenvOn = [shownValue] { return std::abs (shownValue (drum::pFEnv)) > 0.005f; };
@@ -4207,7 +4440,7 @@ void Machine::buildPages()
             for (auto& pg : v)
                 for (auto& b : pg.banks)
                     for (auto& c : b.ctls)
-                        if (c.param < 0 && c.name == name)
+                        if (c.param < 0 && c.name == name && c.tip.isEmpty())
                             c.tip = t;
         };
         dtip (drum::pVel, "La vélocité des trigs de la piste (une note jouée garde la sienne)."_fr);
@@ -4217,9 +4450,7 @@ void Machine::buildPages()
         dtip (drum::pCount, "Combien de coups suivent le trig dans le retrig."_fr);
         dtip (drum::pCurve, "Les coups du retrig qui se resserrent (+) ou s'écartent (-), le dernier tombant au même endroit."_fr);
         dtip (drum::pRVel, "Les coups du retrig qui s'éteignent (+) ou montent (-)."_fr);
-        dtip (drum::pSource, "SYNTH : une voix faite des cycles de l'oscillateur (basiques ou capturés). SAMPLE : un son. SLICES : une prise de la radio et ses tranches."_fr);
-        dtip (drum::pBank, "Les cycles lus : les basiques, ou ceux capturés de ton synthé."_fr);
-        dtip (drum::pPosition, "Où lire dans la banque de cycles."_fr);
+        dtip (drum::pSource, "SYNTH : deux oscillateurs à table d'ondes, un bruit, un clic (MODEL pour partir d'un son). SAMPLE : un son. SLICES : une prise de la radio et ses tranches."_fr);
         dtip (drum::pSlice, "La tranche jouée (à verrouiller pas par pas : chaque pas sa tranche)."_fr);
         dtip (drum::pStart, "Où le son commence."_fr);
         dtip (drum::pReverse, "Le son joué à l'envers."_fr);
@@ -4229,7 +4460,7 @@ void Machine::buildPages()
         dtip (drum::pTune, "L'accord fin, ±24 demi-tons."_fr);
         dtip (drum::pSweep, "La hauteur qui tombe au début du coup (la grosse caisse, le tom) : de combien de demi-tons."_fr);
         dtip (drum::pSweepTime, "En combien de temps elle tombe."_fr);
-        dtip (drum::pPmod, "La voix modulée en phase par une seconde, à RATIO : le métal, les cloches."_fr);
+        dtip (drum::pPmod, "Le son poussé en avant et en arrière par une sinusoïde à RATIO, qui s'éteint avec le coup : un vibrato vif, du métal."_fr);
         dtip (drum::pRatio, "Le rapport de la modulante : entier, harmonique ; entre deux, inharmonique."_fr);
         dtip (drum::pAttack, "L'attaque, de 0 à 200 ms."_fr);
         dtip (drum::pDecay, "La décroissance. HOLD : le son joue jusqu'au bout."_fr);
@@ -4482,6 +4713,10 @@ void Machine::buildPages()
         deco ("amp", "amp", { { 0, 1, "envelope", Picto::envelope }, { 2, 4, "layers" }, { 5, 6, "output" } }, {}, {}, Picto::none, drumMode);
         deco ("pitch", "pitch", { { 2, 3, "sweep" }, { 4, 5, "fm" } }, {}, {}, Picto::none, drumMode);
         deco ("tone", "tone", { { 0, 2, "filter", Picto::filterBox }, { 3, 5, "filter env", Picto::envelope } }, {}, {}, Picto::none, drumMode);
+        deco ("source", "osc 1", { { 0, 3, "table scan", Picto::cycles } }, {}, {}, Picto::none, drumMode);
+        deco ("source", "osc 2", { { 0, 3, "table scan", Picto::cycles }, { 4, 6, "with osc 1" } }, {}, {}, Picto::none, drumMode);
+        deco ("source", "play", { { 0, 2, "place scan", Picto::playhead } }, {}, {}, Picto::none, drumMode);
+        deco ("source", "hit", { { 0, 1, "stutter" }, { 2, 3, "burst" } }, {}, {}, Picto::none, drumMode);
     }
 
     // SPECTRE's, on every mode's effects (and the filter's CUBE)
@@ -4950,7 +5185,18 @@ void Machine::showPage (int p)
         focus = nullptr;
     const auto key = pgs[(size_t) p].name + juce::String (capture ? 9 : mode);
     if (p == idx && pgs[(size_t) p].banks.size() > 1 && isShowing())
-        bankOf[key] = (bankOf[key] + 1) % (int) pgs[(size_t) p].banks.size();   // the same key again: the next bank
+    {
+        // the same key again: the next bank (shown)
+        const int nb = (int) pgs[(size_t) p].banks.size();
+        int b = bankOf[key];
+        for (int k = 0; k < nb; ++k)
+        {
+            b = (b + 1) % nb;
+            if (pgs[(size_t) p].banks[(size_t) b].shown())
+                break;
+        }
+        bankOf[key] = b;
+    }
     idx = p;
     if (! capture)
     {
@@ -4991,6 +5237,13 @@ void Machine::layoutEncoders()
         auto& pg = pgs[(size_t) pi];
         auto& b = bankOf[pg.name + juce::String (capture ? 9 : mode)];
         b = juce::jlimit (0, (int) pg.banks.size() - 1, b);
+        if (! pg.banks[(size_t) b].shown())
+            for (int k = 0; k < (int) pg.banks.size(); ++k)
+                if (pg.banks[(size_t) k].shown())
+                {
+                    b = k;
+                    break;
+                }
         bankShown = &pg.banks[(size_t) b];
         int k = 0;
         for (auto& c : pg.banks[(size_t) b].ctls)

@@ -4,6 +4,15 @@
 
 **Page de téléchargement** : https://distortedimages-code.github.io/REPLIKANT/
 
+## La version 0.4.17 : les drums en table d'ondes
+
+- **`drum::ownTable`** (`Source/drum/DrumTables.*`) : six `CycleBank` de 12 cycles faites au premier `allocate()` (hors du fil audio) : SKIN (distorsion de phase), FOLD (sin (π/2·g·sin x)), METAL (partiels épars de 5 à 95), VOX (trois formants par voyelle sur 110 Hz), DIGI (sinus en marches, puis impulsions), GRIT (spectres au hasard). Le hasard est un LCG à nous, le même partout.
+- **Réglages** (avant `numParams`) : `pModel`, `pTable2`, `pPos2`, `pScan`, `pScanTime`, `pScan2`, `pScanTime2`, `pO2Mode` (FM, MIX, RING), `pBurst`, `pBurstGap`, `pVelMod`, `pPlay` (ONE SHOT, WAVE, GRAINS), `pStutter`, `pStutLen` ; `pBank` a huit tables. `modStride` et `snd::drumDestStride` passent de 48 à 64 (les routes sont gardées par leur nom).
+- **Voix** : place = START + SCAN·(1 − e), e de 1 vers 0 (95 % en TIME), par oscillateur, mise à l'échelle par VEL > SCAN. Le second oscillateur garde le chemin d'avant (une sinusoïde calculée) tant qu'il est BASIC au début sans balayage : les réglages d'avant donnent les mêmes échantillons (`DRUM_GOLDEN`, différence 0 sur sept réglages). WAVE : deux têtes à une demi-période, fenêtres sin², une fenêtre de 2048 trames (à 48 kHz) prise à la place du moment quand la tête repart, passe-haut à 8 Hz. GRAINS : deux grains de 60 ms à mi-chemin, lus au pas de la note. STUTTER : sweep, scans, clic (et la place d'un son en ONE SHOT, fondus de 1 ms) repartent. BURST : clic et bruit refrappés, chaque coup court sauf le dernier.
+- **`drum::applyModel`** : la piste remise à ses valeurs par défaut (niveau, pan, choke, trigs, stéréo gardés), puis les valeurs du modèle.
+- **Fenêtre** : `Machine::Bank::when` (une banque montrée seulement si…) pour les onglets, la touche de page et la disposition ; page SOURCE : `source`, `osc 1`, `osc 2` (synthé), `play` (son), `hit`. `paintDrumViz ("dsrc")` dessine la table en relief et les enveloppes.
+- **Tests** : `DrumTests::testWavetables` (tables, SCAN plus brillant, VEL > SCAN, MIX au rapport, RING somme et différence, 4 coups de BURST, 3 reprises de STUTTER, WAVE périodique à la note sans décalage, GRAINS à l'octave et tenu, STUTTER sur un son sans clic) ; `testGolden` sur demande.
+
 ## La version 0.4.16 : la mémoire de la radio, le mixer à l'écran, la sérigraphie
 
 - **Mémoire** (`radio::heardSeconds` 124, `memorySeconds` 120) : `heardL/R` en 16 bits (±2 pleine échelle, `toPcm` / `fromPcm`), 24 Mo à 48 kHz. `takeRange` (jusqu'à 120 s), `heardNow`, `heardOldest`. Relecture : `replayFrom (frame)` / `replayStop()`, consommés au bloc suivant (`replayCmd`) ; le son entendu remplacé par la mémoire, fondus de 10 ms, jusqu'à l'image du moment demandé (`replayEnd`), puis le direct ; hors antenne aussi. `RadioScreen` : fenêtre (`viewSecs`, `viewBack`, `heldRight` tenu pendant un geste), `frameAt` / `xOf`, sélection et tête de relecture ; `Screen` : clic, glissé (`radioTakeRange`), molette, double-clic. `RadioTests::testHeard` : 2 min gardées, un passage de 120 s, relecture puis direct, arrêt, sans clic.

@@ -88,6 +88,8 @@ namespace te
             std::vector<int> arrows = {};
             juce::String exit = {};
             Picto exitPicto = Picto::none;
+            std::function<bool()> when = {};     // (0.4.17) shown only when (DRUM: a synth's banks, a sound's)
+            bool shown() const                    { return ! when || when(); }
         };
         struct Page { juce::String name; juce::String viz; std::vector<Bank> banks; };
 

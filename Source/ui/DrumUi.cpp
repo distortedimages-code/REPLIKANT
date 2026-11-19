@@ -265,8 +265,17 @@ void DrumScreen::paint (juce::Graphics& g, juce::Rectangle<float> r, ReplikantPr
         if (src != drum::synth && s != nullptr)
             t << " · "_fr << juce::String::fromUTF8 (s->name.c_str()) << " · "_fr << juce::String ((double) s->length() / s->audio->sampleRate, 2) << " s";
         if (src == drum::synth)
-            t << " · "_fr << juce::String::fromUTF8 (drum::text (drum::pNote, tk.p[drum::pNote]).c_str()) << " · bank "_fr
-              << (tk.p[drum::pBank] > 0.5f ? "captured" : "basic");
+        {
+            t << " · "_fr << juce::String::fromUTF8 (drum::text (drum::pNote, tk.p[drum::pNote]).c_str());
+            if (tk.p[drum::pModel] > 0.5f)
+                t << " · "_fr << juce::String::fromUTF8 (drum::text (drum::pModel, tk.p[drum::pModel]).c_str()).toLowerCase();
+            t << " · table "_fr << juce::String::fromUTF8 (drum::text (drum::pBank, tk.p[drum::pBank]).c_str()).toLowerCase();
+            if (tk.p[drum::pPmod] > 0.005f)
+                t << " + "_fr << juce::String::fromUTF8 (drum::text (drum::pTable2, tk.p[drum::pTable2]).c_str()).toLowerCase()
+                  << " (" << juce::String::fromUTF8 (drum::text (drum::pO2Mode, tk.p[drum::pO2Mode]).c_str()).toLowerCase() << ")";
+        }
+        else if (const int pl = (int) std::lround (tk.p[drum::pPlay]); pl != drum::oneShot)
+            t << " · "_fr << (pl == drum::wave ? "wave" : "grains");
         text (g, t, head, mono (10.0f), col::screenDim, juce::Justification::centredLeft, true);
         auto w = r.reduced (0.0f, 2.0f);
         if (w.getHeight() < 12.0f)

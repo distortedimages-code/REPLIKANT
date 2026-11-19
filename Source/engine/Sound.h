@@ -106,7 +106,7 @@ namespace snd
     constexpr int numMods = 4, routesPerMod = 8, maxSteps = 16, numScenes = 16;
     // (0.4.7) a mod can go to a DRUM track's setting too: those destinations come after the sound's own, a stride
     // of 48 settings for each of the eight tracks
-    constexpr int drumDestStride = 48, drumDestTracks = 8;
+    constexpr int drumDestStride = 64, drumDestTracks = 8;      // (0.4.17: from 48)
     inline int drumDest (int track, int param)      { return count + track * drumDestStride + param; }
     inline bool isDrumDest (int d)                  { return d >= count && d < count + drumDestTracks * drumDestStride; }
     inline int drumDestTrack (int d)                { return (d - count) / drumDestStride; }

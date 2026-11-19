@@ -1,6 +1,7 @@
 // REPLIK8 — DRUM (0.4): the tracks, their voices and their sequencer (DrumCore.h). Our own implementation, after the
 // sequencer of IMPAKT.
 #include "DrumCore.h"
+#include "DrumTables.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -17,7 +18,7 @@ namespace
         { "src",   "Source",     K::choice,  0, 2, 0, "SYNTH|SAMPLE|SLICES", "" },
         { "note",  "Note",       K::integer, 24, 96, 60, nullptr, "note" },
         { "tune",  "Tune",       K::linear,  -24, 24, 0, nullptr, "st" },
-        { "bank",  "Bank",       K::choice,  0, 1, 0, "BASIC|CAPTURED", "" },
+        { "bank",  "Table",      K::choice,  0, 7, 0, "BASIC|CAPTURED|SKIN|FOLD|METAL|VOX|DIGI|GRIT", "" },
         { "pos",   "Position",   K::linear,  0, 1, 0, nullptr, "%" },
         { "start", "Start",      K::linear,  0, 1, 0, nullptr, "%" },
         { "slice", "Slice",      K::integer, 0, 15, 0, nullptr, "slice" },
@@ -50,6 +51,20 @@ namespace
         { "rcrv",  "Curve",      K::linear,  -1, 1, 0, nullptr, "crv" },
         { "rvel",  "Vel curve",  K::linear,  -1, 1, 0, nullptr, "crv" },
         { "stereo", "Stereo",    K::toggle,  0, 1, 1, nullptr, "" },
+        { "model", "Model",      K::choice,  0, 9, 0, "CUSTOM|KICK|SNARE|TOM|HAT|METAL|CLAP|ZAP|BLIP|VOX", "" },
+        { "tab2",  "Table 2",    K::choice,  0, 7, 0, "BASIC|CAPTURED|SKIN|FOLD|METAL|VOX|DIGI|GRIT", "" },
+        { "pos2",  "Start 2",    K::linear,  0, 1, 0, nullptr, "%" },
+        { "scan",  "Scan",       K::linear,  -1, 1, 0, nullptr, "scan" },
+        { "scant", "Scan time",  K::log,     0.005f, 4, 0.15f, nullptr, "s" },
+        { "scan2", "Scan 2",     K::linear,  -1, 1, 0, nullptr, "scan" },
+        { "scant2", "Scan time 2", K::log,   0.005f, 4, 0.15f, nullptr, "s" },
+        { "o2",    "Osc 2",      K::choice,  0, 2, 0, "FM|MIX|RING", "" },
+        { "burst", "Burst",      K::integer, 1, 8, 1, nullptr, "hits" },
+        { "bgap",  "Gap",        K::log,     0.002f, 0.05f, 0.01f, nullptr, "s" },
+        { "velm",  "Vel > scan", K::linear,  0, 1, 0, nullptr, "%" },
+        { "play",  "Play",       K::choice,  0, 2, 0, "ONE SHOT|WAVE|GRAINS", "" },
+        { "stut",  "Stutter",    K::integer, 0, 8, 0, nullptr, "rep" },
+        { "stutl", "Length",     K::log,     0.01f, 0.25f, 0.05f, nullptr, "s" },
     };
     const float speeds[numSpeeds] = { 0.125f, 0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f };
     const float retrigDen[numRetrigs] = { 0, 1, 2, 4, 8, 12, 16, 24, 32, 48, 64, 96, 128 };
@@ -150,6 +165,8 @@ std::string text (int p, float v)
     if (u == "fenv")  return std::abs (v) < 0.005f ? std::string ("0 OCT") : fmt ("%+.1f OCT", v * 6.0f);
     if (u == "crv")   return std::abs (v) < 0.005f ? std::string ("EVEN") : fmt ("%+.0f %%", v * 100.0f);
     if (u == "hits")  return fmt ("%.0f", v);
+    if (u == "rep")   return v < 0.5f ? std::string ("OFF") : fmt ("%.0f X", v);
+    if (u == "scan")  return std::abs (v) < 0.005f ? std::string ("0") : fmt ("%+.0f %%", v * 100.0f);
     if (u == "slice") return fmt ("%.0f", v + 1.0f);
     if (u == "note")
     {
@@ -158,6 +175,66 @@ std::string text (int p, float v)
         return std::string (names[((n % 12) + 12) % 12]) + std::to_string (n / 12 - 2);
     }
     return fmt ("%.2f", v);
+}
+
+//==============================================================================
+// (0.4.17) the models: what each one sets (the rest of the sound back to its default first)
+void applyModel (Track& t, int model)
+{
+    if (model <= 0 || model >= numModels)
+    {
+        t.p[pModel] = 0.0f;
+        return;
+    }
+    static const int kept[] = { pLevel, pPan, pChoke, pVel, pProb, pMicro, pRetrig, pCount, pCurve, pRVel, pStereo };
+    for (int i = 0; i < numParams; ++i)
+        if (std::find (std::begin (kept), std::end (kept), i) == std::end (kept))
+            t.p[i] = def (i).def;
+    auto set = [&t] (std::initializer_list<std::pair<int, float>> vs) { for (auto& [k, val] : vs) t.p[k] = legal (k, val); };
+    t.p[pSource] = synth;
+    t.p[pModel] = (float) model;
+    switch (model)
+    {
+        case 1:   // KICK: a skin knocking then round, the pitch falling fast, a click
+            set ({ { pNote, 55 }, { pBank, 2 }, { pPosition, 0.45f }, { pScan, -0.45f }, { pScanTime, 0.06f }, { pSweep, 28 }, { pSweepTime, 0.045f },
+                   { pDecay, 0.55f }, { pClick, 0.3f }, { pDrive, 0.15f }, { pVelMod, 0.3f } });
+            break;
+        case 2:   // SNARE: a skin and its second mode, bright noise over it
+            set ({ { pNote, 77 }, { pBank, 2 }, { pPosition, 0.25f }, { pSweep, 5 }, { pSweepTime, 0.03f }, { pO2Mode, mix }, { pRatio, 1.47f },
+                   { pPmod, 0.45f }, { pNoise, 0.75f }, { pTone, 0.65f }, { pDecay, 0.48f }, { pClick, 0.25f }, { pVelMod, 0.3f } });
+            break;
+        case 3:   // TOM: a skin settling, its fifth, a slower fall
+            set ({ { pNote, 67 }, { pBank, 2 }, { pPosition, 0.3f }, { pScan, -0.3f }, { pScanTime, 0.1f }, { pSweep, 10 }, { pSweepTime, 0.12f },
+                   { pDecay, 0.55f }, { pO2Mode, mix }, { pRatio, 1.5f }, { pPmod, 0.2f }, { pClick, 0.15f } });
+            break;
+        case 4:   // HAT: two metals rung together, bright noise, a high pass
+            set ({ { pNote, 84 }, { pBank, 4 }, { pPosition, 0.6f }, { pScan, 0.3f }, { pScanTime, 0.05f }, { pTable2, 4 }, { pPos2, 0.8f },
+                   { pRatio, 1.83f }, { pO2Mode, ring }, { pPmod, 1.0f }, { pNoise, 0.6f }, { pTone, 0.95f }, { pFilter, 1 }, { pCutoff, 6000.0f },
+                   { pDecay, 0.25f }, { pClick, 0.1f } });
+            break;
+        case 5:   // METAL: a metal, an inharmonic FM on it
+            set ({ { pNote, 79 }, { pBank, 4 }, { pPosition, 0.3f }, { pO2Mode, fm }, { pRatio, 2.76f }, { pPmod, 0.55f }, { pDecay, 0.62f },
+                   { pClick, 0.2f } });
+            break;
+        case 6:   // CLAP: noise struck four times, a band
+            set ({ { pBody, 0.0f }, { pNoise, 0.95f }, { pTone, 0.6f }, { pBurst, 4 }, { pBurstGap, 0.009f }, { pFilter, 2 }, { pCutoff, 1300.0f },
+                   { pReso, 0.25f }, { pDecay, 0.6f } });
+            break;
+        case 7:   // ZAP: a fold coming undone, the pitch diving
+            set ({ { pNote, 72 }, { pBank, 3 }, { pPosition, 0.85f }, { pScan, -0.85f }, { pScanTime, 0.08f }, { pSweep, 48 }, { pSweepTime, 0.035f },
+                   { pDecay, 0.42f }, { pDrive, 0.2f } });
+            break;
+        case 8:   // BLIP: a digital cycle stepping up, the pitch dropping a little
+            set ({ { pNote, 89 }, { pBank, 6 }, { pPosition, 0.15f }, { pScan, 0.7f }, { pScanTime, 0.04f }, { pSweep, -12 }, { pSweepTime, 0.06f },
+                   { pDecay, 0.3f } });
+            break;
+        case 9:   // VOX: a voice going through its vowels
+            set ({ { pNote, 70 }, { pBank, 5 }, { pPosition, 0.0f }, { pScan, 1.0f }, { pScanTime, 0.3f }, { pSweep, 3 }, { pSweepTime, 0.1f },
+                   { pAttack, 0.05f }, { pDecay, 0.6f } });
+            break;
+        default:
+            break;
+    }
 }
 
 //==============================================================================
@@ -234,6 +311,7 @@ Engine::Engine()
 
 void Engine::allocate()
 {
+    prepareTables();                          // (0.4.17: the drums' own wavetables, made here, not on the audio thread)
     if (allocated())
         return;
     pats.resize ((size_t) numPatterns);
@@ -560,6 +638,40 @@ void Engine::startVoice (int track, const float* p, float vel, const float* base
     v.vel = clampf (vel, 0.0f, 1.0f);
     v.fade = 1.0f;
     v.fadeStep = 0.0f;
+    // (0.4.17) the scans: each oscillator's place travels from its start (95 % of the way in its time)
+    for (int o = 0; o < 2; ++o)
+    {
+        v.scanEnv[o] = 1.0f;
+        v.scanCoef[o] = std::exp (-3.0f / (std::max (0.002f, p[o == 0 ? pScanTime : pScanTime2]) * fsr));
+    }
+    // BURST: the click and the noise struck again, GAP apart (each one short but the last)
+    v.burstLeft = idx (p[pBurst], 9) - 1;
+    v.burstGap = std::max (8, (int) (clampf (p[pBurstGap], 0.002f, 0.05f) * fsr));
+    v.burstT = 0;
+    v.noiseCoefShort = std::exp (-1.0f / (std::max (0.0015f, 0.35f * (float) v.burstGap / fsr) * fsr));
+    // STUTTER: the hit's envelopes (and a sound's place) started again, LENGTH apart
+    v.stutLeft = idx (p[pStutter], 9);
+    v.stutLen = std::max (32, (int) (clampf (p[pStutLen], 0.01f, 0.25f) * fsr));
+    v.stutT = 0;
+    v.stutFrom = v.pos;
+    // WAVE and GRAINS: their heads from the start
+    v.wPhase = 0.0;
+    v.wBase[0] = v.wBase[1] = (double) v.from;
+    v.gPos[0] = v.gPos[1] = v.pos;
+    v.gLife = std::max (64, (int) (0.06f * fsr));
+    v.gAge[0] = 0;
+    v.gAge[1] = v.gLife / 2;
+}
+
+// (0.4.17) a table by its number: BASIC, CAPTURED (BASIC when there is none), the drums' own
+const dsp::CycleBank* Engine::tableAt (int i) const
+{
+    if (i >= 2)
+        return ownTable (i - 2);
+    const auto* b = banks[(size_t) i].load (std::memory_order_relaxed);
+    if (b == nullptr || b->count() == 0)
+        b = banks[0].load (std::memory_order_relaxed);
+    return b;
 }
 
 float Engine::modded (int track, int param, float v, float extra) const
@@ -603,14 +715,22 @@ void Engine::renderVoice (Voice& v, float* L, float* R, float* F, int n)
 {
     const float fsr = (float) sr, isr = 1.0f / fsr;
     const int src = idx (v.p[pSource], 3);
-    const auto* bank = banks[(size_t) idx (v.p[pBank], 2)].load (std::memory_order_relaxed);
-    if (bank == nullptr || bank->count() == 0)
-        bank = banks[0].load (std::memory_order_relaxed);
+    const int t1 = idx (v.p[pBank], numTables), t2 = idx (v.p[pTable2], numTables);
+    const auto* bank = tableAt (t1);
+    const auto* bank2 = tableAt (t2);
     const bool synthBody = src == synth && bank != nullptr && bank->count() > 0;
     const float body = clampf (v.p[pBody], 0.0f, 1.0f);
-    const float pmod = clampf (v.p[pPmod], 0.0f, 1.0f), ratio = std::max (0.25f, v.p[pRatio]);
+    // (0.4.17) VEL > SCAN: a soft hit scans less, and gets less of the second oscillator
+    const float velScale = 1.0f - clampf (v.p[pVelMod], 0.0f, 1.0f) * (1.0f - v.vel);
+    const float pmod = clampf (v.p[pPmod], 0.0f, 1.0f) * velScale, ratio = std::max (0.25f, v.p[pRatio]);
+    const int o2 = idx (v.p[pO2Mode], 3);
+    const float start1 = clampf (v.p[pPosition], 0.0f, 1.0f), start2 = clampf (v.p[pPos2], 0.0f, 1.0f);
+    const float scan1 = clampf (v.p[pScan], -1.0f, 1.0f) * velScale, scan2 = clampf (v.p[pScan2], -1.0f, 1.0f) * velScale;
+    const bool osc2 = synthBody && pmod > 0.0f && bank2 != nullptr && bank2->count() > 0;
+    // (the second oscillator as it was before 0.4.17, a pure sine: computed as one)
+    const bool pureSine = t2 == 0 && start2 <= 0.0f && std::abs (scan2) < 1.0e-6f;
     const float sweep = v.p[pSweep];
-    const float position = clampf (v.p[pPosition], 0.0f, 1.0f);
+    const int play = src == synth ? oneShot : idx (v.p[pPlay], 3);
     // the track's filter (left open: nothing done), its drive
     const int ft = idx (v.p[pFilter], 3);
     const float cut = clampf (v.p[pCutoff], 20.0f, 20000.0f), reso = clampf (v.p[pReso], 0.0f, 1.0f);
@@ -638,30 +758,131 @@ void Engine::renderVoice (Voice& v, float* L, float* R, float* F, int n)
     const float gr = v.stereo ? (pan < 0.0f ? 1.0f + pan : 1.0f) : std::sin (th) * 1.41421356f;
     const auto* A = v.sound != nullptr ? v.sound->audio.get() : nullptr;
     const int len = A != nullptr ? (int) A->l.size() : 0;
-    int lvl = 0;
+    // a sound: STUTTER's jumps faded (1 ms each side); WAVE's cycle (2048 frames at 48 kHz); where its place can go
+    const int fadeN = std::max (1, (int) (0.001f * fsr));
+    const bool rev = v.p[pReverse] > 0.5f;
+    const double srcRate = A != nullptr ? A->sampleRate : sr;
+    const double W = 2048.0 * srcRate / 48000.0;
+    const double span = std::max (1.0, (double) (v.to - v.from) - (play == wave ? W + 4.0 : 2.0));
+    const float startS = clampf (v.p[pStart], 0.0f, 0.98f);
+    const double keyStep = srcRate / sr * std::exp2 ((v.p[pNote] - 60.0f + v.p[pTune]) / 12.0f);
+    const int stutters = idx (v.p[pStutter], 9);
+    int lvl = 0, lvl2 = 0;
     for (int i = 0; i < n; ++i)
     {
+        // STUTTER: the hit started again (its sweep, its scans, its click; a sound from its place), the volume going on
+        bool jumped = false;
+        if (v.stutLeft > 0 && ++v.stutT >= v.stutLen)
+        {
+            v.stutT = 0;
+            --v.stutLeft;
+            v.swEnv = 1.0f;
+            v.scanEnv[0] = v.scanEnv[1] = 1.0f;
+            v.clickEnv = clampf (v.p[pClick], 0.0f, 1.0f);
+            if (A != nullptr && play == oneShot)
+                v.pos = v.stutFrom;
+            jumped = true;
+        }
+        (void) jumped;
+        if (v.t <= 0.0f)
+            v.wBase[0] = v.wBase[1] = (double) v.from + (double) startS * span;     // (WAVE: both heads from the start)
         const float semis = sweep * v.swEnv;
         v.swEnv *= v.swCoef;
         const float pitch = std::exp2 (semis * (1.0f / 12.0f));
+        // the scans: from the start, by SCAN, slowing as they arrive
+        const float pos1 = clampf (start1 + scan1 * (1.0f - v.scanEnv[0]), 0.0f, 1.0f);
+        const float pos2 = clampf (start2 + scan2 * (1.0f - v.scanEnv[1]), 0.0f, 1.0f);
+        const float posS = clampf (startS + scan1 * (1.0f - v.scanEnv[0]), 0.0f, 1.0f);
+        v.scanEnv[0] *= v.scanCoef[0];
+        v.scanEnv[1] *= v.scanCoef[1];
         float x = 0.0f, xr = 0.0f;       // (xr: the right side, for a voice in stereo)
         bool bodyLeft = false;
-        if (synthBody && body > 0.0f)
+        if (synthBody && (body > 0.0f || (osc2 && o2 == mix)))
         {
             const float f = v.hz * pitch;
             if ((i & 31) == 0)
-                lvl = dsp::CycleBank::levelFor ((double) f * (1.0 + 3.0 * pmod), sr);
-            double ph = v.phase;
-            if (pmod > 0.0f)
             {
-                ph += (double) (pmod * 1.5f * v.env * std::sin (twoPi * (float) v.mphase));
+                lvl = dsp::CycleBank::levelFor ((double) f * (o2 == fm ? 1.0 + 3.0 * pmod : (o2 == ring && osc2 ? 1.0 + ratio : 1.0)), sr);
+                lvl2 = dsp::CycleBank::levelFor ((double) (f * ratio), sr);
+            }
+            double ph = v.phase;
+            float y2 = 0.0f;
+            if (osc2)
+            {
+                // the second oscillator, at RATIO: FM (its phase pushed, fading with the hit), MIX, or RING
+                y2 = pureSine ? std::sin (twoPi * (float) v.mphase) : bank2->read (pos2, v.mphase, lvl2);
+                if (o2 == fm)
+                    ph += (double) (pmod * 1.5f * v.env * y2);
                 v.mphase += (double) (f * ratio * isr);
                 v.mphase -= std::floor (v.mphase);
             }
             ph -= std::floor (ph);
-            x = bank->read (position, ph, lvl) * body;
+            const float y1 = body > 0.0f ? bank->read (pos1, ph, lvl) * body : 0.0f;
+            x = ! osc2 || o2 == fm ? y1 : (o2 == mix ? y1 + pmod * y2 : y1 * (1.0f - pmod + pmod * y2));
             v.phase += (double) (f * isr);
             v.phase -= std::floor (v.phase);
+            bodyLeft = true;
+        }
+        else if (A != nullptr && body > 0.0f && play == wave)
+        {
+            // WAVE: the sound read as a wavetable: a cycle of it, two heads half a cycle apart (each takes its place
+            // when it comes round), at the key's pitch; the place travels with SCAN
+            const double inc = (double) (v.hz * 4.0f * pitch * isr);
+            float yl = 0.0f, yr = 0.0f;
+            for (int h = 0; h < 2; ++h)
+            {
+                double ph = v.wPhase + 0.5 * h;
+                ph -= std::floor (ph);
+                if (ph < inc)
+                    v.wBase[h] = (double) v.from + (double) posS * span;
+                const double at = v.wBase[h] + (rev ? 1.0 - ph : ph) * W;
+                const int k = (int) std::floor (at);
+                const float t = (float) (at - (double) k);
+                auto s = [&] (const float* d, int j) { return d[j < v.from ? v.from : (j >= v.to ? v.to - 1 : j)]; };
+                const float w = std::sin (0.5f * twoPi * (float) ph);
+                yl += w * w * hermite (s (A->l.data(), k - 1), s (A->l.data(), k), s (A->l.data(), k + 1), s (A->l.data(), k + 2), t);
+                yr += w * w * hermite (s (A->r.data(), k - 1), s (A->r.data(), k), s (A->r.data(), k + 1), s (A->r.data(), k + 2), t);
+            }
+            v.wPhase += inc;
+            v.wPhase -= std::floor (v.wPhase);
+            // (a cycle cut out of a sound has its own offset: a high pass at 8 Hz)
+            const float dcK = 1.0f - 50.0f * isr;
+            for (int c = 0; c < 2; ++c)
+            {
+                const float in = c == 0 ? yl : yr;
+                v.dcY[c] = in - v.dcX[c] + dcK * v.dcY[c];
+                v.dcX[c] = in;
+            }
+            yl = v.dcY[0];
+            yr = v.dcY[1];
+            x = (v.stereo ? yl : 0.5f * (yl + yr)) * body;
+            xr = v.stereo ? yr * body : x;
+            bodyLeft = true;
+        }
+        else if (A != nullptr && body > 0.0f && play == grains)
+        {
+            // GRAINS: two grains of 60 ms, half apart, each from where the place is when it starts, read at the
+            // pitch (its time apart from its pitch: SCAN moves the place, the note and SWEEP the pitch)
+            float yl = 0.0f, yr = 0.0f;
+            const double stepNow = keyStep * (double) pitch * (rev ? -1.0 : 1.0);
+            for (int h = 0; h < 2; ++h)
+            {
+                if (++v.gAge[h] >= v.gLife)
+                {
+                    v.gAge[h] = 0;
+                    v.gPos[h] = (double) v.from + (double) posS * span;
+                }
+                const double at = v.gPos[h];
+                const int k = (int) std::floor (at);
+                const float t = (float) (at - (double) k);
+                auto s = [&] (const float* d, int j) { return d[j < v.from ? v.from : (j >= v.to ? v.to - 1 : j)]; };
+                const float w = std::sin (0.5f * twoPi * (float) v.gAge[h] / (float) v.gLife);
+                yl += w * w * hermite (s (A->l.data(), k - 1), s (A->l.data(), k), s (A->l.data(), k + 1), s (A->l.data(), k + 2), t);
+                yr += w * w * hermite (s (A->r.data(), k - 1), s (A->r.data(), k), s (A->r.data(), k + 1), s (A->r.data(), k + 2), t);
+                v.gPos[h] += stepNow;
+            }
+            x = (v.stereo ? yl : 0.5f * (yl + yr)) * body;
+            xr = v.stereo ? yr * body : x;
             bodyLeft = true;
         }
         else if (A != nullptr && body > 0.0f && v.pos >= (double) v.from && v.pos < (double) v.to - 1.0)
@@ -678,9 +899,16 @@ void Engine::renderVoice (Voice& v, float* L, float* R, float* F, int n)
             auto s = [&] (const float* d, int j) { return d[j < v.from ? v.from : (j >= v.to ? v.to - 1 : j)]; };
             const float yl = hermite (s (A->l.data(), k - 1), s (A->l.data(), k), s (A->l.data(), k + 1), s (A->l.data(), k + 2), t);
             const float yr = hermite (s (A->r.data(), k - 1), s (A->r.data(), k), s (A->r.data(), k + 1), s (A->r.data(), k + 2), t);
-            // (its ends faded: 2 ms)
+            // (its ends faded: 2 ms; STUTTER's jumps: 1 ms each side)
             const double room = v.step >= 0.0 ? (double) v.to - v.pos : v.pos - (double) v.from;
-            const float edge = (float) std::min (1.0, room / (0.002 * A->sampleRate));
+            float edge = (float) std::min (1.0, room / (0.002 * A->sampleRate));
+            if (stutters > 0)
+            {
+                if (v.stutLeft > 0)
+                    edge *= std::min (1.0f, (float) (v.stutLen - v.stutT) / (float) fadeN);
+                if (v.stutLeft < stutters)
+                    edge *= std::min (1.0f, (float) v.stutT / (float) fadeN);
+            }
             if (v.stereo)
             {
                 x = yl * body * edge;
@@ -692,6 +920,14 @@ void Engine::renderVoice (Voice& v, float* L, float* R, float* F, int n)
             bodyLeft = true;
             (void) len;
         }
+        // BURST: the click and the noise struck again, GAP apart
+        if (v.burstLeft > 0 && ++v.burstT >= v.burstGap)
+        {
+            v.burstT = 0;
+            --v.burstLeft;
+            v.clickEnv = clampf (v.p[pClick], 0.0f, 1.0f);
+            v.noiseEnv = clampf (v.p[pNoise], 0.0f, 1.0f);
+        }
         // the noise, the click
         float nz = 0.0f;
         if (v.noiseEnv > 1.0e-5f)
@@ -700,7 +936,7 @@ void Engine::renderVoice (Voice& v, float* L, float* R, float* F, int n)
             v.nz += (w - v.nz) * nA;
             v.dz[0] += (v.nz - v.dz[0]) * hpA;
             nz = (v.nz + hpMix * (v.nz - v.dz[0] - v.nz)) * v.noiseEnv;
-            v.noiseEnv *= v.noiseCoef;
+            v.noiseEnv *= v.burstLeft > 0 ? v.noiseCoefShort : v.noiseCoef;
         }
         float ck = 0.0f;
         if (v.clickEnv > 1.0e-4f)
@@ -765,7 +1001,8 @@ void Engine::renderVoice (Voice& v, float* L, float* R, float* F, int n)
             }
         }
         // done: the body silent (or the sample at its end), the noise and the click gone
-        if (v.att >= 1.0f && v.noiseEnv < 1.0e-5f && v.clickEnv < 1.0e-4f && (v.env < 1.0e-4f || ! bodyLeft) && ! (v.hold && bodyLeft))
+        if (v.att >= 1.0f && v.noiseEnv < 1.0e-5f && v.clickEnv < 1.0e-4f && (v.env < 1.0e-4f || ! bodyLeft) && ! (v.hold && bodyLeft)
+            && v.burstLeft == 0 && v.stutLeft == 0)
         {
             v.active = false;
             return;
