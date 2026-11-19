@@ -4,6 +4,11 @@
 
 **Page de téléchargement** : https://distortedimages-code.github.io/REPLIKANT/
 
+## La version 0.4.11 : la liste des récepteurs
+
+- **Liste** (`RadioNet::receivers`) : `http://rx.linkfanel.net/kiwisdr_com.js` (un tableau JavaScript d'objets aux champs en chaînes, la virgule finale retirée avant `juce::JSON::parse`), puis `http://kiwisdr.com/public/` (qui affiche désormais une page à cliquer avant la liste) ; `parseReceivers` lit l'une ou l'autre forme, `addReceiver` les mêmes champs ; un hôte `*.proxy.kiwisdr.com` sans port est joint sur 8073 (le port 80 ne fait que rediriger). Le protocole des récepteurs (`/<ts>/SND`, `SET auth`, `AR OK`, ADPCM) est inchangé et toujours accepté (v1.902), comme `/ws/kiwi/<ts>/SND` du client web. `RadioNetTests` : les deux formes, la plus libre d'abord, celle hors ligne retirée.
+- **Adresse collée** (`RadioTuner::tuneAddress`) : `http://hôte[:port]/?f=<kHz><mode>`, port 80 avec `http://` sans port, 8073 sans rien.
+
 ## La version 0.4.10 : WASP
 
 - **WASP** (`VAFilter::wasp`) : un filtre à variables d'état 12 dB résolu sans délai, ses deux intégrateurs à fuite (le gain propre d'un inverseur, ~30 dB, divisé par la pente qui lui reste à son niveau : plus il est poussé, plus il fuit, donc plus il est amorti) ; la sortie de chaque intégrateur sur une courbe en tanh décalée (pente 1 en 0, asymétrique : harmoniques paires), prise au gain qu'elle avait l'échantillon d'avant ; la transconductance de chaque intégrateur qui sature (`otaGain`) ; l'entrée par la même courbe, son continu retiré. Q de 0,6 à 10 au bouton, la fuite ajoutée : il n'oscille jamais. NOTCH = (1 − m)·LP + m·HP, m = ½ + ½·SEP (MIX). `testFilters` : il sonne puis s'éteint à pleine résonance, +16 dB à la coupure au calme et moins de 4 dB de moins fort, la deuxième harmonique entre −40 et −6 dB, l'encoche à −50 dB.

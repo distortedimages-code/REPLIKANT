@@ -197,6 +197,27 @@ int main()
                juce::JSON::toString (r, true).substring (0, 400));
     }
 
+    // (0.4.11) the map's form of the list: a JavaScript array
+    net->listOverride = base + "/kiwisdr_com.js";
+    net->receivers (9, true);
+    ans.clear();
+    for (int i = 0; i < 100 && ans.size() < 1; ++i)
+    {
+        run (0.05, false);
+        for (auto& a : net->takeAnswers())
+            ans.push_back (a);
+    }
+    check ("receivers (array): answered", ans.size() == 1 && (bool) ans[0]["ok"]);
+    if (! ans.empty())
+    {
+        const auto& r = ans[0]["res"];
+        check ("receivers (array): parsed, the offline one left out, the freest first",
+               r.size() == 3 && r[0]["name"].toString().startsWith ("Mock emptiest") && (int) r[0]["max"] == 8 && r[1]["name"].toString() == "Mock receiver & antenna"
+                   && (int) r[1]["port"] == port + 1 && r[1]["loc"].toString() == "Paris" && std::abs ((double) r[1]["hi"] - 30000.0) < 1,
+               juce::JSON::toString (r, true).substring (0, 400));
+    }
+    net->listOverride = base + "/public/";
+
     // ---- a shortwave receiver (RX 2)
     RadioNet::Source w;
     w.kind = 2;

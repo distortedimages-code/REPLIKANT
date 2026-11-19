@@ -880,8 +880,93 @@ void RadioNet::search (int id, const juce::var& q)
     });
 }
 
-// the receivers' public list: each one's fields in HTML comments ("<!-- name=... -->") after its "cl-info" block, its
-// address the link after them
+// the receivers' public list. kiwisdr.com's own page asks a person to click before it lists them (2026): the list is
+// read from the map that republishes it every few minutes (rx.linkfanel.net, a JavaScript array of objects), and
+// from kiwisdr.com's page as it used to be when that one fails. Either way it is kept ten minutes.
+//   the page: each receiver's fields in HTML comments ("<!-- name=... -->") after its "cl-info" block, its address
+//   the link after them; the array: the same fields as strings, "url" its address
+namespace
+{
+    void addReceiver (juce::Array<juce::var>& out, const juce::StringPairArray& f, juce::String link)
+    {
+        auto get = [&] (const char* key) { return f[key]; };
+        if (link.isEmpty()) link = get ("url");
+        auto u = parseUrl (link);
+        if (! u.ok || u.scheme != "http") return;
+        if (get ("offline") == "yes" || get ("status") == "offline" || get ("status") == "inactive") return;
+        // (the receivers behind kiwisdr.com's relay answer on 8073; port 80 only sends there)
+        const auto hostPart = link.fromFirstOccurrenceOf ("://", false, false).upToFirstOccurrenceOf ("/", false, false);
+        if (u.host.endsWithIgnoreCase (".proxy.kiwisdr.com") && ! hostPart.containsChar (':'))
+            u.port = 8073;
+        auto* r = new juce::DynamicObject();
+        r->setProperty ("name", unEntity (get ("name")).substring (0, 160));
+        r->setProperty ("host", u.host); r->setProperty ("port", u.port);
+        r->setProperty ("loc", unEntity (get ("loc")).substring (0, 80));
+        r->setProperty ("antenna", unEntity (get ("antenna")).substring (0, 120));
+        r->setProperty ("users", get ("users").getIntValue()); r->setProperty ("max", get ("users_max").getIntValue());
+        const auto bands = get ("bands");
+        r->setProperty ("lo", bands.upToFirstOccurrenceOf ("-", false, false).getDoubleValue() / 1000.0);
+        r->setProperty ("hi", bands.fromFirstOccurrenceOf ("-", false, false).getDoubleValue() / 1000.0);
+        const auto gps = get ("gps").removeCharacters ("()");
+        r->setProperty ("lat", gps.upToFirstOccurrenceOf (",", false, false).trim().getDoubleValue());
+        r->setProperty ("lon", gps.fromFirstOccurrenceOf (",", false, false).trim().getDoubleValue());
+        out.add (juce::var (r));
+    }
+
+    // either form of the list, read into receivers
+    juce::Array<juce::var> parseReceivers (const juce::String& text)
+    {
+        juce::Array<juce::var> out;
+        if (text.contains ("cl-info"))
+        {
+            int at = 0;
+            for (;;)
+            {
+                // (its class in either quotes)
+                const int p = text.indexOf (at, "cl-info");
+                if (p < 0) break;
+                const int q = text.indexOf (p + 7, "cl-info");
+                const auto block = text.substring (p, q < 0 ? text.length() : q);
+                at = p + 10;
+                juce::StringPairArray f;
+                int c = 0;
+                for (;;)
+                {
+                    const int a = block.indexOf (c, "<!-- ");
+                    if (a < 0) break;
+                    const int b = block.indexOf (a, " -->");
+                    if (b < 0) break;
+                    const auto kv = block.substring (a + 5, b);
+                    if (kv.containsChar ('=')) f.set (kv.upToFirstOccurrenceOf ("=", false, false).trim(), kv.fromFirstOccurrenceOf ("=", false, false).trim());
+                    c = b + 4;
+                }
+                juce::String link = block.fromFirstOccurrenceOf ("<a href=", false, false).trimCharactersAtStart ("'\"").upToFirstOccurrenceOf ("'", false, false).upToFirstOccurrenceOf ("\"", false, false).trim();
+                if (link.isEmpty()) link = block.fromLastOccurrenceOf ("-->", false, false).fromFirstOccurrenceOf (">", false, false).upToFirstOccurrenceOf ("</a>", false, false).trim();
+                addReceiver (out, f, link);
+            }
+            return out;
+        }
+        // the array: from its first "[" to its last "]", the comma JavaScript allows before the "]" taken out
+        const int a = text.indexOfChar ('['), b = text.lastIndexOfChar (']');
+        if (a < 0 || b <= a) return out;
+        auto body = text.substring (a, b + 1);
+        const int last = body.lastIndexOfChar ('}');
+        if (last > 0) body = body.substring (0, last + 1) + "]";
+        const auto v = juce::JSON::parse (body);
+        if (! v.isArray()) return out;
+        for (const auto& e : *v.getArray())
+        {
+            auto* o = e.getDynamicObject();
+            if (o == nullptr) continue;
+            juce::StringPairArray f;
+            for (const auto& prop : o->getProperties())
+                f.set (prop.name.toString(), prop.value.toString());
+            addReceiver (out, f, {});
+        }
+        return out;
+    }
+}
+
 void RadioNet::receivers (int id, bool fresh)
 {
     pool->addJob ([this, id, fresh] {
@@ -892,50 +977,24 @@ void RadioNet::receivers (int id, bool fresh)
             if (! fresh && rxList.isArray() && nowMs() - rxListAt < 600000) { o->setProperty ("ok", true); o->setProperty ("res", rxList); answer (res); return; }
         }
         juce::String text, err;
-        if (! fetchText (listOverride.isNotEmpty() ? listOverride : juce::String ("http://kiwisdr.com/public/"), text, 16 << 20, 15000, err))
-        { o->setProperty ("ok", false); o->setProperty ("err", err); answer (res); return; }
         juce::Array<juce::var> out;
-        int at = 0;
-        for (;;)
+        const juce::String first = listOverride.isNotEmpty() ? listOverride : juce::String ("http://rx.linkfanel.net/kiwisdr_com.js");
+        if (fetchText (first, text, 16 << 20, 15000, err))
+            out = parseReceivers (text);
+        if (out.isEmpty() && listOverride.isEmpty())
         {
-            // (its class in either quotes)
-            const int p = text.indexOf (at, "cl-info");
-            if (p < 0) break;
-            const int q = text.indexOf (p + 7, "cl-info");
-            const auto block = text.substring (p, q < 0 ? text.length() : q);
-            at = p + 10;
-            juce::StringPairArray f;
-            int c = 0;
-            for (;;)
-            {
-                const int a = block.indexOf (c, "<!-- ");
-                if (a < 0) break;
-                const int b = block.indexOf (a, " -->");
-                if (b < 0) break;
-                const auto kv = block.substring (a + 5, b);
-                if (kv.containsChar ('=')) f.set (kv.upToFirstOccurrenceOf ("=", false, false).trim(), kv.fromFirstOccurrenceOf ("=", false, false).trim());
-                c = b + 4;
-            }
-            auto get = [&] (const char* key) { return f[key]; };
-            juce::String link = block.fromFirstOccurrenceOf ("<a href=", false, false).trimCharactersAtStart ("'\"").upToFirstOccurrenceOf ("'", false, false).upToFirstOccurrenceOf ("\"", false, false).trim();
-            if (link.isEmpty()) link = block.fromLastOccurrenceOf ("-->", false, false).fromFirstOccurrenceOf (">", false, false).upToFirstOccurrenceOf ("</a>", false, false).trim();
-            if (link.isEmpty()) link = get ("url");
-            const auto u = parseUrl (link);
-            if (! u.ok || u.scheme != "http") continue;
-            if (get ("offline") == "yes" || get ("status") == "offline" || get ("status") == "inactive") continue;
-            auto* r = new juce::DynamicObject();
-            r->setProperty ("name", unEntity (get ("name")).substring (0, 160));
-            r->setProperty ("host", u.host); r->setProperty ("port", u.port);
-            r->setProperty ("loc", get ("loc").substring (0, 80));
-            r->setProperty ("antenna", get ("antenna").substring (0, 120));
-            r->setProperty ("users", get ("users").getIntValue()); r->setProperty ("max", get ("users_max").getIntValue());
-            const auto bands = get ("bands");
-            r->setProperty ("lo", bands.upToFirstOccurrenceOf ("-", false, false).getDoubleValue() / 1000.0);
-            r->setProperty ("hi", bands.fromFirstOccurrenceOf ("-", false, false).getDoubleValue() / 1000.0);
-            const auto gps = get ("gps").removeCharacters ("()");
-            r->setProperty ("lat", gps.upToFirstOccurrenceOf (",", false, false).trim().getDoubleValue());
-            r->setProperty ("lon", gps.fromFirstOccurrenceOf (",", false, false).trim().getDoubleValue());
-            out.add (juce::var (r));
+            juce::String err2;
+            if (fetchText ("http://kiwisdr.com/public/", text, 16 << 20, 15000, err2))
+                out = parseReceivers (text);
+            if (out.isEmpty() && err.isEmpty())
+                err = err2.isNotEmpty() ? err2 : "la liste des récepteurs est vide : colle l'adresse d'un récepteur"_fr;
+        }
+        if (out.isEmpty())
+        {
+            o->setProperty ("ok", false);
+            o->setProperty ("err", err.isNotEmpty() ? err : "la liste des récepteurs est vide"_fr);
+            answer (res);
+            return;
         }
         // the free ones first
         std::stable_sort (out.begin(), out.end(), [] (const juce::var& a, const juce::var& b) {

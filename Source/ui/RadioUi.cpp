@@ -587,7 +587,7 @@ void RadioStrip::mouseUp (const juce::MouseEvent&)
 //============================================================================== the tuner
 RadioTuner::RadioTuner (ReplikantProcessor& p, std::function<void (const juce::String&, bool)> m) : proc (p), message (std::move (m))
 {
-    for (auto* ed : { &query, &freq })
+    for (auto* ed : { &query, &freq, &address })
     {
         ed->setColour (juce::TextEditor::textColourId, col::screenText);
         ed->setColour (juce::TextEditor::highlightColourId, col::sOrange.withAlpha (0.35f));
@@ -621,6 +621,10 @@ RadioTuner::RadioTuner (ReplikantProcessor& p, std::function<void (const juce::S
             setFrequency (khz);
         unfocusAllComponents();
     };
+    address.setFont (mono (12.0f));
+    address.setIndents (10, 4);
+    address.setTextToShowWhenEmpty ("ou colle l'adresse d'un récepteur (http://…:8073)"_fr, col::screenGhost);
+    address.onReturnKey = [this] { tuneAddress (address.getText()); unfocusAllComponents(); };
     list.setModel (this);
     list.setRowHeight (22);
     list.setColour (juce::ListBox::backgroundColourId, juce::Colours::transparentBlack);
@@ -679,6 +683,64 @@ void RadioTuner::setFrequency (double khz, const juce::String& mode)
     else
         message ("Choisis un récepteur dans la liste : il s'accordera sur "_fr + kbText (khz) + " kHz.", false);
     repaint();
+}
+
+// a receiver's address as a browser shows it ("http://host:8073/?f=9420am"): tuned as it is, at the frequency and in the
+// mode its address says (else the ones chosen here)
+void RadioTuner::tuneAddress (const juce::String& text)
+{
+    auto t = text.trim();
+    if (t.isEmpty())
+        return;
+    const bool scheme = t.contains ("://");
+    if (scheme && ! t.startsWithIgnoreCase ("http://"))
+    {
+        message ("Seules les adresses http:// des récepteurs KiwiSDR se branchent ici."_fr, true);
+        return;
+    }
+    auto rest = scheme ? t.fromFirstOccurrenceOf ("://", false, false) : t;
+    const auto hostPort = rest.upToFirstOccurrenceOf ("/", false, false).upToFirstOccurrenceOf ("?", false, false);
+    const auto params = rest.fromFirstOccurrenceOf ("?", false, false);
+    juce::String host = hostPort;
+    int port = scheme ? 80 : 8073;
+    if (hostPort.containsChar (':'))
+    {
+        host = hostPort.upToLastOccurrenceOf (":", false, false);
+        port = hostPort.fromLastOccurrenceOf (":", false, false).getIntValue();
+    }
+    else if (host.endsWithIgnoreCase (".proxy.kiwisdr.com"))
+        port = 8073;
+    if (host.isEmpty() || ! host.containsOnly ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-") || port <= 0 || port > 65535)
+    {
+        message ("Adresse illisible : colle-la telle que ton navigateur l'affiche (http://…:8073)."_fr, true);
+        return;
+    }
+    // ?f=9420am, f=7055lsb, f=27185/-2700,2700amnz6...
+    for (const auto& part : juce::StringArray::fromTokens (params, "&", ""))
+        if (part.startsWith ("f="))
+        {
+            const auto v = part.substring (2);
+            const double khz = v.initialSectionContainingOnly ("0123456789.").getDoubleValue();
+            if (khz > 0.0)
+                swKhz = juce::jlimit (10.0, 30000.0, khz);
+            const auto letters = v.fromFirstOccurrenceOf (v.initialSectionContainingOnly ("0123456789./-,"), false, false).toLowerCase();
+            for (auto* md : { "usb", "lsb", "cw", "am" })
+                if (letters.startsWith (md))
+                {
+                    swMode = md;
+                    break;
+                }
+        }
+    RadioNet::Source s;
+    s.kind = 2;
+    s.host = host;
+    s.port = port;
+    s.rxName = host;
+    s.khz = swKhz;
+    s.mode = swMode;
+    freq.setText (kbText (swKhz) + " khz", false);
+    tune (s);
+    message ("Récepteur "_fr + host + ":" + juce::String (port) + " · " + kbText (swKhz) + " kHz " + swMode.toUpperCase(), false);
 }
 
 void RadioTuner::showView (int v)
@@ -754,6 +816,7 @@ void RadioTuner::resized()
         for (auto* tag : { "ambient", "electronic", "jazz", "news", "classical", "experimental", "world" })
             chip (row, tag, q ("tag", tag));
         freq.setVisible (false);
+        address.setVisible (false);
         query.setVisible (true);
         refreshKey = {};
     }
@@ -779,7 +842,10 @@ void RadioTuner::resized()
             o->setProperty ("mode", b.mode);
             chip (bandRow, b.name, juce::var (o), 10.0f);
         }
+        r.removeFromTop (6.0f);
+        address.setBounds (r.removeFromTop (24.0f).removeFromLeft (juce::jmin (r.getWidth(), 380.0f)).toNearestInt());
         freq.setVisible (true);
+        address.setVisible (true);
         query.setVisible (false);
         searchKey = {};
     }

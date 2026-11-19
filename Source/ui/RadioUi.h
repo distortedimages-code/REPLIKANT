@@ -64,7 +64,7 @@ namespace te
         std::function<void (const juce::String&, bool)> message;
         int view = 0;                            // 0 the stations, 1 the shortwave
         bool viewChosen = false;
-        juce::TextEditor query, freq;
+        juce::TextEditor query, freq, address;   // (0.4.11) address: a receiver's own address, pasted
         juce::ListBox list;
         juce::Array<juce::var> stations, receivers;
         int asked = 0, waitingFor = -1;
@@ -83,6 +83,7 @@ namespace te
         void askReceivers (bool fresh);
         void setFrequency (double khz, const juce::String& mode = {});
         void showView (int v);
+        void tuneAddress (const juce::String&);
         void timerCallback() override;
         int getNumRows() override;
         void paintListBoxItem (int row, juce::Graphics&, int w, int h, bool selected) override;

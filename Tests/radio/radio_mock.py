@@ -82,6 +82,18 @@ def public_page():
             + kiwi_entry('Mock emptiest', 'http://127.0.0.2:8073', 0, 8)
             + '</body></html>').encode()
 
+def kiwi_array():
+    # the map's form: a JavaScript array of objects, its fields as strings, a comma before the "]"
+    def e(name, url, users, mx, offline='no'):
+        return ('\t{\n\t\t"name":%s,\n\t\t"status":"active",\n\t\t"offline":"%s",\n\t\t"loc":"Paris",\n\t\t"antenna":"Long wire",\n'
+                '\t\t"bands":"0-30000000",\n\t\t"users":"%d",\n\t\t"users_max":"%d",\n\t\t"gps":"(48.85, 2.35)",\n\t\t"url":"%s"\n\t},\n') % (json.dumps(name), offline, users, mx, url)
+    return ('// KiwiSDR.com receiver list for dyatlov map maker\nvar kiwisdr_com =\n[\n'
+            + e('Mock receiver & antenna', 'http://127.0.0.1:%d' % (PORT + 1), 1, 4)
+            + e('Mock full', 'http://127.0.0.1:%d' % (PORT + 2), 4, 4)
+            + e('Mock offline', 'http://10.0.0.1:8073', 0, 4, 'yes')
+            + e('Mock emptiest \U0001F7E0', 'http://127.0.0.2:8073', 0, 8)
+            + ']\n;\n').encode()
+
 def stream(conn, h):
     stat('streams')
     meta = h.get('icy-metadata') == '1'
@@ -123,6 +135,8 @@ def http_client(conn):
         if path.startswith('/stats'):
             with LOCK: send(conn, '200 OK', 'application/json', json.dumps(STATS).encode())
             return
+        if path.startswith('/kiwisdr_com.js'):
+            send(conn, '200 OK', 'application/javascript', kiwi_array()); return
         if path.startswith('/public'):
             body = public_page()
             conn.sendall(b'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n')

@@ -1,3 +1,9 @@
+**REPLIK8 0.4.11** : les récepteurs ondes courtes reviennent.
+
+- **La liste des récepteurs ondes courtes était vide** : la page qui les recensait demande maintenant de cliquer avant de les montrer. REPLIK8 lit la liste sur la carte qui la republie toutes les quelques minutes (plus de 800 récepteurs dans le monde), les plus libres en premier, et revient à l'ancienne page si celle-ci ne répond pas
+- **Coller l'adresse d'un récepteur** : sous les bandes, un champ prend l'adresse telle que ton navigateur l'affiche (http://…:8073). Si elle porte une fréquence et un mode (?f=9420am), REPLIK8 s'y accorde. Pratique pour un récepteur trouvé sur une carte ou un forum
+- Les récepteurs derrière le relais du fabricant sont joints directement sur leur port
+
 **REPLIK8 0.4.10** : le filtre WASP refait.
 
 - **WASP** : son caractère vient d'amplis de fortune, des inverseurs logiques détournés, et il est maintenant modélisé à partir d'eux. Ces inverseurs ont peu de gain : les intégrateurs du filtre fuient, d'autant plus qu'ils approchent de leurs limites. Résultat : il ne part jamais en auto-oscillation, sa résonance est nasale et marquée à bas niveau (jusqu'à +16 dB à la coupure) et s'effondre en grain quand le son est fort ou que DRIVE monte. Leur courbe est bancale : des harmoniques paires, de plus en plus quand on le pousse. Le courant qui règle la coupure sature aussi, et l'entrée passe elle-même par un inverseur
