@@ -374,6 +374,8 @@ void Player::startVoice (int note, int velocity, float fromPitch, const Chunk& c
         v.fading = false;
         v.fade = 1.0f;
         v.fresh = true;
+    v.lvFresh = true;
+        v.lvFresh = true;
         v.s = nullptr;
         v.index = -1;
         v.ghostLeft = v.attackLeft = 0;
@@ -935,15 +937,32 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
     // the MIXEUR: the sample's level, ORBITE's (heard when it's on; computed too when it modulates the phase)
     const float mixS = c.v[snd::mxSample];
     const float mixO = c.v[snd::orOn] > 0.5f ? c.v[snd::mxOrbite] * synthLevel : 0.0f;
-    const bool orbNeeded = mixO > 0.0f || r.pm == 5;
+    // (the sample's, ORBITE's and the sub's levels ramped a sample at a time from where the last chunk left them)
+    if (v.lvFresh)
+    {
+        v.lvFrom[0] = mixS;
+        v.lvFrom[1] = mixO;
+        v.lvFrom[2] = c.v[snd::mxSub] * 0.6f;
+        v.lvFrom[3] = c.v[snd::subOn] > 0.5f ? 1.0f : 0.0f;
+        v.lvFresh = false;
+    }
+    float mS = v.lvFrom[0], mO = v.lvFrom[1], mSub = v.lvFrom[2], subGate = v.lvFrom[3];
+    const float invNs = 1.0f / (float) juce::jmax (1, n);
+    const float mSInc = (mixS - mS) * invNs, mOInc = (mixO - mO) * invNs, mSubInc = (c.v[snd::mxSub] * 0.6f - mSub) * invNs;
+    const float subGateTo = c.v[snd::subOn] > 0.5f ? 1.0f : 0.0f, subGateInc = (subGateTo - subGate) * invNs;
+    v.lvFrom[0] = mixS;
+    v.lvFrom[1] = mixO;
+    v.lvFrom[2] = c.v[snd::mxSub] * 0.6f;
+    v.lvFrom[3] = subGateTo;
+    const bool orbNeeded = mixO > 0.0f || mO > 0.0f || r.pm == 5;
     const double playedNow = (double) v.pitch + (double) (int) c.v[snd::transpose] + (double) c.v[snd::fine] * 0.01 + (double) c.bendSemis
                            + (double) c.v[snd::tune];
     const OrbitePlan op = orbNeeded ? orbitePlan (c.v, playedNow, sr) : OrbitePlan {};
     float orbNow = 0.0f;
     // the SUB: its frequency (the note one or two octaves down, back up an octave while under 25 Hz), the crossover
-    const bool subOn = c.v[snd::subOn] > 0.5f;
+    const bool subOn = c.v[snd::subOn] > 0.5f || subGate > 0.0f;
     const bool subOctave = (int) c.v[snd::subMode] == 1;
-    const float subMix = c.v[snd::mxSub] * 0.6f, subKeep = 1.0f - c.v[snd::subReplace];
+    const float subKeep = 1.0f - c.v[snd::subReplace];
     const float subDrive = 1.0f + 7.0f * c.v[snd::subDrive], subNorm = 1.0f / std::tanh (subDrive);
     const bool subFollow = c.v[snd::subFollow] > 0.5f;
     double subHz = rk::noteHz (playedNow) / ((int) c.v[snd::subOct] == 1 ? 4.0 : 2.0);
@@ -1171,8 +1190,9 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
                 lowR = S.lo[1][1].tick (S.lo[1][0].tick (xr));
                 highR = S.hi[1][1].tick (S.hi[1][0].tick (xr));
             }
-            xl = highL + subKeep * lowL;
-            xr = highR + subKeep * lowR;
+            const float keep = 1.0f - (1.0f - subKeep) * subGate;      // (the lows given back as the sub fades out)
+            xl = highL + keep * lowL;
+            xr = highR + keep * lowR;
             // the sub itself
             float s = 0.0f;
             if (! subOctave)
@@ -1224,10 +1244,14 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
             // warmed by DRIVE, then kept under the crossover (its harmonics too) and over the infra
             s = std::tanh (s * subDrive) * subNorm;
             s = S.band[1].tick (S.band[0].tick (s));
-            subOut = S.infra[1].tick (S.infra[0].tick (s)) * subMix;
+            subOut = S.infra[1].tick (S.infra[0].tick (s)) * mSub * subGate;
         }
-        xl = xl * mixS + orbNow * mixO + subOut;
-        xr = xr * mixS + orbNow * mixO + subOut;
+        mS += mSInc;
+        mO += mOInc;
+        mSub += mSubInc;
+        subGate += subGateInc;
+        xl = xl * mS + orbNow * mO + subOut;
+        xr = xr * mS + orbNow * mO + subOut;
         // RETOUR's next push: this sample, kept in bounds (a feedback that can't run away)
         v.lastOut = juce::jlimit (-1.5f, 1.5f, 0.5f * (xl + xr));
         const float fe = tick (v.flt, c.flt, false);
@@ -1309,7 +1333,7 @@ void Player::renderSynth (Voice& v, float* L, float* R, int n, const Chunk& c)
     const float pmTo = c.v[snd::pmBA] * c.v[snd::pmBA] * 1.5f;     // B moves A's phase by up to 1.5 cycles
     // ORBITE, in the mix when it's on (centred, one per note)
     const float lvO = c.v[snd::orOn] > 0.5f ? c.v[snd::mxOrbite] : 0.0f;
-    const OrbitePlan op = lvO > 0.0f ? orbitePlan (c.v, played, sr) : OrbitePlan {};
+    const OrbitePlan op = lvO > 0.0f || (! v.lvFresh && v.lvFrom[4] > 0.0f) ? orbitePlan (c.v, played, sr) : OrbitePlan {};
 
     // the filter, its cutoff following the keys and the velocity; everything ramped from the last chunk
     if (c.filterOn)
@@ -1345,6 +1369,21 @@ void Player::renderSynth (Voice& v, float* L, float* R, int n, const Chunk& c)
     v.posBFrom = posB;
     v.pmFrom = pmTo;
     const float fadeStep = 1.0f / (float) (0.004 * sr);
+    // the levels too, a sample at a time (a fader moved: no stairs)
+    const float lvTo[5] = { lvA, lvB, sub, noise, lvO };
+    if (v.lvFresh)
+    {
+        std::copy (lvTo, lvTo + 5, v.lvFrom.begin());
+        v.lvFresh = false;
+    }
+    float lv[5], lvInc[5];
+    for (int k = 0; k < 5; ++k)
+    {
+        lv[k] = v.lvFrom[(size_t) k];
+        lvInc[k] = (lvTo[k] - lv[k]) * invN;
+        v.lvFrom[(size_t) k] = lvTo[k];
+    }
+    const bool subHeard = sub > 0.0f || lv[2] > 0.0f, noiseHeard = noise > 0.0f || lv[3] > 0.0f, orbHeard = lvO > 0.0f || lv[4] > 0.0f;
 
     for (int i = 0; i < n; ++i)
     {
@@ -1355,41 +1394,43 @@ void Player::renderSynth (Voice& v, float* L, float* R, int n, const Chunk& c)
         pmNow += pmInc;
         iA += iAInc;
         iB += iBInc;
+        for (int k = 0; k < 5; ++k)
+            lv[k] += lvInc[k];
         float xl = 0.0f, xr = 0.0f;
         for (int u = 0; u < voicesN; ++u)
         {
             double& b = v.phB[(size_t) u];
             b += iB * ratio[u];
             b -= std::floor (b);
-            const float sb = lvB > 0.0f || pmNow > 0.0f ? bankB.read (pB, b, levB) : 0.0f;
+            const float sb = lv[1] > 0.0f || lvB > 0.0f || pmNow > 0.0f ? bankB.read (pB, b, levB) : 0.0f;
             double& a = v.phA[(size_t) u];
             a += iA * ratio[u];
             a -= std::floor (a);
             const float sa = bankA.read (pA, a + (double) (pmNow * sb), levA);
-            const float x = sa * lvA + sb * lvB;
+            const float x = sa * lv[0] + sb * lv[1];
             xl += x * gl[u];
             xr += x * gr[u];
         }
         xl *= norm;
         xr *= norm;
-        if (sub > 0.0f)
+        if (subHeard)
         {
             v.phSub += iA * 0.5;
             v.phSub -= std::floor (v.phSub);
-            const float s = sub * std::sin (twoPi * (float) v.phSub);
+            const float s = lv[2] * std::sin (twoPi * (float) v.phSub);
             xl += s;
             xr += s;
         }
-        if (noise > 0.0f)
+        if (noiseHeard)
         {
-            const float w = noise * 0.5f * (uniform (v.rng) * 2.0f - 1.0f);
+            const float w = lv[3] * 0.5f * (uniform (v.rng) * 2.0f - 1.0f);
             xl += w;
             xr += w;
         }
-        if (lvO > 0.0f)
+        if (orbHeard)
         {
             v.orbit += op.orbitInc;
-            const float o = lvO * v.orb.process (op.s, op.incC, op.inc1, op.inc2, v.orbit);
+            const float o = lv[4] * v.orb.process (op.s, op.incC, op.inc1, op.inc2, v.orbit);
             xl += o;
             xr += o;
         }
@@ -1467,6 +1508,47 @@ float Player::smoothed (int i, float k, bool snap)
     return snd::fromNorm (i, g);
 }
 
+// what each follower hears over this chunk (only the sources a FOLLOW listens to): the level as a peak would read it
+void Player::hearFollowers (int pos, int end)
+{
+    bool wanted[numFollowSources] {};
+    for (int m = 0; m < snd::numMods; ++m)
+        if ((int) get (snd::modParam (m, snd::mType)) == (int) dsp::ModType::follower)
+            wanted[juce::jlimit (0, numFollowSources - 1, (int) get (snd::modParam (m, snd::mSource)))] = true;
+    auto rms = [pos, end] (const FollowSignal& f)
+    {
+        if (f.l == nullptr || end <= pos)
+            return 0.0f;
+        float sum = 0.0f;
+        for (int i = pos; i < end; ++i)
+            sum += f.l[i] * f.l[i];
+        int count = end - pos;
+        if (f.r != nullptr)
+        {
+            for (int i = pos; i < end; ++i)
+                sum += f.r[i] * f.r[i];
+            count *= 2;
+        }
+        const float v = std::sqrt (sum / (float) count) * 1.41f;
+        return std::isfinite (v) ? v : 0.0f;
+    };
+    for (int s = 0; s < numFollowSources; ++s)
+    {
+        if (! wanted[s])
+        {
+            followLevel[(size_t) s] = 0.0f;
+            continue;
+        }
+        const auto& f = follow[(size_t) s];
+        if (s == 0)
+            followLevel[0] = f.l != nullptr ? rms (f) : inputLevel;
+        else if (s == 1)
+            followLevel[1] = std::max (voiceLevel, rms (f));   // (the voices: the last chunk's)
+        else
+            followLevel[(size_t) s] = rms (f);
+    }
+}
+
 void Player::modulate (int offset, int n, const Transport& t, Chunk& c, bool atRest)
 {
     const double bpm = t.playing && t.bpm > 0.0 ? t.bpm : (double) get (snd::tempo);
@@ -1520,7 +1602,7 @@ void Player::modulate (int offset, int n, const Transport& t, Chunk& c, bool atR
             retrigPending[m] = false;
         }
         else if (ms.type == dsp::ModType::follower)
-            mod.input ((int) P (snd::mSource) == 0 ? inputLevel : voiceLevel);
+            mod.input (followLevel[(size_t) juce::jlimit (0, numFollowSources - 1, (int) P (snd::mSource))]);
         const bool onHost = ms.sync && t.playing;
         if (retrigPending[m])
         {
@@ -1832,6 +1914,7 @@ void Player::runChain (float* L, float* R, int n, const Chunk& c)
                 s.shimmer = c.v[snd::rvShimmer];
                 s.mod = c.v[snd::rvMod];
                 s.mix = c.v[snd::rvMix];
+                s.dry = c.v[snd::rvDry];
                 space.set (s);
                 stage (5, c.v[snd::rvOn] > 0.5f, [this] (float* l, float* r, int m) { space.process (l, r, m); });
             }
@@ -2099,6 +2182,7 @@ void Player::render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi
         }
         else
             inputLevel = 0.0f;
+        hearFollowers (pos, end);
         const int rs = rsState.load (std::memory_order_relaxed);
         bool sounding = inputThroughFx || rs >= (int) Resample::recording;
         for (auto& v : voices)
@@ -2318,4 +2402,5 @@ void Player::render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi
             peakLevel[(size_t) i] = i < np ? lv[i] : 0.0f;
         }
     }
+    follow.fill ({});        // (the host's signals were this block's)
 }

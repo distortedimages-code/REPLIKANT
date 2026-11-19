@@ -302,8 +302,13 @@ juce::String Encoder::valueText (const Ctl& c, const Arming& arm)
     {
         if (arm.mod >= 0 && snd::def (c.param).modulatable)
         {
+            // (+40 %: up from the setting, -40 %: down; ±40 %: both ways, inv: the other way round)
             const float a = arm.player->routeAmount (arm.mod, c.param);
-            return "m" + juce::String (arm.mod + 1) + " " + (a > 0 ? "+" : a < 0 ? "-" : "") + juce::String (juce::roundToInt (std::abs (a) * 100.0f)) + " %";
+            const bool bi = arm.player->get (snd::modParam (arm.mod, snd::mPolarity)) < 0.5f;
+            const juce::String pct = juce::String (juce::roundToInt (std::abs (a) * 100.0f)) + " %";
+            if (bi)
+                return "m" + juce::String (arm.mod + 1) + " " + juce::String::fromUTF8 ("\xc2\xb1") + pct + (a < 0 ? " inv" : "");
+            return "m" + juce::String (arm.mod + 1) + " " + (a > 0 ? "+" : a < 0 ? "-" : "") + pct;
         }
         if (arm.scene >= 0 && snd::sceneLockable (c.param))
         {
@@ -544,7 +549,12 @@ void Encoder::paint (juce::Graphics& g)
             juce::Colour modColour = col::ink;
             if (const int m = armedMod(); m >= 0)
             {
-                modTo = juce::jlimit (0.0f, 1.0f, value + arm.player->routeAmount (m, ctl->param));
+                // (±: both ways around the setting; +: one way, up or down as the amount goes)
+                const float a = arm.player->routeAmount (m, ctl->param);
+                const bool bi = arm.player->get (snd::modParam (m, snd::mPolarity)) < 0.5f;
+                modTo = juce::jlimit (0.0f, 1.0f, value + a);
+                if (bi)
+                    modFrom = juce::jlimit (0.0f, 1.0f, value - a);
                 modColour = col::mod (m);
             }
             else if (ctl->param >= 0 && arm.player != nullptr)
@@ -619,13 +629,18 @@ void Encoder::pick (int option)
 
 void Encoder::setFrom (float norm)
 {
-    norm = juce::jlimit (0.0f, 1.0f, norm);
+    // (a route: -100 % .. +100 %, down from the setting as well as up)
     if (const int m = armedMod(); m >= 0)
     {
         arm.player->setRoute (m, ctl->param, juce::jlimit (-1.0f, 1.0f, norm));
         if (arm.changed) arm.changed();
+        if (ctl->changed)
+            ctl->changed();
+        repaint();
+        return;
     }
-    else if (const int sc = armedScene(); sc >= 0)
+    norm = juce::jlimit (0.0f, 1.0f, norm);
+    if (const int sc = armedScene(); sc >= 0)
     {
         arm.player->setSceneLock (sc, ctl->param, snd::fromNorm (ctl->param, norm));
         if (arm.changed) arm.changed();

@@ -110,16 +110,16 @@ namespace
         { "rvTone",    "Tone",                        K::linear,  0, 1, 0.5f, 1, nullptr, true, "%" },
         { "rvShimmer", "Shimmer",                     K::linear,  0, 1, 0, 1, nullptr, true, "%" },
         { "rvMod",     "Motion",                      K::linear,  0, 1, 0.5f, 1, nullptr, true, "%" },
-        { "rvMix",     "Mix",                         K::linear,  0, 1, 0.3f, 1, nullptr, true, "%" },
+        { "rvMix",     "Wet",                         K::linear,  0, 1, 0.3f, 1, nullptr, true, "%" },
 
-#define RK_MOD(n, type, div) \
+#define RK_MOD(n, type, div, pol) \
         { "m" #n "Type",     "Type",                K::choice,  0, 4, type, 1, "LFO|STEPS|RANDOM|ENV|FOLLOW", false, "" }, \
         { "m" #n "Shape",    "Shape",               K::choice,  0, 6, 0, 1, kShapes, false, "" }, \
         { "m" #n "Sync",     "Rhythm",              K::choice,  0, 1, 0, 1, "SYNC|FREE", false, "" }, \
         { "m" #n "Div",      "Division",            K::choice,  0, 15, div, 1, kDivisions, false, "" }, \
         { "m" #n "Hz",       "Rate",                K::log,     0.02f, 40, 1, 1, nullptr, false, "Hz" }, \
         { "m" #n "Smooth",   "Smooth",             K::linear,  0, 1, 0, 1, nullptr, false, "%" }, \
-        { "m" #n "Polarity", "Polarity",            K::choice,  0, 1, 0, 1, "\xc2\xb1|+", false, "" }, \
+        { "m" #n "Polarity", "Polarity",            K::choice,  0, 1, pol, 1, "\xc2\xb1|+", false, "" }, \
         { "m" #n "Retrig",   "Retrig",              K::choice,  0, 1, 0, 1, "FREE|NOTE", false, "" }, \
         { "m" #n "Len",      "Length",            K::integer, 1, 32, 16, 1, nullptr, false, "" }, \
         { "m" #n "Vari",     "Variation",           K::linear,  0, 1, 0, 1, nullptr, false, "%" }, \
@@ -127,13 +127,13 @@ namespace
         { "m" #n "Decay",    "Decay",               K::log,     1, 10000, 300, 1, nullptr, false, "ms" }, \
         { "m" #n "Sustain",  "Sustain",            K::linear,  0, 1, 0.5f, 1, nullptr, false, "%" }, \
         { "m" #n "Release",  "Release",             K::log,     5, 10000, 400, 1, nullptr, false, "ms" }, \
-        { "m" #n "Source",   "Source",              K::choice,  0, 1, 0, 1, "INPUT|VOICES", false, "" }, \
+        { "m" #n "Source",   "Source",              K::choice,  0, 10, 0, 1, "INPUT|SELF|SIDECHAIN|DRUM 1|DRUM 2|DRUM 3|DRUM 4|DRUM 5|DRUM 6|DRUM 7|DRUM 8", false, "" }, \
         { "m" #n "Gain",     "Gain",                K::linear,  0, 36, 12, 1, nullptr, false, "dB" }, \
         { "m" #n "Amt",      "Amount",              K::linear,  0, 1, 1, 1, nullptr, false, "%" },
-        RK_MOD (1, 0, 4)
-        RK_MOD (2, 1, 6)
-        RK_MOD (3, 2, 5)
-        RK_MOD (4, 3, 6)
+        RK_MOD (1, 0, 4, 0)
+        RK_MOD (2, 1, 6, 0)
+        RK_MOD (3, 2, 5, 0)
+        RK_MOD (4, 3, 6, 1)
 #undef RK_MOD
 
         { "xfade",     "Crossfader",                  K::linear,  0, 1, 0, 1, nullptr, true, "%" },
@@ -232,6 +232,7 @@ namespace
         { "fZ",        "Z",                           K::linear,  0, 1, 0, 1, nullptr, true, "%" },
         { "fSmooth",   "Smooth",                      K::linear,  0, 200, 10, 1, nullptr, false, "ms" },
         { "fTrim",     "Trim",                        K::linear,  -24, 12, 0, 1, nullptr, true, "dB" },
+        { "rvDry",     "Dry",                         K::linear,  0, 1, 1, 1, nullptr, true, "%" },
     };
 
     std::string fmt (const char* f, double v)
@@ -426,6 +427,7 @@ std::string longName (int id)
     if (id == drSwing)             return "Drum Swing";
     if (in (spClock, spAssign))    return "Spectre " + name;
     if (in (fCube, fTrim))         return "Filter " + name;
+    if (id == rvDry)               return "Espace Dry";
     if (in (rdTake, rdPads))       return "Radio " + name;
     if (in (rdPadTune, rdPadLevel)) return "Radio Pads " + name;
     return name;

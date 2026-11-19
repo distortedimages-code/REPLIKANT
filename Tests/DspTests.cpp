@@ -356,6 +356,7 @@ static void testModulators()
         ModSettings e;
         e.type = ModType::envelope;
         e.attack = 0.01f; e.decay = 0.1f; e.sustain = 0.4f; e.release = 0.2f;
+        e.unipolar = true;
         Modulator a;
         a.set (e);
         a.gate (true);
@@ -372,6 +373,7 @@ static void testModulators()
         ModSettings f;
         f.type = ModType::follower;
         f.attack = 0.005f; f.release = 0.1f; f.gain = 2.0f;
+        f.unipolar = true;
         Modulator a;
         a.set (f);
         a.input (0.3f);
@@ -381,6 +383,16 @@ static void testModulators()
         a.input (0.0f);
         for (int k = 0; k < 700; ++k) x = a.advance (0.001, 120);
         CHECK (x < 0.01f, "follower falls %.4f", x);
+        // ±: around the setting, -1 in silence, +1 at full level
+        f.unipolar = false;
+        Modulator b;
+        b.set (f);
+        b.input (0.0f);
+        for (int k = 0; k < 50; ++k) x = b.advance (0.001, 120);
+        CHECK (std::abs (x + 1.0f) < 0.01f, "bipolar follower in silence %.3f", x);
+        b.input (0.5f);
+        for (int k = 0; k < 100; ++k) x = b.advance (0.001, 120);
+        CHECK (std::abs (x - 1.0f) < 0.01f, "bipolar follower full %.3f", x);
     }
 }
 
@@ -611,7 +623,7 @@ static void testSpectre()
         float peak = 0.0f;
         bool finite = true;
         for (float x : r.out) { finite = finite && std::isfinite (x); peak = std::max (peak, std::abs (x)); }
-        CHECK (finite && peak < 2.0f && peak > 0.1f, "wave %d: peak %.2f", wave, peak);
+        CHECK (finite && peak < 3.0f && peak > 0.1f, "wave %d: peak %.2f", wave, peak);
     }
     {
         SpectreRig r;
@@ -759,6 +771,157 @@ static void testCube()
     }
 }
 
+
+// (0.4.5) no clicks where a knob jumps: a model, a type, a mode or a wave changed while a tone plays never makes a
+// step bigger than the tone's own (its steepest slope, with room for the harmonics the change brings)
+static void testNoClicks()
+{
+    const double sr = 48000.0;
+    auto tone = [sr] (int i) { return 0.5f * (float) std::sin (2.0 * M_PI * 220.0 * i / sr); };
+    auto worstStep = [] (const std::vector<float>& y, size_t from)
+    {
+        float w = 0.0f;
+        for (size_t i = from + 1; i < y.size(); ++i)
+            w = std::max (w, std::abs (y[i] - y[i - 1]));
+        return w;
+    };
+    // the drive: every model in turn, ten times a second
+    {
+        Drive d;
+        d.prepare (sr);
+        DriveSettings s;
+        s.drive = 0.4f;
+        std::vector<float> L, R;
+        for (int b = 0; b < 40; ++b)
+        {
+            s.model = (DriveModel) (1 + b % 3);
+            d.set (s);
+            std::vector<float> l (480), r (480);
+            for (int i = 0; i < 480; ++i)
+                l[(size_t) i] = r[(size_t) i] = tone (b * 480 + i);
+            d.process (l.data(), r.data(), 480);
+            L.insert (L.end(), l.begin(), l.end());
+        }
+        const float w = worstStep (L, 4800);
+        CHECK (w < 0.12f, "drive models switched: a step of %.3f", w);
+    }
+    // the filter: its types and models in turn
+    {
+        VAFilter f;
+        f.prepare (sr);
+        FilterSettings s;
+        s.res = 0.5f;
+        std::vector<float> y;
+        for (int b = 0; b < 48; ++b)
+        {
+            s.model = (FilterModel) (1 + (b / 4) % 7);
+            s.type = (FilterType) (b % 4);
+            s.cube = b % 10;
+            f.set (s);
+            for (int i = 0; i < 480; ++i)
+                y.push_back (f.tick (tone (b * 480 + i), 6.5f));
+        }
+        const float w = worstStep (y, 4800);
+        CHECK (w < 0.25f, "filter models and types switched: a step of %.3f", w);
+    }
+    // the chorus' modes, SPECTRE's waves
+    {
+        Chorus c;
+        c.prepare (sr);
+        ChorusSettings s;
+        s.mix = 0.6f;
+        std::vector<float> L;
+        for (int b = 0; b < 30; ++b)
+        {
+            s.mode = b % 3;
+            c.set (s);
+            std::vector<float> l (480), r (480);
+            for (int i = 0; i < 480; ++i)
+                l[(size_t) i] = r[(size_t) i] = tone (b * 480 + i);
+            c.process (l.data(), r.data(), 480);
+            L.insert (L.end(), l.begin(), l.end());
+        }
+        const float w = worstStep (L, 4800);
+        CHECK (w < 0.08f, "chorus modes switched: a step of %.3f", w);
+    }
+    {
+        // (a square has its own steps: against the steepest of the waves held, not against the tone)
+        auto run = [&] (int fixed)
+        {
+            Spectral sp;
+            sp.prepare (sr);
+            SpectralSettings s;
+            s.mix = 1.0f;
+            s.voices = 4;
+            s.glide = 0.0f;
+            std::vector<float> L;
+            for (int b = 0; b < 60; ++b)
+            {
+                s.wave = fixed >= 0 ? fixed : (b < 20 ? 0 : (b % 4 == 0 ? 0 : (b % 4 == 1 ? 1 : (b % 4 == 2 ? 4 : 1))));
+                sp.set (s);
+                std::vector<float> l (480), r (480);
+                for (int i = 0; i < 480; ++i)
+                    l[(size_t) i] = r[(size_t) i] = tone (b * 480 + i);
+                sp.process (l.data(), r.data(), 480);
+                L.insert (L.end(), l.begin(), l.end());
+            }
+            return worstStep (L, 20 * 480);
+        };
+        const float held = std::max ({ run (0), run (1), run (4) }), switched = run (-1);
+        CHECK (switched < held * 1.1f + 0.02f, "spectre's waves switched: a step of %.3f (held: %.3f)", switched, held);
+    }
+}
+
+
+// (0.4.5) the effects keep the sound as loud as it came in (a chord of saws with noisy hits, at their default mixes):
+// none thins it, none jumps over it
+static void testEffectLevels()
+{
+    const double sr = 48000.0;
+    std::vector<float> x ((size_t) (sr * 4));
+    {
+        std::mt19937 r (3);
+        std::uniform_real_distribution<float> u (-1.0f, 1.0f);
+        double ph[3] = { 0, 0, 0 };
+        const double f[3] = { 110, 138.6, 164.8 };
+        for (size_t i = 0; i < x.size(); ++i)
+        {
+            float v = 0.0f;
+            for (int k = 0; k < 3; ++k)
+            {
+                ph[k] += f[k] / sr;
+                ph[k] -= std::floor (ph[k]);
+                v += (float) (2.0 * ph[k] - 1.0) * 0.15f;
+            }
+            x[i] = v + 0.2f * u (r) * (float) std::exp (-std::fmod (i / sr, 0.5) * 8.0);
+        }
+    }
+    auto levelOf = [&] (auto&& fx)
+    {
+        auto L = x, R = x;
+        for (size_t i = 0; i < L.size(); i += 256)
+            fx (L.data() + i, R.data() + i, (int) std::min<size_t> (256, L.size() - i));
+        double ei = 0.0, eo = 0.0;
+        for (size_t i = (size_t) sr; i < x.size(); ++i)
+        {
+            ei += (double) x[i] * x[i];
+            eo += 0.5 * ((double) L[i] * L[i] + (double) R[i] * R[i]);
+        }
+        return 10.0 * std::log10 (eo / ei);
+    };
+    double worst = 0.0;
+    const char* worstName = "";
+    auto check = [&] (const char* name, double db) { if (std::abs (db) > std::abs (worst)) { worst = db; worstName = name; } };
+    { Spectral e; e.prepare (sr); SpectralSettings st; e.set (st); check ("spectre", levelOf ([&] (float* l, float* r, int n) { e.process (l, r, n); })); }
+    { PitchShift e; e.prepare (sr); PitchSettings st; e.set (st); check ("pitch", levelOf ([&] (float* l, float* r, int n) { e.process (l, r, n); })); }
+    for (int mode : { 0, 1 }) { Chorus e; e.prepare (sr); ChorusSettings st; st.mode = mode; e.set (st); check ("chorus", levelOf ([&] (float* l, float* r, int n) { e.process (l, r, n); })); }
+    { Crush e; e.prepare (sr); CrushSettings st; st.bits = 6.0f; st.rateHz = 8000.0f; e.set (st); check ("crush", levelOf ([&] (float* l, float* r, int n) { e.process (l, r, n); })); }
+    { Space e; e.prepare (sr); SpaceSettings st; e.set (st); check ("espace", levelOf ([&] (float* l, float* r, int n) { e.process (l, r, n); })); }
+    for (int m : { 1, 2, 3 }) { Drive e; e.prepare (sr); DriveSettings st; st.model = (DriveModel) m; st.drive = 0.7f; e.set (st); check ("drive", levelOf ([&] (float* l, float* r, int n) { e.process (l, r, n); })); }
+    std::printf ("  the effects' levels at their defaults: %+.2f dB at worst (%s)\n", worst, worstName);
+    CHECK (std::abs (worst) < 1.5, "an effect moves the level by %.2f dB (%s)", worst, worstName);
+}
+
 int main()
 {
     testOversampler();
@@ -767,6 +930,8 @@ int main()
     testEffects();
     testSpectre();
     testCube();
+    testNoClicks();
+    testEffectLevels();
     testModulators();
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;

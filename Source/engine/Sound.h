@@ -83,6 +83,8 @@ namespace snd
         spClock, spMult, spDiv, spNotch, spTrans, spFine, spWarp, spAssign,
         // (0.4.4) the filter's CUBE: which one, its Y and Z (its X is the cutoff)
         fCube, fY, fZ, fSmooth, fTrim,
+        // (0.4.5) ESPACE's dry, apart from its wet (MIX)
+        rvDry,
         count
     };
 

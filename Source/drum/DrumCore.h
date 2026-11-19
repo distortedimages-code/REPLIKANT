@@ -127,6 +127,8 @@ namespace drum
         // n frames of the eight tracks into L, R (written, not added)
         void render (float* L, float* R, int n, const Clock&, float swing, const Event* events, int numEvents);
         void allSoundOff();
+        // each track alone (mono, before its pan) over the last render, for FOLLOW; nullptr when it did not fit
+        const float* trackSignal (int t) const    { return trackFrames > 0 && t >= 0 && t < numTracks ? trackOut[(size_t) t].data() : nullptr; }
         // WTF?!: the player's ten pulls (normalised, its amount in them), set before render: each hit's settings are
         // pulled by them (TUNE, DECAY, SWEEP, PMOD, CUTOFF, RESO, NOISE, START or POSITION, DRIVE, F.ENV), each
         // track taking them in its own order
@@ -179,7 +181,9 @@ namespace drum
         std::array<Voice, numTracks * 2> voices;
         void hit (int track, int step, float velMul, bool retrig);
         void startVoice (int track, const float* p, float vel);
-        void renderVoice (Voice&, float* L, float* R, int n);
+        void renderVoice (Voice&, float* L, float* R, float* F, int n);   // F: its track's own (mono, added)
+        std::array<std::vector<float>, numTracks> trackOut;
+        int trackFrames = 0;
 
         // ---- a track's playing state
         struct Run

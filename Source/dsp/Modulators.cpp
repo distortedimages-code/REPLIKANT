@@ -38,7 +38,7 @@ float Modulator::rnd()
 
 bool Modulator::isUnipolar() const
 {
-    return settings.type == ModType::envelope || settings.type == ModType::follower || settings.unipolar;
+    return settings.unipolar;
 }
 
 void Modulator::gate (bool on)
@@ -165,10 +165,12 @@ float Modulator::atPpq (double ppq, double bpm, double dt)
 
 float Modulator::advance (double dt, double bpm)
 {
-    if (settings.type == ModType::envelope)
-        return out = envelope (dt);
-    if (settings.type == ModType::follower)
-        return out = follow (dt);
+    // (ENV, FOLLOW: 0..1 from where the setting is; ±: -1..1 around it, the rest at -1)
+    if (settings.type == ModType::envelope || settings.type == ModType::follower)
+    {
+        const float e = settings.type == ModType::envelope ? envelope (dt) : follow (dt);
+        return out = settings.unipolar ? e : 2.0f * e - 1.0f;
+    }
     double rate;
     if (settings.sync)
     {

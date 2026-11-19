@@ -8,7 +8,8 @@
 //   DECAY 0.3 s .. 30 s, then FREEZE at its end. SIZE: from a pipe (metallic) to a vast hall; turned, the taps slide
 //   (the pitch bends as on a tape). TONE: left, the highs die faster (a cave); right, less diffusion and sway (metal).
 //   SHIMMER: the tail an octave up fed back in (two taps sliding through a 93 ms line), the octaves climbing; its loop
-//   gain held under 1 at any decay. MOD: the sway's depth. MIX: dry / wet.
+//   gain held under 1 at any decay. MOD: the sway's depth. WET (MIX) the reverb's level, DRY the sound's (0.4.5:
+//   apart, so the sound is never thinned by the reverb).
 
 #pragma once
 
@@ -20,6 +21,7 @@ namespace dsp
     struct SpaceSettings
     {
         float size = 0.5f, decay = 0.5f, tone = 0.5f, shimmer = 0.0f, mod = 0.5f, mix = 0.3f;
+        float dry = 1.0f;     // (0.4.5) the dry's level apart: MIX is the reverb's (its wet, brought to the dry's level)
     };
 
     class Space
@@ -44,7 +46,7 @@ namespace dsp
 
         double sr = 48000.0, scaleRate = 48000.0 / 22050.0;
         SpaceSettings target;
-        float mix = 0.3f;
+        float mix = 0.3f, dryNow = 1.0f;
         Line ap[4], lines[kLines], shim;
         int apLen[4] {};
         float len[kLines] {};

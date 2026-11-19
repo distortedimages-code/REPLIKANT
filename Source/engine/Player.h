@@ -93,6 +93,16 @@ public:
     void setFxOrder (const std::array<int, numStages>&);      // ignored unless a permutation
     std::array<int, numStages> fxOrder() const;
 
+    // FOLLOW: what each of its sources plays, set by the host before each render (valid for that render's frames;
+    // nullptr: silent). 0 INPUT (the audio input), 1 SELF (the instrument: its voices, or what the DRUM or the RADIO
+    // plays), 2 SIDECHAIN, 3.. DRUM 1..8 (each track alone). Without INPUT, the followers hear `input` (render's)
+    static constexpr int numFollowSources = 11;
+    void setFollowSignal (int source, const float* left, const float* right = nullptr)
+    {
+        if (source >= 0 && source < numFollowSources)
+            follow[(size_t) source] = { left, right };
+    }
+
     // message thread: the route of mod m to `dest` set to `amount` (made if needed, removed at 0); false when the
     // mod has no room left
     bool setRoute (int mod, int dest, float amount);
@@ -247,6 +257,9 @@ private:
         // a sample at a time (no stairs every 32 samples)
         bool fresh = true;
         float cutFrom = 0.0f, envFrom = 0.0f;
+        // (0.4.5) the levels of the mix (oscillators, sub, noise, ORBITE; the sample's), where the last chunk left them
+        std::array<float, 5> lvFrom {};
+        bool lvFresh = true;
         double stepFrom = 1.0;
         // SYNTHÉ: the oscillators' phases (each unison voice its own), the sub's; where the last chunk left their
         // increments and positions
@@ -320,6 +333,10 @@ private:
     bool gateOn[snd::numMods] {};
     std::array<uint32_t, snd::numMods> seedNow {};
     float inputLevel = 0.0f, voiceLevel = 0.0f;   // what the followers follow (the last chunk's)
+    struct FollowSignal { const float* l = nullptr; const float* r = nullptr; };
+    std::array<FollowSignal, numFollowSources> follow {};
+    std::array<float, numFollowSources> followLevel {};   // this chunk's
+    void hearFollowers (int pos, int end);
 
     // the chain
     dsp::VAFilter inFilter[2];

@@ -369,6 +369,10 @@ public:
     static constexpr float kC30 = 0.8660254f, kS30 = 0.5f;
     static constexpr int cubeIds[3] = { snd::cutoff, snd::fY, snd::fZ };
     bool cubeShown = false, cubing = false;
+    // FOLLOW's trace (what it sent, every 25 ms)
+    std::array<float, 120> trace {};
+    int traceAt = 0, traceMod = -1;
+    double traceTime = 0.0;
     juce::Rectangle<float> cubeArea;
     float cubeSize = 100.0f, cubeFrom[3] {};
     std::array<std::array<float, 3>, 28> cubeTrail {};
@@ -1938,8 +1942,53 @@ private:
                     stepsLen = len;
                 }
             }
-            else if (type == dsp::ModType::envelope || type == dsp::ModType::follower)
-                envelope (M (snd::mAttack), M (snd::mDecay), type == dsp::ModType::envelope ? M (snd::mSustain) : 1.0f, M (snd::mRelease), colour);
+            else if (type == dsp::ModType::follower)
+            {
+                // FOLLOW: what it sends over the last three seconds (newest on the right), and what it listens to
+                const bool bi = M (snd::mPolarity) < 0.5f;
+                const float amt = M (snd::mAmt);
+                const float now = amt > 1.0e-3f ? p.player.modValue[(size_t) mi].load() / amt : 0.0f;
+                const double t = juce::Time::getMillisecondCounterHiRes() * 0.001;
+                if (traceMod != mi)
+                {
+                    trace.fill (bi ? -1.0f : 0.0f);
+                    traceMod = mi;
+                }
+                while (t - traceTime > 0.025)
+                {
+                    traceTime = t - traceTime > 1.0 ? t : traceTime + 0.025;
+                    trace[(size_t) traceAt] = now;
+                    traceAt = (traceAt + 1) % (int) trace.size();
+                }
+                auto lane = r.reduced (0.0f, 4.0f);
+                auto yOf = [lane, bi] (float v)
+                {
+                    const float u = bi ? 0.5f * (juce::jlimit (-1.0f, 1.0f, v) + 1.0f) : juce::jlimit (0.0f, 1.0f, v);
+                    return lane.getBottom() - u * lane.getHeight();
+                };
+                g.setColour (col::screenGrid);
+                g.drawHorizontalLine ((int) yOf (bi ? 0.0f : 0.5f), lane.getX(), lane.getRight());
+                juce::Path path;
+                const int count = (int) trace.size();
+                for (int i = 0; i < count; ++i)
+                {
+                    const float x = lane.getX() + lane.getWidth() * (float) i / (float) (count - 1);
+                    const float y = yOf (trace[(size_t) ((traceAt + i) % count)]);
+                    if (i == 0) path.startNewSubPath (x, y); else path.lineTo (x, y);
+                }
+                auto area = path;
+                area.lineTo (lane.getRight(), yOf (bi ? -1.0f : 0.0f));
+                area.lineTo (lane.getX(), yOf (bi ? -1.0f : 0.0f));
+                area.closeSubPath();
+                fill (area, colour.withAlpha (0.16f));
+                stroke (path, colour, 2.0f);
+                const auto sources = snd::choicesOf (snd::modParam (mi, snd::mSource));
+                const int src = juce::jlimit (0, (int) sources.size() - 1, (int) M (snd::mSource));
+                text (g, juce::String::fromUTF8 (sources[(size_t) src].c_str()).toLowerCase() + (bi ? "  \xc2\xb1"_fr : "  +"),
+                      lane.removeFromTop (16.0f), mono (11.0f, 500), col::screenDim, juce::Justification::topLeft);
+            }
+            else if (type == dsp::ModType::envelope)
+                envelope (M (snd::mAttack), M (snd::mDecay), M (snd::mSustain), M (snd::mRelease), colour);
             else
             {
                 const int shape = (int) M (snd::mShape);
@@ -2804,7 +2853,8 @@ void Machine::buildPages()
         pg.banks.push_back ({ "pitch", { S (snd::piA), S (snd::piB), S (snd::piDetune), sep (S (snd::piDelay)), S (snd::piLevelB), S (snd::piFeedback), sep (S (snd::piMix)) } });
         pg.banks.push_back ({ "chorus", { S (snd::chMode), sep (S (snd::chRate)), S (snd::chDepth), S (snd::chFeedback), S (snd::chTone), sep (S (snd::chMix)), sep (S (snd::piCrystals)) } });
         pg.banks.push_back ({ "crush", { S (snd::crBits), S (snd::crRate), S (snd::crJitter), sep (S (snd::crTone)), sep (S (snd::crMix)) } });
-        pg.banks.push_back ({ "espace", { S (snd::rvSize), S (snd::rvDecay), S (snd::rvTone), sep (S (snd::rvShimmer)), S (snd::rvMod), sep (S (snd::rvMix)) } });
+        pg.banks.push_back ({ "espace", { S (snd::rvSize), S (snd::rvDecay), S (snd::rvTone), sep (S (snd::rvShimmer)), S (snd::rvMod), sep (S (snd::rvDry)),
+                                          S (snd::rvMix) } });
         return pg;
     };
     // ORBITE: the carrier and how it's wired, then each satellite
@@ -2851,7 +2901,20 @@ void Machine::buildPages()
             auto periodic = is ({ ModType::wave, ModType::steps, ModType::random });
             auto M = [mi] (snd::ModSetting w) { return snd::modParam (mi, w); };
             Bank b { "m" + juce::String (mi + 1), {} };
-            b.ctls.push_back (S (M (snd::mType)));
+            // (a new type starts on its own polarity: around the setting for the cycles, up from it for ENV and FOLLOW)
+            // (only when the type changes: `was` is the one last drawn)
+            auto typeCtl = S (M (snd::mType));
+            auto was = std::make_shared<int> ((int) type());
+            typeCtl.getNorm = [get = typeCtl.getNorm, was, type] { *was = (int) type(); return get(); };
+            typeCtl.changed = [this, mi, was, type]
+            {
+                const auto t = type();
+                if ((int) t == *was)
+                    return;
+                *was = (int) t;
+                setSound (proc, snd::modParam (mi, snd::mPolarity), t == ModType::envelope || t == ModType::follower ? 1.0f : 0.0f);
+            };
+            b.ctls.push_back (typeCtl);
             b.ctls.push_back (S (M (snd::mShape), nullptr, is ({ ModType::wave })));
             b.ctls.push_back (S (M (snd::mLen), nullptr, is ({ ModType::steps, ModType::random })));
             b.ctls.push_back (S (M (snd::mVari), nullptr, is ({ ModType::random })));
@@ -2859,7 +2922,7 @@ void Machine::buildPages()
             b.ctls.push_back (S (M (snd::mDiv), nullptr, [this, periodic, mi] { return periodic() && P (proc, snd::modParam (mi, snd::mSync)) < 0.5f; }));
             b.ctls.push_back (S (M (snd::mHz), nullptr, [this, periodic, mi] { return periodic() && P (proc, snd::modParam (mi, snd::mSync)) > 0.5f; }));
             b.ctls.push_back (S (M (snd::mSmooth), nullptr, is ({ ModType::wave, ModType::steps })));
-            b.ctls.push_back (S (M (snd::mPolarity), nullptr, periodic));
+            b.ctls.push_back (S (M (snd::mPolarity)));
             b.ctls.push_back (S (M (snd::mRetrig), nullptr, is ({ ModType::wave, ModType::steps })));
             b.ctls.push_back (S (M (snd::mSource), nullptr, is ({ ModType::follower })));
             b.ctls.push_back (S (M (snd::mGain), nullptr, is ({ ModType::follower })));
@@ -3217,8 +3280,16 @@ void Machine::buildPages()
         tip (*v, snd::fCube, "Le cube : VOWELS (les voyelles), SWEEP, PHASER, COMB, BELLS, TILT, DUO, HOLLOW, BODY, SPREAD. Leurs axes sont écrits à l'écran."_fr);
         tip (*v, snd::fY, "Le deuxième axe du cube (son nom est à l'écran), à moduler."_fr);
         tip (*v, snd::fZ, "Le troisième axe du cube (son nom est à l'écran), à moduler."_fr);
+        tip (*v, snd::rvDry, "Le son sec, à côté de la réverbe : à 100 %, la réverbe s'ajoute sans rien lui prendre."_fr);
+        tip (*v, snd::rvMix, "Le niveau de la réverbe, ajoutée au son sec."_fr);
         tip (*v, snd::fSmooth, "Le temps que met le point pour rejoindre X, Y et Z quand ils sautent (0 à 200 ms) : des transitions lisses, ou nerveuses."_fr);
         tip (*v, snd::fTrim, "Le niveau à la sortie du cube (-24 à +12 dB)."_fr);
+        for (int mi = 0; mi < snd::numMods; ++mi)
+        {
+            tip (*v, snd::modParam (mi, snd::mPolarity), "± : la modulation s'étend des deux côtés du réglage. + : elle part du réglage et va d'un seul côté, vers le haut si la quantité de la route est positive, vers le bas si elle est négative (arme le mod, puis tourne le potard vers la gauche)."_fr);
+            tip (*v, snd::modParam (mi, snd::mSource), "Ce que le suiveur écoute. INPUT : l'entrée audio. SELF : l'instrument lui-même (ses voix, ou ce que jouent DRUM et RADIO). SIDECHAIN : le sidechain du DAW. DRUM 1 à 8 : une piste de la boîte à rythmes, seule."_fr);
+            tip (*v, snd::modParam (mi, snd::mGain), "Le gain avant le suiveur : monte-le pour qu'un son discret aille jusqu'au bout de la course."_fr);
+        }
         for (auto& pg : *v)
             for (auto& b : pg.banks)
                 for (auto& c : b.ctls)

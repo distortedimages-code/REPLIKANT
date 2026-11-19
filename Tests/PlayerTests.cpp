@@ -1590,6 +1590,69 @@ static void testSub()
     }
 }
 
+// FOLLOW (0.4.5): each source heard (INPUT, SELF, SIDECHAIN, a DRUM track alone), one way up or down, or both ways
+static void testFollower()
+{
+    // a burst on DRUM 3 (0.1 .. 0.3 s), nothing elsewhere: only a follower listening to it moves
+    const int total = (int) (0.6 * sr), block = 256;
+    std::vector<float> burst ((size_t) total, 0.0f);
+    for (int i = (int) (0.1 * sr); i < (int) (0.3 * sr); ++i)
+        burst[(size_t) i] = 0.5f * (float) std::sin (2.0 * pi * 200.0 * i / sr);
+    auto run = [&] (int source, float polarity, float amount, float& atPeak, float& atRest)
+    {
+        Player p;
+        plain (p);
+        p.set (snd::m1Type, 4.0f);              // FOLLOW
+        p.set (snd::m1Source, (float) source);
+        p.set (snd::m1Polarity, polarity);
+        p.set (snd::m1Gain, 6.0f);
+        p.set (snd::m1Attack, 2.0f);
+        p.set (snd::m1Release, 40.0f);
+        p.set (snd::cutoff, 1000.0f);
+        p.setRoute (0, snd::cutoff, amount);
+        juce::AudioBuffer<float> buf (2, block);
+        atPeak = atRest = -1.0f;
+        for (int pos = 0; pos < total; pos += block)
+        {
+            buf.setSize (2, std::min (block, total - pos), false, false, true);
+            buf.clear();
+            p.setFollowSignal (5, burst.data() + pos);           // DRUM 3
+            p.render (buf, {}, {}, nullptr, 0, false);
+            if (pos + block >= (int) (0.25 * sr) && atPeak < 0.0f)
+                atPeak = p.modulatedNorm (snd::cutoff);
+        }
+        atRest = p.modulatedNorm (snd::cutoff);
+    };
+    const float base = snd::toNorm (snd::cutoff, 1000.0f);
+    float peak = 0.0f, rest = 0.0f;
+    run (5, 1.0f, 0.4f, peak, rest);
+    CHECK (peak > base + 0.3f && std::abs (rest - base) < 0.02f, "DRUM 3 heard, one way up: %.3f at the burst, %.3f after (%.3f)", peak, rest, base);
+    run (5, 1.0f, -0.4f, peak, rest);
+    CHECK (peak < base - 0.3f && std::abs (rest - base) < 0.02f, "one way down: %.3f at the burst, %.3f after (%.3f)", peak, rest, base);
+    run (5, 0.0f, 0.3f, peak, rest);
+    CHECK (peak > base + 0.25f && rest < base - 0.25f, "both ways: %.3f at the burst, %.3f in silence (%.3f)", peak, rest, base);
+    run (4, 1.0f, 0.4f, peak, rest);
+    CHECK (std::abs (peak - base) < 0.02f, "DRUM 2 does not hear DRUM 3: %.3f (%.3f)", peak, base);
+
+    // SELF: the player's own voices, no host signal needed
+    {
+        auto tone = instrumentOf (sine (440.0, 1.0, 0.5f), 24000, 24000 + 4800);
+        Player p;
+        p.set (snd::engine, (float) snd::sampler);
+        plain (p);
+        p.setInstrument (tone.get());
+        p.set (snd::m1Type, 4.0f);
+        p.set (snd::m1Source, 1.0f);
+        p.set (snd::m1Polarity, 1.0f);
+        p.set (snd::m1Gain, 6.0f);
+        p.set (snd::cutoff, 1000.0f);
+        p.setRoute (0, snd::cutoff, 0.4f);
+        play (p, 0.3, { { 0.0, 69, 127 } });
+        const float n = p.modulatedNorm (snd::cutoff);
+        CHECK (n > base + 0.2f, "SELF follows the voices: %.3f (%.3f)", n, base);
+    }
+}
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI gui;
@@ -1634,6 +1697,7 @@ int main()
     testScenes();
     testVoices();
     testFilterModsFx();
+    testFollower();
     testSmoothing();
     testSynth();
     testStability();

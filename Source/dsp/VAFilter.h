@@ -64,6 +64,11 @@ namespace dsp
         float wasp (float x, float hz);
         float polivoks (float x, float hz);
         float cubeTick (float in, float x);
+        float tickNow (float x, float oct);
+        void apply (const FilterSettings&);
+        FilterSettings pending;
+        bool hasPending = false, playingOn = false;
+        float duck = 1.0f;
 
         double sr = 96000.0, invSr = 1.0 / 96000.0;
         FilterSettings target;

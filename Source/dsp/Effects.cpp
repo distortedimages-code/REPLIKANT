@@ -362,7 +362,7 @@ void Spectral::process (float* L, float* R, int n)
     const float fb = std::clamp (target.feedback, 0.0f, 1.0f);
     const float fbRel = (float) std::exp (-1.0 / (0.3 * sr));
     const float tailK = (float) std::exp (-1.0 / (0.002 * sr));
-    const int wave = std::clamp (target.wave, 0, 6);
+    const int waveWanted = std::clamp (target.wave, 0, 6);
     // the slices
     const int clock = std::clamp (target.clock, 0, 3);
     const double freeHop = sr * (0.006 + 0.5 * std::pow ((double) std::clamp (target.slice, 0.0f, 1.0f), 2.0)) * (double) (1 << std::clamp (target.mult, 0, 5));
@@ -462,6 +462,18 @@ void Spectral::process (float* L, float* R, int n)
                 o.lhz += d;
                 o.mul = std::exp2 (d * 0.125f);
             }
+        if (waveWanted != waveNow)
+        {
+            waveDuck -= (float) (1.0 / (0.003 * sr));
+            if (waveDuck <= 0.0f)
+            {
+                waveDuck = 0.0f;
+                waveNow = waveWanted;
+            }
+        }
+        else if (waveDuck < 1.0f)
+            waveDuck = std::min (1.0f, waveDuck + (float) (1.0 / (0.005 * sr)));
+        const int wave = waveNow;
         float outL = 0.0f, outR = 0.0f;
         int idx = 0;
         for (auto& o : osc)
@@ -505,6 +517,8 @@ void Spectral::process (float* L, float* R, int n)
             outR += s * pan * 1.4f;
             ++idx;
         }
+        outL *= waveDuck;
+        outR *= waveDuck;
         lastOut = 0.5f * (outL + outR);
         if (! std::isfinite (lastOut))
         {
@@ -515,9 +529,18 @@ void Spectral::process (float* L, float* R, int n)
             std::fill (smooth.begin(), smooth.end(), 0.0f);
             lastOut = fbEnv = outL = outR = 0.0f;
         }
+        // (0.4.5) the resynthesis brought to the sound's level (followers over half a second; held through silence,
+        // so a frozen spectrum or a drone keeps its level), within +-12 dB
+        {
+            const float pk = (float) (1.0 / (0.5 * sr));
+            dryPow += pk * (mono * mono - dryPow);
+            wetPow += pk * (0.25f * (outL + outR) * (outL + outR) - wetPow);
+            if (dryPow > 1.0e-6f && wetPow > 1.0e-9f)
+                wetGain += 0.0004f * (std::clamp (std::sqrt (dryPow / wetPow), 0.25f, 4.0f) - wetGain);
+        }
         // MIX: at constant power
         const float th = std::clamp (mix, 0.0f, 1.0f) * 1.5707963f;
-        const float dg = std::cos (th), wg = std::sin (th);
+        const float dg = std::cos (th), wg = std::sin (th) * wetGain;
         L[i] = dl * dg + outL * wg;
         if (R != nullptr)
             R[i] = dr * dg + outR * wg;
@@ -633,9 +656,12 @@ void PitchShift::chunk (float* L, float* R, int n)
     for (int i = 0; i < n; ++i)
     {
         mix += (target.mix - mix) * k;
-        L[i] += mix * (outL[i] - L[i]);
+        // (0.4.5) at constant power, the shifted voices brought up to the dry's level: the sound kept as loud
+        const float th = std::clamp (mix, 0.0f, 1.0f) * 1.5707963f;
+        const float dg = std::cos (th), wg = std::sin (th) * 1.65f;
+        L[i] = L[i] * dg + outL[i] * wg;
         if (R != nullptr)
-            R[i] += mix * (outR[i] - R[i]);
+            R[i] = R[i] * dg + outR[i] * wg;
     }
 }
 
@@ -687,10 +713,22 @@ void Chorus::process (float* L, float* R, int n)
         depth += (target.depth - depth) * k;
         ph += inc;
         if (ph >= 1.0) ph -= 1.0;
+        if (target.mode != modeNow)
+        {
+            duck -= (float) (1.0 / (0.003 * sr));
+            if (duck <= 0.0f)
+            {
+                duck = 0.0f;
+                modeNow = target.mode;
+                fbState[0] = fbState[1] = 0.0f;
+            }
+        }
+        else if (duck < 1.0f)
+            duck = std::min (1.0f, duck + (float) (1.0 / (0.005 * sr)));
         const float dl = L[i], dr = R != nullptr ? R[i] : L[i];
         float wl = 0.0f, wr = 0.0f;
         w = (w + 1) & mask;
-        if (target.mode == 1)
+        if (modeNow == 1)
         {
             // flanger: 0.3 .. 6 ms swept, its feedback
             const float fb = std::clamp (target.feedback, -0.95f, 0.95f);
@@ -710,7 +748,7 @@ void Chorus::process (float* L, float* R, int n)
         {
             buf[0][(size_t) w] = dl;
             buf[1][(size_t) w] = dr;
-            if (target.mode == 2)
+            if (modeNow == 2)
             {
                 // vibrato: one swaying delay, all wet
                 const float m = (float) std::sin (kTwoPi * ph);
@@ -736,10 +774,25 @@ void Chorus::process (float* L, float* R, int n)
         lp[1] += toneK * (wr - lp[1]);
         wl = lp[0];
         wr = lp[1];
-        const float m = target.mode == 2 ? std::max (mix, 0.0f) : mix;
-        L[i] = dl + m * (wl - dl);
+        const float m = modeNow == 2 ? std::max (mix, 0.0f) : mix;
+        float ol, orr;
+        if (modeNow == 2)
+        {
+            ol = dl + m * (wl - dl);
+            orr = dr + m * (wr - dr);
+        }
+        else
+        {
+            // (0.4.5) at constant power: the voices beside the dry, not instead of it
+            const float th = std::clamp (m, 0.0f, 1.0f) * 1.5707963f;
+            const float dg = std::cos (th), wg = std::sin (th);
+            ol = dl * dg + wl * wg;
+            orr = dr * dg + wr * wg;
+        }
+        // (through a mode change: the dry alone, for a few ms)
+        L[i] = dl + duck * (ol - dl);
         if (R != nullptr)
-            R[i] = dr + m * (wr - dr);
+            R[i] = dr + duck * (orr - dr);
     }
 }
 

@@ -28,7 +28,7 @@ namespace dsp
         int division = 6;           // index in divisions() (1/16 by default)
         float hz = 1.0f;            // free rate (a cycle, a step, a draw)
         float smooth = 0.0f;        // 0..1
-        bool unipolar = false;      // 0..1 instead of -1..1
+        bool unipolar = false;      // 0..1 instead of -1..1 (ENV and FOLLOW too: ± sets them around the setting)
         bool retrigger = false;     // starts again at each note
         int length = 16;            // PAS: steps (1..16); HASARD: draws (1..32)
         std::array<float, 16> stepValues {};   // -1..1

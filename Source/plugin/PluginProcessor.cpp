@@ -154,7 +154,9 @@ void ReplikantProcessor::prepareToPlay (double sr, int block)
     playMidi.ensureSize (4096);
     synthMidi.ensureSize (2048);
     radio.prepare (sr, block);
+    drum.prepare (sr, juce::jmax (block, 4096) * 2);
     radioBuffer.setSize (2, juce::jmax (block, 4096) * 2, false, true, false);
+    followCopy.setSize (4, juce::jmax (block, 4096) * 2, false, true, false);
     outMidi.ensureSize (4096);
 
    #if JucePlugin_Build_Standalone
@@ -279,6 +281,32 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         }
     }
 
+    // FOLLOW's INPUT and SIDECHAIN, kept as well (the output is written over the first, the second cleared)
+    const bool followable = n <= followCopy.getNumSamples();
+    const float* followIn[2] = { nullptr, nullptr };
+    const float* followSc[2] = { nullptr, nullptr };
+    if (followable)
+    {
+        const int mainIn = juce::jmin (2, input.getNumChannels());
+        if (mainIn > 0 && ! echoed)
+            for (int c = 0; c < 2; ++c)
+            {
+                followCopy.copyFrom (c, 0, input, juce::jmin (c, mainIn - 1), 0, n);
+                followIn[c] = followCopy.getReadPointer (c);
+            }
+        if (getBusCount (true) > 1 && getBus (true, 1)->isEnabled())
+        {
+            auto sc = getBusBuffer (buffer, true, 1);
+            const int scIn = juce::jmin (2, sc.getNumChannels());
+            if (scIn > 0)
+                for (int c = 0; c < 2; ++c)
+                {
+                    followCopy.copyFrom (2 + c, 0, sc, juce::jmin (c, scIn - 1), 0, n);
+                    followSc[c] = followCopy.getReadPointer (2 + c);
+                }
+        }
+    }
+
     // what is heard: the synth (monitor) and the instrument
     auto out = getBusBuffer (buffer, false, 0);
     const bool direct = mon == 1;
@@ -392,10 +420,19 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
                 rr[i] += kept[juce::jmin (1, numIn - 1)][i];
             }
         const float* heard[2] = { rl, rr };
+        player.setFollowSignal (0, followIn[0], followIn[1]);
+        player.setFollowSignal (1, rl, rr);
+        player.setFollowSignal (2, followSc[0], followSc[1]);
+        for (int t = 0; t < drum::numTracks; ++t)
+            player.setFollowSignal (3 + t, drumOn ? drum.trackSignal (t) : nullptr);
         player.render (out, noMidi, transport, heard, 2, true);
     }
     else if (! sampling)
+    {
+        player.setFollowSignal (0, followIn[0], followIn[1]);
+        player.setFollowSignal (2, followSc[0], followSc[1]);
         player.render (out, playMidi, transport, kept[0] != nullptr ? kept : nullptr, numIn, mon == 2);
+    }
 
     rememberOutput (out, n);
 
@@ -1230,6 +1267,7 @@ juce::var ReplikantProcessor::modsToVar() const
             steps.add ((double) st.load());
         o->setProperty ("routes", routes);
         o->setProperty ("steps", steps);
+        o->setProperty ("polarity", 2);          // (ENV and FOLLOW obey their polarity since 0.4.5)
         o->setProperty ("seed", (int) player.seeds[(size_t) m].load());
         mods.add (juce::var (o));
     }
@@ -1243,6 +1281,14 @@ void ReplikantProcessor::modsFromVar (const juce::var& v)
     for (int m = 0; m < snd::numMods && m < v.size(); ++m)
     {
         const auto& o = v[m];
+        // (before 0.4.5, ENV and FOLLOW went one way whatever their polarity said: kept so)
+        if (! o.hasProperty ("polarity"))
+        {
+            const int type = (int) player.get (snd::modParam (m, snd::mType));
+            if (type == (int) dsp::ModType::envelope || type == (int) dsp::ModType::follower)
+                if (auto* pol = params.getParameter (snd::def (snd::modParam (m, snd::mPolarity)).id))
+                    pol->setValueNotifyingHost (pol->convertTo0to1 (1.0f));
+        }
         player.clearRoutes (m);
         if (auto* rs = o["routes"].getArray())
             for (auto& r : *rs)

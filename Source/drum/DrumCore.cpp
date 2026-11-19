@@ -242,9 +242,11 @@ void Engine::allocate()
     armed.store (true, std::memory_order_release);
 }
 
-void Engine::prepare (double sampleRate, int)
+void Engine::prepare (double sampleRate, int maxBlock)
 {
     sr = sampleRate > 1000.0 ? sampleRate : 48000.0;
+    for (auto& t : trackOut)
+        t.assign ((size_t) std::max (maxBlock, 512), 0.0f);
     for (auto& v : voices)
         v.active = false;
     for (auto& r : run)
@@ -573,7 +575,7 @@ void Engine::hit (int track, int step, float velMul, bool)
     glow[(size_t) track].store (1.0f, std::memory_order_relaxed);
 }
 
-void Engine::renderVoice (Voice& v, float* L, float* R, int n)
+void Engine::renderVoice (Voice& v, float* L, float* R, float* F, int n)
 {
     const float fsr = (float) sr, isr = 1.0f / fsr;
     const int src = idx (v.p[pSource], 3);
@@ -705,6 +707,8 @@ void Engine::renderVoice (Voice& v, float* L, float* R, int n)
         const float g = level * v.fade;
         L[i] += x * g * gl;
         R[i] += x * g * gr;
+        if (F != nullptr)
+            F[i] += x * g;
         v.t += isr;
         if (v.fadeStep != 0.0f)
         {
@@ -736,8 +740,12 @@ void Engine::render (float* L, float* R, int n, const Clock& c, float swing, con
 {
     std::fill (L, L + n, 0.0f);
     std::fill (R, R + n, 0.0f);
+    trackFrames = n > 0 && (size_t) n <= trackOut[0].size() ? n : 0;
+    for (auto& t : trackOut)
+        std::fill (t.begin(), t.begin() + trackFrames, 0.0f);
     if (n <= 0 || ! allocated())
         return;
+    auto F = [this] (const Voice& v, int pos) { return trackFrames > 0 ? trackOut[(size_t) v.track].data() + pos : nullptr; };
     for (int t = 0; t < numTracks; ++t)
     {
         const Sound* s = nextSound[(size_t) t].load (std::memory_order_acquire);
@@ -767,7 +775,7 @@ void Engine::render (float* L, float* R, int n, const Clock& c, float swing, con
         if (at > pos)
             for (auto& v : voices)
                 if (v.active)
-                    renderVoice (v, L + pos, R + pos, at - pos);
+                    renderVoice (v, L + pos, R + pos, F (v, pos), at - pos);
         pos = at;
         if (h.velAbs >= 0.0f)
         {
@@ -781,6 +789,6 @@ void Engine::render (float* L, float* R, int n, const Clock& c, float swing, con
     if (pos < n)
         for (auto& v : voices)
             if (v.active)
-                renderVoice (v, L + pos, R + pos, n - pos);
+                renderVoice (v, L + pos, R + pos, F (v, pos), n - pos);
 }
 }

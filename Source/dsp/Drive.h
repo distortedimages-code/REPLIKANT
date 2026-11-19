@@ -72,6 +72,8 @@ namespace dsp
         double sr = 48000.0;
         DriveSettings target;
         float drive = 0.0f, tone = 0.5f, mix = 1.0f;
+        DriveModel playing = DriveModel::off;          // the model heard (a change ducks through silence)
+        float duck = 1.0f, levIn = 0.0f, levOut = 0.0f, level = 1.0f;
         Channel chans[2];
         PeakEq bump;
         double wowPhase = 0.0, flutterPhase = 0.0;

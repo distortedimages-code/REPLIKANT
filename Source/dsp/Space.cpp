@@ -188,9 +188,10 @@ void Space::process (float* L, float* R, int n)
         shim.write (shLp);
         const float og = kOut * std::sqrt (scale * (1.0f / 0.379f));
         const float wl = l * og, wr = r * og;
-        L[i] = dl + mix * (wl - dl);
+        dryNow += (std::clamp (target.dry, 0.0f, 1.0f) - dryNow) * k;
+        L[i] = dl * dryNow + wl * mix * 2.6f;
         if (R != nullptr)
-            R[i] = dr + mix * (wr - dr);
+            R[i] = dr * dryNow + wr * mix * 2.6f;
     }
     for (int l = 0; l < kLines; ++l)
         lp[l] = flush (lp[l]), hp[l] = flush (hp[l]), ay[l] = flush (ay[l]);

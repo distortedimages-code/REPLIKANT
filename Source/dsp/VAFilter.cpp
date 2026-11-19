@@ -161,6 +161,7 @@ void VAFilter::reset()
         k35a[i] = k35b[i] = 0.0f;
     du1 = dcx = dcy = y1 = 0.0f;
     dstale = true;
+    playingOn = false;
     for (auto& c : cs)
         c.s1 = c.s2 = 0.0f;
     madeCube = -1;
@@ -169,6 +170,29 @@ void VAFilter::reset()
 }
 
 void VAFilter::set (const FilterSettings& s)
+{
+    // (0.4.5) a jump while it plays (another model, type or cube): ducked through silence, 1 ms down, 3 ms up,
+    // instead of a click; the continuous settings keep moving meanwhile
+    const bool jump = s.model != target.model || s.type != target.type || (s.model == FilterModel::cube && s.cube != target.cube);
+    if (jump && playingOn && target.model != FilterModel::off && s.model != FilterModel::off)
+    {
+        pending = s;
+        hasPending = true;
+        target.res = s.res;
+        target.drive = s.drive;
+        target.sep = s.sep;
+        target.fm = s.fm;
+        target.y = s.y;
+        target.z = s.z;
+        target.smoothMs = s.smoothMs;
+        target.trimDb = s.trimDb;
+        return;
+    }
+    hasPending = false;
+    apply (s);
+}
+
+void VAFilter::apply (const FilterSettings& s)
 {
     if (s.model != target.model)
     {
@@ -184,6 +208,28 @@ float VAFilter::tick (float x, float oct)
 {
     if (target.model == FilterModel::off)
         return x;
+    playingOn = true;
+    if (hasPending)
+    {
+        duck -= (float) (1000.0 * invSr);
+        if (duck <= 0.0f)
+        {
+            duck = 0.0f;
+            hasPending = false;
+            apply (pending);
+            if (target.model == FilterModel::off)
+                return 0.0f;
+        }
+    }
+    else if (duck < 1.0f)
+        duck = std::min (1.0f, duck + (float) (333.0 * invSr));
+    if (duck < 1.0f)
+        return duck * tickNow (x, oct);
+    return tickNow (x, oct);
+}
+
+float VAFilter::tickNow (float x, float oct)
+{
     // the knobs glide (~3 ms at any rate)
     const float k = (float) std::min (1.0, 330.0 * invSr);
     res += (target.res - res) * k;

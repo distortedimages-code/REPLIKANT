@@ -227,7 +227,7 @@ private:
     std::atomic<bool> thruAudio { false };
     juce::MidiMessageCollector toSynth, toPlayer;   // from the editor
     juce::MidiBuffer playMidi, outMidi, synthMidi;
-    juce::AudioBuffer<float> synthBuffer, inputCopy, silence;
+    juce::AudioBuffer<float> synthBuffer, inputCopy, silence, followCopy;
     bool wasSampling = false;
     // the start of what went out over the last blocks: an input that is that again is the host handing our own
     // output back (see processBlock)

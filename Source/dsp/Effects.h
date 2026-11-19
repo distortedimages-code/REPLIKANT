@@ -106,6 +106,9 @@ namespace dsp
         };
         std::array<Osc, maxVoices> osc;
         float lastOut = 0.0f, fbEnv = 0.0f;
+        int waveNow = 0;                               // (another wave: the oscillators ducked 3 ms, then up in 5)
+        float dryPow = 0.0f, wetPow = 0.0f, wetGain = 1.0f;   // (0.4.5) the resynthesis kept at the sound's level
+        float waveDuck = 1.0f;
         float onsetFast = 0.0f, onsetSlow = 0.0f;      // ATTACKS: two followers of the input
         int onsetHold = 0;
         uint32_t rng = 0x2545F491u;
@@ -180,6 +183,8 @@ namespace dsp
         double sr = 48000.0;
         ChorusSettings target;
         float mix = 0.5f, depth = 0.5f;
+        int modeNow = 0;                 // (a mode changed: the wet ducked through silence, 3 ms down, 5 up)
+        float duck = 1.0f;
         std::vector<float> buf[2];
         int mask = 0, w = 0;
         double ph = 0.0;
