@@ -201,6 +201,21 @@ int main (int argc, char** argv)
     run (90);
     shoot ("51-reglages-comp.png");
     set (snd::cpOn, 0.0f);
+    // (0.4.5) the keyboard's three looks, a chord held
+    view->showPage (0);
+    for (int n : { 48, 52, 55, 58 })
+        proc.audition (n, 100, true);
+    view->setKeyStyle (1);
+    run (20);
+    shoot ("54-clavier-pads.png");
+    view->setKeyStyle (2);
+    run (20);
+    shoot ("55-clavier-flat.png");
+    view->setKeyStyle (0);
+    run (20);
+    shoot ("56-clavier-classic.png");
+    for (int n : { 48, 52, 55, 58 })
+        proc.audition (n, 0, false);
     set (snd::wtf, 0.0f);
     set (snd::wtfMode, 0.0f);
     proc.player.setRoute (1, snd::cutoff, 0.0f);

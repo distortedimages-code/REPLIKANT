@@ -2561,6 +2561,17 @@ public:
         text (g, "oct +", octUp.withTrimmedBottom (3.0f), mono (11.0f, 500), col::ink, juce::Justification::centred);
         r.removeFromTop (6.0f);
         keys = r;
+        switch (m.keyStyle)
+        {
+            case 1:  paintPads (g, r); break;
+            case 2:  paintFlat (g, r); break;
+            default: paintClassic (g, r); break;
+        }
+    }
+
+    // CLASSIC: ivory and ebony, the keys sinking as they're played
+    void paintClassic (juce::Graphics& g, juce::Rectangle<float> r)
+    {
         const int whites = 15;
         const float ww = r.getWidth() / (float) whites;
         for (int i = 0; i < whites; ++i)
@@ -2586,9 +2597,104 @@ public:
             if (! isBlack (n))
                 continue;
             auto k = juce::Rectangle<float> (r.getX() + (float) (i + 1) * ww - ww * 0.3f, r.getY(), ww * 0.6f, r.getHeight() * 0.58f);
-            g.setColour (isDown (n) ? col::accent : col::well);
+            const bool down = isDown (n);
+            g.setColour (juce::Colours::black.withAlpha (0.35f));
+            g.fillRoundedRectangle (k.translated (1.5f, 3.0f), 5.0f);
+            g.setGradientFill (juce::ColourGradient (down ? col::accent : juce::Colour (0xff2a2a2c), k.getX(), k.getY(),
+                                                     down ? col::accentDark : juce::Colour (0xff0e0e10), k.getX(), k.getBottom(), false));
             g.fillRoundedRectangle (k, 5.0f);
+            g.setColour (juce::Colours::white.withAlpha (down ? 0.25f : 0.12f));
+            g.fillRoundedRectangle (k.reduced (3.0f, 0.0f).withHeight (k.getHeight() * 0.18f).translated (0.0f, 2.0f), 3.0f);
         }
+    }
+
+    // PADS: two rows of backlit pads, the sharps above, each lit by its note's glow when played
+    void paintPads (juce::Graphics& g, juce::Rectangle<float> r)
+    {
+        const int whites = 15;
+        const float ww = r.getWidth() / (float) whites;
+        auto upper = r.removeFromTop (r.getHeight() * 0.48f);
+        r.removeFromTop (6.0f);
+        auto pad = [&] (juce::Rectangle<float> k, int note, bool sharp)
+        {
+            const bool down = isDown (note);
+            g.setColour (juce::Colour (0xff0b0c0e));
+            g.fillRoundedRectangle (k, 7.0f);
+            auto face = k.reduced (2.0f);
+            g.setGradientFill (juce::ColourGradient (sharp ? juce::Colour (0xff2b2e33) : juce::Colour (0xff3a3e44), face.getX(), face.getY(),
+                                                     sharp ? juce::Colour (0xff1d1f23) : juce::Colour (0xff2a2d31), face.getX(), face.getBottom(), false));
+            g.fillRoundedRectangle (face, 6.0f);
+            if (down)
+            {
+                g.setColour (col::accent.withAlpha (0.35f));
+                g.fillRoundedRectangle (face.expanded (2.0f), 8.0f);
+                g.setGradientFill (juce::ColourGradient (col::accent.brighter (0.3f), face.getCentreX(), face.getCentreY(),
+                                                         col::accent.withAlpha (0.6f), face.getX(), face.getY(), true));
+                g.fillRoundedRectangle (face, 6.0f);
+            }
+            // its light: a thin bar along the top
+            g.setColour (down ? juce::Colours::white.withAlpha (0.9f) : (sharp ? juce::Colour (0xff555a62) : juce::Colour (0xff6a7078)));
+            g.fillRoundedRectangle (face.withHeight (3.0f).reduced (face.getWidth() * 0.25f, 0.0f).translated (0.0f, 5.0f), 1.5f);
+            if (! sharp && note % 12 == 0)
+                text (g, lower (rk::noteName (note)), face.removeFromBottom (18.0f), mono (10.5f, 600), down ? col::accentInk : juce::Colour (0xffb8bec6),
+                      juce::Justification::centred);
+        };
+        for (int i = 0; i < whites; ++i)
+            pad (juce::Rectangle<float> (r.getX() + (float) i * ww + 2.0f, r.getY(), ww - 4.0f, r.getHeight()), whiteNote (i), false);
+        for (int i = 0; i < whites - 1; ++i)
+        {
+            const int n = whiteNote (i) + 1;
+            if (isBlack (n))
+                pad (juce::Rectangle<float> (upper.getX() + (float) (i + 1) * ww - ww * 0.5f + 2.0f, upper.getY(), ww - 4.0f, upper.getHeight()), n, true);
+        }
+    }
+
+    // FLAT: one dark slab, the keys drawn on it in thin lines; a played key lights from below
+    void paintFlat (juce::Graphics& g, juce::Rectangle<float> r)
+    {
+        const int whites = 15;
+        const float ww = r.getWidth() / (float) whites;
+        g.setColour (juce::Colour (0xff16181b));
+        g.fillRoundedRectangle (r, 10.0f);
+        for (int i = 0; i < whites; ++i)
+        {
+            const int note = whiteNote (i);
+            auto k = juce::Rectangle<float> (r.getX() + (float) i * ww, r.getY(), ww, r.getHeight());
+            if (isDown (note))
+            {
+                g.setGradientFill (juce::ColourGradient (col::accent.withAlpha (0.0f), k.getX(), k.getY() + k.getHeight() * 0.35f,
+                                                         col::accent.withAlpha (0.85f), k.getX(), k.getBottom(), false));
+                g.fillRect (k.reduced (1.0f, 0.0f));
+                g.setColour (col::accent);
+                g.fillRect (k.getX() + 4.0f, k.getBottom() - 5.0f, k.getWidth() - 8.0f, 3.0f);
+            }
+            if (i > 0)
+            {
+                g.setColour (juce::Colour (0xff3a3f45));
+                g.fillRect (k.getX() - 0.5f, r.getY() + r.getHeight() * 0.58f, 1.0f, r.getHeight() * 0.42f - 8.0f);
+            }
+            if (note % 12 == 0)
+            {
+                g.setColour (juce::Colour (0xff8a9099));
+                g.fillEllipse (k.getCentreX() - 2.0f, r.getBottom() - 26.0f, 4.0f, 4.0f);
+                text (g, lower (rk::noteName (note)), k.withY (r.getBottom() - 20.0f).withHeight (16.0f), mono (10.0f, 500), juce::Colour (0xff8a9099),
+                      juce::Justification::centred);
+            }
+        }
+        for (int i = 0; i < whites - 1; ++i)
+        {
+            const int n = whiteNote (i) + 1;
+            if (! isBlack (n))
+                continue;
+            auto k = juce::Rectangle<float> (r.getX() + (float) (i + 1) * ww - ww * 0.32f, r.getY() + 6.0f, ww * 0.64f, r.getHeight() * 0.56f - 6.0f);
+            const bool down = isDown (n);
+            g.setColour (down ? col::accent : juce::Colour (0xff2c3035));
+            g.fillRoundedRectangle (k, 4.0f);
+            g.setColour (down ? juce::Colours::white.withAlpha (0.8f) : juce::Colour (0xff4a5058));
+            g.fillRoundedRectangle (k.withY (k.getBottom() - 6.0f).withHeight (2.0f).reduced (6.0f, 0.0f), 1.0f);
+        }
+        g.setColour (juce::Colour (0xff3a3f45));
+        g.drawRoundedRectangle (r.reduced (0.5f), 10.0f, 1.0f);
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -2622,6 +2728,15 @@ private:
             return -1;
         const float ww = keys.getWidth() / 15.0f;
         const int i = juce::jlimit (0, 14, (int) ((p.x - keys.getX()) / ww));
+        if (m.keyStyle == 1 && p.y < keys.getY() + keys.getHeight() * 0.48f)
+        {
+            // PADS: the upper row, the sharp nearest (none between E and F, B and C)
+            const int j = juce::jlimit (0, 13, (int) std::floor ((p.x - keys.getX()) / ww - 0.5f));
+            const int n = whiteNote (j) + 1;
+            return isBlack (n) ? n : -1;
+        }
+        if (m.keyStyle == 1)
+            return whiteNote (i);
         if (p.y < keys.getY() + keys.getHeight() * 0.58f)
         {
             const float within = (p.x - keys.getX()) - (float) i * ww;
@@ -3254,6 +3369,7 @@ Machine::Machine (ReplikantProcessor& p) : proc (p), updatePanel (p.updater)
     for (int m = 0; m < numModes; ++m)
         page[m] = juce::jlimit (0, juce::jmax (0, (int) pages[m].size() - 1), proc.settingsFile().getIntValue ("page" + juce::String (m), 0));
     captureKind = juce::jlimit ((int) notesKind, (int) resampleKind, proc.settingsFile().getIntValue ("captureKind", notesKind));
+    keyStyle = juce::jlimit (0, 2, proc.settingsFile().getIntValue ("keyStyle", 0));
     shownResample = proc.lastResample;
     const int engine = (int) P (proc, snd::engine);
     mode = juce::jlimit (0, numModes - 1, engine);
@@ -3493,6 +3609,11 @@ void Machine::buildPages()
         monitor.tip = "L'audio qui arrive (le synthé, ou la piste où REPLIK8 est en insert). OFF : coupé. DIRECT : tel quel, pendant la capture (page CAPTURE ouverte). THRU FX : passé dans le filtre et les effets (multi-effet, avec les mods)."_fr;
         b.ctls.push_back (monitor);
         b.ctls.push_back (choiceCtl ("Keys to", { "replik8", "synth" }, [&o] { return o.thru ? 1 : 0; }, [this, &o] (int v) { o.thru = v == 1; proc.settingsChanged(); }));
+        auto keyLook = choiceCtl ("Keyboard", { "classic", "pads", "flat" }, [this] { return keyStyle; },
+                                  [this] (int v) { setKeyStyle (v); });
+        keyLook.tip = "Le clavier du bas : CLASSIC (ivoire et ébène), PADS (deux rangées de pads rétroéclairés), FLAT (une dalle sombre, les touches s'allument par en dessous)."_fr;
+        keyLook.sepBefore = true;
+        b.ctls.push_back (keyLook);
         pg.banks.push_back (std::move (b));
         // COMP: at the end of the chain, before the volume
         pg.banks.push_back ({ "comp", { S (snd::cpOn, "On"), sep (S (snd::cpIn)), S (snd::cpAmount), sep (S (snd::cpAttack)), S (snd::cpRelease),
@@ -4278,6 +4399,13 @@ void Machine::layoutEncoders()
         focus = shown[0];
     for (auto& e : encoders)
         e->focused = e->getCtl() != nullptr && e->getCtl() == focus;
+}
+
+void Machine::setKeyStyle (int style)
+{
+    keyStyle = juce::jlimit (0, 2, style);
+    proc.settingsFile().setValue ("keyStyle", keyStyle);
+    keyboard->repaint();
 }
 
 void Machine::touch (const Ctl& c)

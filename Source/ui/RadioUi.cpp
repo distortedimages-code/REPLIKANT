@@ -262,16 +262,81 @@ void RadioStrip::layout()
     row.removeFromLeft (8.0f);
     grabKey = row;
     right.removeFromTop (8.0f);
-    // (to the SAMPLER on the left, to the DRUM track shown on the right)
-    const float sw = (right.getWidth() - 8.0f) * 0.54f;
+    // the routes: what is sent (a chip), then where: the SAMPLER, the DRUM track shown
     auto takeRow = right.removeFromTop (h);
-    takeKey = takeRow.removeFromLeft (sw);
-    takeRow.removeFromLeft (8.0f);
-    takeDrumKey = takeRow;
     right.removeFromTop (8.0f);
-    padKey = right.removeFromLeft (sw);
-    right.removeFromLeft (8.0f);
-    padDrumKey = right;
+    auto padRow = right;
+    for (auto* rowp : { &takeRow, &padRow })
+    {
+        auto& rw = *rowp;
+        auto chip = rw.removeFromLeft (70.0f);
+        rw.removeFromLeft (14.0f);
+        const float bw = (rw.getWidth() - 6.0f) * 0.5f;
+        auto a = rw.removeFromLeft (bw);
+        rw.removeFromLeft (6.0f);
+        if (rowp == &takeRow) { takeChip = chip; takeKey = a; takeDrumKey = rw; }
+        else                  { padChip = chip; padKey = a; padDrumKey = rw; }
+    }
+}
+
+// GRAB's picture: the time just gone, caught (an arrow running back round a clock)
+static void grabPicto (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour c)
+{
+    const auto b = r.withSizeKeepingCentre (juce::jmin (r.getWidth(), r.getHeight()), juce::jmin (r.getWidth(), r.getHeight())).reduced (1.0f);
+    const auto ctr = b.getCentre();
+    const float rad = b.getWidth() * 0.42f;
+    juce::Path arc;
+    arc.addCentredArc (ctr.x, ctr.y, rad, rad, 0.0f, 0.35f, juce::MathConstants<float>::twoPi - 0.15f, true);
+    g.setColour (c);
+    g.strokePath (arc, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    // its head, at the start (going back)
+    const float a0 = 0.35f;
+    const juce::Point<float> tip (ctr.x + std::sin (a0) * rad, ctr.y - std::cos (a0) * rad);
+    juce::Path head;
+    head.addTriangle (tip.x - 3.5f, tip.y - 2.5f, tip.x + 2.0f, tip.y - 4.0f, tip.x + 0.5f, tip.y + 2.5f);
+    g.fillPath (head);
+    // the hands: what was just played
+    g.drawLine (ctr.x, ctr.y, ctr.x, ctr.y - rad * 0.55f, 1.4f);
+    g.drawLine (ctr.x, ctr.y, ctr.x - rad * 0.45f, ctr.y + rad * 0.2f, 1.4f);
+}
+
+// a route's key: its picture, its name; the DRUM's with the track's number on a badge
+static void routeKey (juce::Graphics& g, juce::Rectangle<float> k, bool ok, bool accent, Picto icon, const juce::String& name, const juce::String& badge)
+{
+    key (g, k, ! ok ? KeyState::off : (accent ? KeyState::accent : KeyState::normal), false, 9.0f);
+    const auto ink = ! ok ? col::ink3 : (accent ? col::accentInk : col::ink);
+    auto face = k.withTrimmedBottom (3.0f).reduced (8.0f, 4.0f);
+    auto iconArea = face.removeFromLeft (24.0f);
+    picto (g, icon, iconArea.withSizeKeepingCentre (20.0f, 20.0f), ink, 1.3f);
+    if (badge.isNotEmpty())
+    {
+        // the track, on a badge at the key's end
+        const auto b = juce::Rectangle<float> (18.0f, 18.0f).withCentre ({ face.getRight() - 9.0f, face.getCentreY() });
+        face.removeFromRight (22.0f);
+        g.setColour (ok ? (accent ? col::accentInk.withAlpha (0.9f) : col::red) : col::ink3);
+        g.fillEllipse (b);
+        text (g, badge, b, mono (10.0f, 700), ok && accent ? col::red : juce::Colours::white, juce::Justification::centred);
+    }
+    face.removeFromLeft (4.0f);
+    text (g, name, face, mono (11.0f, 600), ink, juce::Justification::centredLeft);
+}
+
+// what is sent: a chip with its picture, an arrow out of it
+static void routeChip (juce::Graphics& g, juce::Rectangle<float> c, bool ok, Picto icon, const juce::String& name)
+{
+    g.setColour (ok ? col::well : col::well.withAlpha (0.5f));
+    g.fillRoundedRectangle (c, 8.0f);
+    const auto ink = ok ? col::screenText : col::screenGhost;
+    auto face = c.reduced (6.0f, 4.0f);
+    picto (g, icon, face.removeFromTop (face.getHeight() * 0.55f).withSizeKeepingCentre (20.0f, 20.0f), ink, 1.3f);
+    text (g, name, face, mono (10.0f, 600), ink, juce::Justification::centred, true);
+    // the arrow to the two places
+    const float x0 = c.getRight() + 2.0f, x1 = c.getRight() + 12.0f, y = c.getCentreY();
+    g.setColour (ok ? col::deckInk2 : col::deckInk2.withAlpha (0.35f));
+    g.drawLine (x0, y, x1 - 2.0f, y, 1.4f);
+    juce::Path head;
+    head.addTriangle (x1, y, x1 - 4.5f, y - 3.5f, x1 - 4.5f, y + 3.5f);
+    g.fillPath (head);
 }
 
 void RadioStrip::paint (juce::Graphics& g)
@@ -345,47 +410,50 @@ void RadioStrip::paint (juce::Graphics& g)
             }
         }
     }
-    // ON AIR, REC, GRAB
+    // ON AIR, REC, GRAB: a picture and a word each
     const bool onAir = P (proc, snd::rdOn) > 0.5f;
     key (g, airKey, onAir ? KeyState::on : KeyState::normal, false, 10.0f);
     {
-        auto t = airKey.withTrimmedBottom (3.0f);
-        auto lamp = juce::Rectangle<float> (t.getX() + 10.0f, t.getCentreY() - 4.0f, 8.0f, 8.0f);
+        auto t = airKey.withTrimmedBottom (3.0f).reduced (8.0f, 5.0f);
+        const auto ink = onAir ? col::keyOnInk : col::ink;
+        picto (g, Picto::antenna, t.removeFromTop (t.getHeight() * 0.58f).withSizeKeepingCentre (22.0f, 22.0f), ink, 1.3f);
+        text (g, onAir ? "on air" : "off air", t, mono (10.5f, 600), ink, juce::Justification::centred);
         g.setColour (onAir ? col::sRed : col::ink3.withAlpha (0.5f));
-        g.fillEllipse (lamp);
-        text (g, onAir ? "on air" : "off air", t.withTrimmedLeft (22.0f), mono (12.0f, 600), onAir ? col::keyOnInk : col::ink, juce::Justification::centred);
+        g.fillEllipse (airKey.getRight() - 15.0f, airKey.getY() + 7.0f, 7.0f, 7.0f);
     }
     const bool rec = e.recording();
     const bool blink = std::fmod (juce::Time::getMillisecondCounterHiRes(), 700.0) < 350.0;
     g.setColour (rec ? col::well : col::red);
     g.fillRoundedRectangle (recKey, 10.0f);
     {
-        auto t = recKey.reduced (12.0f, 0.0f);
-        g.setColour (rec ? (blink ? col::sRed : col::sRed.withAlpha (0.4f)) : col::well);
+        auto t = recKey.reduced (8.0f, 5.0f);
+        auto icon = t.removeFromTop (t.getHeight() * 0.58f).withSizeKeepingCentre (14.0f, 14.0f);
+        g.setColour (rec ? (blink ? col::sRed : col::sRed.withAlpha (0.4f)) : juce::Colours::white);
         if (rec)
-            g.fillRect (t.getX(), t.getCentreY() - 6.0f, 12.0f, 12.0f);
+            g.fillRoundedRectangle (icon.reduced (1.0f), 2.0f);
         else
-            g.fillEllipse (t.getX(), t.getCentreY() - 6.0f, 12.0f, 12.0f);
-        text (g, rec ? "stop " + juce::String (e.recSeconds(), 1) + " s" : juce::String ("rec"), t.withTrimmedLeft (20.0f), mono (12.0f, 600),
-              rec ? col::screenText : juce::Colours::white);
+            g.fillEllipse (icon);
+        text (g, rec ? juce::String (e.recSeconds(), 1) + " s" : juce::String ("rec"), t, mono (10.5f, 600), rec ? col::screenText : juce::Colours::white,
+              juce::Justification::centred);
     }
     key (g, grabKey, rec ? KeyState::off : KeyState::normal, false, 10.0f);
-    text (g, "grab " + juce::String (juce::roundToInt (radio::takeSeconds ((int) P (proc, snd::rdTake)))) + " s", grabKey.withTrimmedBottom (3.0f),
-          mono (12.0f, 600), rec ? col::ink3 : col::ink, juce::Justification::centred);
-    // what goes to the SAMPLER
+    {
+        auto t = grabKey.withTrimmedBottom (3.0f).reduced (8.0f, 5.0f);
+        const auto ink = rec ? col::ink3 : col::ink;
+        grabPicto (g, t.removeFromTop (t.getHeight() * 0.58f).withSizeKeepingCentre (22.0f, 22.0f), ink);
+        text (g, "grab " + juce::String (juce::roundToInt (radio::takeSeconds ((int) P (proc, snd::rdTake)))) + " s", t, mono (10.5f, 600), ink,
+              juce::Justification::centred);
+    }
+    // the routes: the take, or the pad chosen, to the SAMPLER or to the DRUM track shown
     const bool hasTake = take != nullptr && take->audio != nullptr;
-    key (g, takeKey, hasTake ? KeyState::accent : KeyState::off, false, 10.0f);
-    text (g, "take → sampler"_fr, takeKey.withTrimmedBottom (3.0f), mono (12.0f, 600), hasTake ? col::accentInk : col::ink3, juce::Justification::centred);
     const bool padOk = hasTake && selected >= 0;
-    key (g, padKey, padOk ? KeyState::normal : KeyState::off, false, 10.0f);
-    text (g, padOk ? "pad " + juce::String (selected + 1) + " → sampler"_fr : juce::String ("pad → sampler"_fr), padKey.withTrimmedBottom (3.0f),
-          mono (12.0f, 600), padOk ? col::ink : col::ink3, juce::Justification::centred);
-    // ... and to the DRUM track shown: the take and its slices, or the pad
     const auto track = juce::String (juce::jlimit (0, drum::numTracks - 1, proc.drumTrack.load()) + 1);
-    key (g, takeDrumKey, hasTake ? KeyState::accent : KeyState::off, false, 10.0f);
-    text (g, "→ drum "_fr + track, takeDrumKey.withTrimmedBottom (3.0f), mono (12.0f, 600), hasTake ? col::accentInk : col::ink3, juce::Justification::centred);
-    key (g, padDrumKey, padOk ? KeyState::normal : KeyState::off, false, 10.0f);
-    text (g, "→ drum "_fr + track, padDrumKey.withTrimmedBottom (3.0f), mono (12.0f, 600), padOk ? col::ink : col::ink3, juce::Justification::centred);
+    routeChip (g, takeChip, hasTake, Picto::slice, "take");
+    routeKey (g, takeKey, hasTake, true, Picto::cassette, "sampler", {});
+    routeKey (g, takeDrumKey, hasTake, true, Picto::drum, "drum", track);
+    routeChip (g, padChip, padOk, Picto::pads, padOk ? "pad " + juce::String (selected + 1) : juce::String ("pad"));
+    routeKey (g, padKey, padOk, false, Picto::cassette, "sampler", {});
+    routeKey (g, padDrumKey, padOk, false, Picto::drum, "drum", track);
 }
 
 void RadioStrip::mouseDown (const juce::MouseEvent& e)

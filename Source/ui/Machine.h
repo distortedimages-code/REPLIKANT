@@ -54,6 +54,7 @@ namespace te
         int modeShown() const                      { return mode; }
         bool captureShown() const                  { return capture; }
         void touch (const Ctl&);                   // the screen's readout follows
+        void setKeyStyle (int style);              // CLASSIC, PADS, FLAT
 
         void paint (juce::Graphics&) override;
         void paintOverChildren (juce::Graphics&) override;
@@ -107,6 +108,7 @@ namespace te
         int page[numModes] {}, capturePage = 0, resamplePage = 0, cyclePage = 0;
         void buildCyclePages();
         int captureKind = notesKind;
+        int keyStyle = 0;                          // the keyboard's look: CLASSIC, PADS, FLAT
         juce::String shownResample;                // the last instrument RÉÉCHANTILLONNER made, as shown
         void buildResamplePages();
         void toggleResample();
