@@ -1,4 +1,5 @@
 #include "Machine.h"
+#include "Assistant.h"
 #include "RadioUi.h"
 #include "DrumUi.h"
 #include "../dsp/Modulators.h"
@@ -3178,8 +3179,22 @@ public:
             return;
         }
         const bool sampling = m.proc.isSampling();
+        // the assistant, and a test note
+        const bool helping = m.assistant != nullptr && m.assistant->isOpen();
+        key (g, help, helping ? KeyState::on : (sampling ? KeyState::off : KeyState::normal), false, 10.0f);
+        {
+            auto h = help.withTrimmedBottom (3.0f).reduced (10.0f, 0.0f);
+            const auto ink = helping ? col::keyOnInk : (sampling ? col::ink3 : col::ink);
+            auto icon = h.removeFromTop (h.getHeight() * 0.56f);
+            g.setColour (ink);
+            auto c = icon.withSizeKeepingCentre (22.0f, 22.0f).translated (0.0f, 4.0f);
+            g.drawEllipse (c, 1.5f);
+            g.setFont (grotesk (14.0f, 700));
+            g.drawText ("?", c, juce::Justification::centred);
+            text (g, "assistant", h, mono (11.5f, 500), ink, juce::Justification::centredTop);
+        }
         key (g, test, sampling ? KeyState::off : KeyState::normal, false, 10.0f);
-        text (g, "tester une note", test.withTrimmedBottom (3.0f), mono (13.0f, 500), sampling ? col::ink3 : col::ink, juce::Justification::centred);
+        text (g, "test note", test.withTrimmedBottom (3.0f), mono (12.0f, 500), sampling ? col::ink3 : col::ink, juce::Justification::centred);
         // the big one
         g.setColour (sampling ? col::well : col::red);
         g.fillRoundedRectangle (go, 12.0f);
@@ -3235,6 +3250,9 @@ public:
             if (kinds[i].contains (e.position) && ! m.proc.isSampling())
             {
                 m.setCaptureKind (i);
+                // NOTES or CYCLES: the assistant opens by itself (SETTINGS › ASSISTANT)
+                if (i != Machine::resampleKind && CaptureAssistant::automatic (m.proc))
+                    m.openAssistant();
                 repaint();
                 return;
             }
@@ -3254,6 +3272,15 @@ public:
             return;
         }
         if (go.contains (e.position)) { m.toggleSampling(); repaint(); return; }
+        if (help.contains (e.position) && ! m.proc.isSampling())
+        {
+            if (m.assistant->isOpen())
+                m.assistant->close();
+            else
+                m.openAssistant();
+            repaint();
+            return;
+        }
         if (test.contains (e.position) && ! m.proc.isSampling())
         {
             m.proc.sendTestNote();
@@ -3263,7 +3290,7 @@ public:
 
 private:
     Machine& m;
-    juce::Rectangle<float> kinds[3], test, go;
+    juce::Rectangle<float> kinds[3], help, test, go;
 
     void layout()
     {
@@ -3273,7 +3300,13 @@ private:
         for (int i = 0; i < 3; ++i)
             kinds[i] = { top.getX() + (float) i * (w + 8.0f), top.getY(), w, top.getHeight() };
         r.removeFromTop (10.0f);
-        test = r.removeFromLeft (200.0f);
+        auto keys = r.removeFromLeft (200.0f);
+        help = keys.removeFromLeft (96.0f);
+        keys.removeFromLeft (8.0f);
+        test = keys;
+        // (RÉÉCHANTILLONNER: the input's key over both)
+        if (m.captureKind == Machine::resampleKind)
+            test = help.getUnion (test);
         r.removeFromLeft (10.0f);
         go = r;
     }
@@ -3403,6 +3436,13 @@ Machine::Machine (ReplikantProcessor& p) : proc (p), updatePanel (p.updater)
     addChildComponent (*radioStrip);
     addChildComponent (*radioTuner);
     addChildComponent (*drumStrip);
+
+    assistant = std::make_unique<CaptureAssistant> (proc);
+    assistant->say = [this] (const juce::String& t, bool warning) { showMessage (t, warning); };
+    assistant->onClose = [this] { captureStrip->repaint(); grabKeyboardFocus(); };
+    assistant->onStart = [this] { if (! proc.isSampling()) toggleSampling(); captureStrip->repaint(); };
+    assistant->onSettingsChanged = [this] { captureSettingsChanged(); };
+    addChildComponent (*assistant);
 
     addChildComponent (updatePanel);
     updatePanel.onClose = [this] { updatePanel.setVisible (false); };
@@ -3678,6 +3718,10 @@ void Machine::buildPages()
         keyLook.tip = "Le clavier du bas : CLASSIC (ivoire et ébène), PADS (deux rangées de pads rétroéclairés), FLAT (une dalle sombre, les touches s'allument par en dessous)."_fr;
         keyLook.sepBefore = true;
         b.ctls.push_back (keyLook);
+        auto help = choiceCtl ("Assistant", { "on", "off" }, [this] { return CaptureAssistant::automatic (proc) ? 0 : 1; },
+                               [this] (int v) { CaptureAssistant::setAutomatic (proc, v == 0); });
+        help.tip = "ON : l'assistant de capture s'ouvre tout seul quand tu choisis NOTES ou CYCLES. OFF : seulement par sa touche, dans CAPTURE."_fr;
+        b.ctls.push_back (help);
         pg.banks.push_back (std::move (b));
         // COMP: at the end of the chain, before the volume
         pg.banks.push_back ({ "comp", { S (snd::cpOn, "On"), sep (S (snd::cpIn)), S (snd::cpAmount), sep (S (snd::cpAttack)), S (snd::cpRelease),
@@ -4342,6 +4386,8 @@ void Machine::buildCyclePages()
 
 void Machine::setCaptureKind (int k)
 {
+    if (k == resampleKind && assistant->isOpen())
+        assistant->close();
     if (k == captureKind)
         return;
     captureKind = k;
@@ -4379,6 +4425,8 @@ void Machine::showMode (int m)
 {
     if (m == drumMode)
         proc.drumReady();
+    if (assistant->isOpen())
+        assistant->close();
     capture = false;
     if (m != mode || (int) P (proc, snd::engine) != m)
         setSound (proc, snd::engine, (float) m);
@@ -4423,6 +4471,41 @@ void Machine::showCapture (bool on)
     capture = on;
     focus = nullptr;
     showPage (pageIndex());
+    if (! on && assistant->isOpen())
+        assistant->close();
+    // the first time CAPTURE opens (NOTES or CYCLES), the assistant with it
+    if (on && ! assistantSeen && captureKind != resampleKind && CaptureAssistant::automatic (proc) && ! proc.isSampling())
+        openAssistant();
+}
+
+void Machine::openAssistant()
+{
+    if (captureKind == resampleKind)
+        return;
+    assistantSeen = true;
+    assistant->open (captureKind == cyclesKind ? 1 : 0);
+}
+
+void Machine::captureSettingsChanged()
+{
+    // a port that appeared (the IAC bus switched on): the capture pages made again with it
+    auto now = proc.midiOutputs();
+    bool same = now.size() == midiDevices.size();
+    for (int i = 0; same && i < now.size(); ++i)
+        same = now[i].identifier == midiDevices[i].identifier;
+    if (! same)
+    {
+        midiDevices = now;
+        focus = nullptr;
+        buildCapturePages();
+        buildCyclePages();
+        if (capture)
+            showPage (pageIndex());
+    }
+    for (auto& e : encoders)
+        e->refreshIfChanged();
+    screen->repaint();
+    captureStrip->repaint();
 }
 
 void Machine::showPage (int p)
@@ -4674,6 +4757,8 @@ void Machine::resized()
     drumStrip->setBounds (b);
     // the tuner: over the screen's left part (its title and the panel on the right stay)
     radioTuner->setBounds (screenArea.getX() + 16, screenArea.getY() + 12 + 30, screenArea.getWidth() - 32 - 392 - 14, screenArea.getHeight() - 24 - 30);
+    // the assistant: over the screen, the page keys and the encoders (the capture's keys stay under it)
+    assistant->setBounds (screenArea.getX(), screenArea.getY(), screenArea.getWidth(), encArea.getBottom() - screenArea.getY());
     updatePanel.setBounds (getLocalBounds());
 }
 
@@ -4776,6 +4861,8 @@ void Machine::toggleSampling()
     juce::String why;
     if (! (captureKind == cyclesKind ? proc.startCycles (why) : proc.startSampling (why)))
         showMessage (why, true);
+    else if (assistant->isOpen())
+        assistant->close();
 }
 
 void Machine::openInstrument()

@@ -5,7 +5,7 @@ if(APPLE)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Universal binary")
 endif()
 
-project(REPLIKANT VERSION 0.4.7 LANGUAGES C CXX)
+project(REPLIKANT VERSION 0.4.8 LANGUAGES C CXX)
 
 # GitHub repository whose releases the plug-in checks for updates (public releases).
 set(RK_UPDATE_REPO "distortedimages-code/REPLIKANT" CACHE STRING "owner/repo checked for updates (empty = no update check)")
@@ -113,6 +113,7 @@ set(RK_APP_SOURCES
     Source/ui/UpdatePanel.cpp
     Source/ui/RadioUi.cpp
     Source/ui/DrumUi.cpp
+    Source/ui/Assistant.cpp
     Source/ui/Machine.cpp)
 
 # Fonts (SIL Open Font License, see Resources/fonts)

@@ -6,6 +6,7 @@
 #include "../Source/plugin/PluginProcessor.h"
 #include "../Source/plugin/PluginEditor.h"
 #include "../Source/ui/Machine.h"
+#include "../Source/ui/Assistant.h"
 #include "../Source/radio/RadioNet.h"
 
 static void pump (int ms)
@@ -32,6 +33,7 @@ int main (int argc, char** argv)
     dir.createDirectory();
 
     ReplikantProcessor proc;
+    te::CaptureAssistant::setAutomatic (proc, false);      // (opened by hand for its own shots)
     proc.options.source = ReplikantProcessor::Source::testSynth;
     proc.instrumentName = "Synthe test";
     proc.session.lowNote = 36;
@@ -315,6 +317,57 @@ int main (int argc, char** argv)
             break;
     }
     view->refreshNow();     // the capture over: the sampler plays it
+
+    // the assistant (0.4.8): its steps, then the test on the test synth
+    {
+        using A = te::CaptureAssistant;
+        view->showCapture (true);
+        view->setCaptureKind (te::Machine::notesKind);
+        view->openAssistant();
+        auto* as = view->captureAssistant();
+        auto step = [&] (const char* name, const char* file, double t = 1.6)
+        {
+            as->showStepNamed (name);
+            as->tick (t);
+            pump (60);
+            shoot (file);
+        };
+        as->fakeForShot (0, "Ableton Live", "VST3", {}, false);
+        as->chooseForShot (0, (int) A::Target::plugin);
+        step ("daw", "60-assistant-logiciel.png");
+        step ("target", "61-assistant-source.png");
+        step ("iac", "62-assistant-midi-iac.png");
+        as->fakeForShot (0, "Ableton Live", "VST3", "Synthe", true);
+        step ("iac", "63-assistant-midi-trouve.png");
+        step ("track", "64-assistant-piste-live.png");
+        as->fakeForShot (1, "Logic Pro", "AU", "Audio 3", true);
+        as->chooseForShot (1, (int) A::Target::hardware);
+        step ("wiring", "65-assistant-branchements.png");
+        step ("track", "66-assistant-piste-logic.png");
+        // the test, for real, on the test synth
+        as->chooseForShot (0, (int) A::Target::test);
+        step ("test", "67-assistant-test.png", 0.2);
+        proc.captureOpen = true;
+        as->runTestForShot();
+        for (int b = 0; b < 1200 && proc.probing(); ++b)
+        {
+            buf.clear();
+            midi.clear();
+            proc.processBlock (buf, midi);
+            if (b == 200)
+            {
+                as->tick (0.02);
+                shoot ("68-assistant-test-en-cours.png");
+            }
+        }
+        for (int i = 0; i < 8; ++i)
+            as->tick (0.3);
+        pump (60);
+        shoot ("69-assistant-test-pret.png");
+        const auto pr = proc.probe();
+        std::printf ("assistant test: %d/%d heard, %.1f ms, peak %.1f dB\n", pr.heard, pr.played, pr.latencyMs[0], pr.peakDb);
+        as->close();
+    }
 
     // the sampler, its pages
     set (snd::loopXfade, 0.4f);

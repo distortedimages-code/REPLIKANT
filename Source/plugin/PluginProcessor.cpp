@@ -205,6 +205,9 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
                 if (! meta.getMessage().isSysEx())
                     sink.send (meta.getMessage());
     }
+    // the assistant's test: its notes, at the start of the block (as the recorder sends them)
+    if (! sampling)
+        probeBegin (sink, n);
 
     // the sound of the synth: the input, the sidechain, or the test synth
     const int src = sourceAudio.load();
@@ -245,6 +248,29 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         if (src == (int) Source::input)
             for (int c = 0; c < numIn; ++c)
                 chans[c] = silence.getReadPointer (c);
+    }
+    // the assistant: the meters (the capture page open), its test listening
+    if (captureOpen.load (std::memory_order_relaxed) || probeRunning.load (std::memory_order_relaxed))
+    {
+        auto keep = [] (std::atomic<float>& a, float v) { if (v > a.load (std::memory_order_relaxed)) a.store (v, std::memory_order_relaxed); };
+        const bool scOn = getBusCount (true) > 1 && getBus (true, 1)->isEnabled();
+        auto sc = scOn ? getBusBuffer (buffer, true, 1) : juce::AudioBuffer<float>();
+        for (int c = 0; c < 2; ++c)
+        {
+            if (numIn > 0)
+            {
+                const auto r = juce::FloatVectorOperations::findMinAndMax (chans[juce::jmin (c, numIn - 1)], n);
+                keep (heardSource[c], juce::jmax (-r.getStart(), r.getEnd()));
+            }
+            if (input.getNumChannels() > 0)
+                keep (heardMain[c], input.getMagnitude (juce::jmin (c, input.getNumChannels() - 1), 0, n));
+            if (sc.getNumChannels() > 0)
+                keep (heardSide[c], sc.getMagnitude (juce::jmin (c, sc.getNumChannels() - 1), 0, n));
+        }
+        if (echoed)
+            heardEcho.store (true, std::memory_order_relaxed);
+        if (! sampling)
+            probeListen (chans, numIn, n, input, scOn ? &sc : nullptr, echoed);
     }
     if (numIn > 0 && n <= synthBuffer.getNumSamples())
         recorder.capture (chans, numIn, n);
@@ -664,6 +690,11 @@ bool ReplikantProcessor::startSampling (juce::String& why)
         why = "Une session est en cours."_fr;
         return false;
     }
+    if (probeRunning.load())
+    {
+        why = "Le test de l'assistant joue encore : attends sa fin."_fr;
+        return false;
+    }
     if (options.source != Source::testSynth && port.load() == nullptr && ! hostMidiOut.load())
     {
         why = "Choisis la sortie MIDI qui va au synthé (SOURCE > MIDI)."_fr;
@@ -709,6 +740,11 @@ bool ReplikantProcessor::startCycles (juce::String& why)
     if (isSampling())
     {
         why = "Une session est en cours."_fr;
+        return false;
+    }
+    if (probeRunning.load())
+    {
+        why = "Le test de l'assistant joue encore : attends sa fin."_fr;
         return false;
     }
     const bool listen = cycleOptions.vary == 3;
@@ -1115,6 +1151,370 @@ void ReplikantProcessor::sendTestNote()
         off.setTimeStamp (juce::Time::getMillisecondCounterHiRes() * 0.001);
         toSynth.addMessageToQueue (off);
     });
+}
+
+//============================================================================== the capture assistant
+ReplikantProcessor::HostInfo ReplikantProcessor::hostInfo() const
+{
+    HostInfo h;
+    const juce::PluginHostType type;
+    h.hostName = juce::String (type.getHostDescription());
+    if (wrapperType == wrapperType_AudioUnit || wrapperType == wrapperType_AudioUnitv3) h.format = "AU";
+    else if (wrapperType == wrapperType_VST3)                                       h.format = "VST3";
+    else if (wrapperType == wrapperType_Standalone)                                 h.format = "app";
+    else                                                                            h.format = juce::AudioProcessor::getWrapperTypeDescription (wrapperType);
+    if (wrapperType == wrapperType_Standalone)  h.host = Host::app;
+    else if (type.isAbletonLive())              h.host = Host::live;
+    else if (type.isLogic())                    h.host = Host::logic;
+    else if (type.isBitwigStudio())             h.host = Host::bitwig;
+    else if (type.isReaper())                   h.host = Host::reaper;
+    else if (type.isCubase() || type.isNuendo()) h.host = Host::cubase;
+    else if (type.isStudioOne())                h.host = Host::studioOne;
+    {
+        const juce::SpinLock::ScopedLockType lock (trackLock);
+        h.trackName = trackName;
+    }
+    if (getBusCount (true) > 0 && getBus (true, 0)->isEnabled())
+        h.mainInputs = getBus (true, 0)->getNumberOfChannels();
+    if (getBusCount (true) > 1 && getBus (true, 1)->isEnabled())
+        h.sidechainInputs = getBus (true, 1)->getNumberOfChannels();
+    return h;
+}
+
+void ReplikantProcessor::updateTrackProperties (const TrackProperties& p)
+{
+    const juce::SpinLock::ScopedLockType lock (trackLock);
+    trackName = p.name;
+}
+
+ReplikantProcessor::Heard ReplikantProcessor::heard()
+{
+    Heard h;
+    for (int c = 0; c < 2; ++c)
+    {
+        h.source[c] = heardSource[c].exchange (0.0f);
+        h.main[c] = heardMain[c].exchange (0.0f);
+        h.side[c] = heardSide[c].exchange (0.0f);
+    }
+    h.echoed = heardEcho.exchange (false);
+    return h;
+}
+
+ReplikantProcessor::AudioIns ReplikantProcessor::audioInputs (const juce::String& device) const
+{
+    AudioIns a;
+   #if JucePlugin_Build_Standalone
+    if (wrapperType == wrapperType_Standalone)
+        if (auto* holder = juce::StandalonePluginHolder::getInstance())
+        {
+            auto& dm = holder->deviceManager;
+            a.app = true;
+            a.current = dm.getAudioDeviceSetup().inputDeviceName;
+            if (auto* type = dm.getCurrentDeviceTypeObject())
+            {
+                a.devices = type->getDeviceNames (true);
+                a.shown = device.isNotEmpty() ? device : a.current;
+                auto* now = dm.getCurrentAudioDevice();
+                if (a.shown == a.current && now != nullptr)
+                {
+                    a.channels = now->getInputChannelNames();
+                    a.active = now->getActiveInputChannels();
+                }
+                else if (a.shown.isNotEmpty())
+                    if (std::unique_ptr<juce::AudioIODevice> d { type->createDevice ({}, a.shown) })
+                        a.channels = d->getInputChannelNames();
+            }
+            return a;
+        }
+   #endif
+    // in a DAW: the Mac's inputs as Core Audio lists them (the DAW records them, REPLIK8 only names them)
+    std::unique_ptr<juce::AudioIODeviceType> type (juce::AudioIODeviceType::createAudioIODeviceType_CoreAudio());
+    if (type == nullptr)
+        return a;
+    type->scanForDevices();
+    a.devices = type->getDeviceNames (true);
+    const int def = type->getDefaultDeviceIndex (true);
+    a.shown = device.isNotEmpty() ? device : (juce::isPositiveAndBelow (def, a.devices.size()) ? a.devices[def] : a.devices[0]);
+    if (a.shown.isNotEmpty())
+        if (std::unique_ptr<juce::AudioIODevice> d { type->createDevice ({}, a.shown) })
+            a.channels = d->getInputChannelNames();
+    return a;
+}
+
+bool ReplikantProcessor::useAudioInput (const juce::String& device, int first, bool stereo, juce::String& why)
+{
+   #if JucePlugin_Build_Standalone
+    if (wrapperType == wrapperType_Standalone)
+        if (auto* holder = juce::StandalonePluginHolder::getInstance())
+        {
+            auto& dm = holder->deviceManager;
+            auto setup = dm.getAudioDeviceSetup();
+            setup.inputDeviceName = device;
+            setup.useDefaultInputChannels = false;
+            setup.inputChannels.clear();
+            setup.inputChannels.setBit (juce::jmax (0, first));
+            if (stereo)
+                setup.inputChannels.setBit (juce::jmax (0, first) + 1);
+            why = dm.setAudioDeviceSetup (setup, true);
+            if (why.isNotEmpty())
+                return false;
+            holder->saveAudioDeviceState();
+            return true;
+        }
+   #endif
+    juce::ignoreUnused (device, first, stereo);
+    why = "Dans un DAW, c'est le DAW qui choisit la carte son."_fr;
+    return false;
+}
+
+bool ReplikantProcessor::startProbe (bool ccTest, juce::String& why)
+{
+    if (isSampling())
+    {
+        why = "Une capture est en cours."_fr;
+        return false;
+    }
+    if (options.source != Source::testSynth && port.load() == nullptr && ! hostMidiOut.load())
+    {
+        why = "Aucune sortie MIDI vers le synthé : choisis-la d'abord."_fr;
+        return false;
+    }
+    probeNote = juce::jlimit (0, 127, ccTest ? cycleOptions.note : 60);
+    probeChannel = juce::jlimit (1, 16, options.channel);
+    probeCc = juce::jlimit (0, 127, cycleOptions.cc);
+    probeCcFrom = juce::jlimit (0, 127, cycleOptions.ccFrom);
+    probeCcTo = juce::jlimit (0, 127, cycleOptions.ccTo);
+    {
+        const juce::SpinLock::ScopedLockType lock (probeLock);
+        probeShared = {};
+        probeShared.state = Probe::running;
+        probeShared.ccTest = ccTest;
+        probeShared.hits = ccTest ? 1 : 3;
+    }
+    probeRunning = true;
+    probeWanted = ccTest ? 2 : 1;
+    return true;
+}
+
+void ReplikantProcessor::stopProbe()
+{
+    probeWanted = -1;
+}
+
+ReplikantProcessor::Probe ReplikantProcessor::probe() const
+{
+    const juce::SpinLock::ScopedLockType lock (probeLock);
+    return probeShared;
+}
+
+void ReplikantProcessor::probePublish()
+{
+    const juce::SpinLock::ScopedTryLockType lock (probeLock);
+    if (! lock.isLocked())
+        return;          // (next block)
+    probeShared = run.result;
+    run.dirty = false;
+}
+
+// at the start of a block: what the test sends (a note on or off, a CC), as the recorder sends its notes
+void ReplikantProcessor::probeBegin (Recorder::MidiSink& sink, int n)
+{
+    juce::ignoreUnused (n);
+    auto& r = run;
+    const int want = probeWanted.exchange (0);
+    if (want != 0 && r.phase != ProbeRun::off)
+    {
+        sink.send (juce::MidiMessage::noteOff (r.channel, r.note));     // (whatever was held)
+        r.phase = ProbeRun::off;
+    }
+    if (want < 0)
+    {
+        r.result.state = Probe::idle;
+        r.dirty = true;
+        probeRunning = false;
+    }
+    else if (want > 0)
+    {
+        r = {};
+        r.note = probeNote.load();
+        r.channel = probeChannel.load();
+        r.cc = probeCc.load();
+        r.ccFromValue = probeCcFrom.load();
+        r.ccToValue = probeCcTo.load();
+        r.result.state = Probe::running;
+        r.result.ccTest = want == 2;
+        r.result.hits = want == 2 ? 1 : 3;
+        r.phase = ProbeRun::floor;
+        r.dirty = true;
+    }
+    switch ((int) r.phase)
+    {
+        case ProbeRun::noteOn:
+            sink.send (juce::MidiMessage::noteOn (r.channel, r.note, (juce::uint8) 100));
+            r.phase = ProbeRun::held;
+            r.t = 0;
+            r.onset = -1;
+            r.peak = r.mainPeak = r.sidePeak = 0.0f;
+            break;
+        case ProbeRun::noteOff:
+        {
+            sink.send (juce::MidiMessage::noteOff (r.channel, r.note));
+            auto& res = r.result;
+            ++res.played;
+            if (r.onset >= 0 && res.heard < 8)
+                res.latencyMs[res.heard++] = (float) (1000.0 * r.onset / sampleRate);
+            res.peakDb = juce::jmax (res.peakDb, juce::Decibels::gainToDecibels (r.peak, -100.0f));
+            res.clipped = res.clipped || r.peak >= 0.995f;
+            if (r.mainPeak > 0.003f) res.heardOn |= 1;
+            if (r.sidePeak > 0.003f) res.heardOn |= 2;
+            r.phase = ProbeRun::gap;
+            r.t = 0;
+            r.dirty = true;
+            break;
+        }
+        case ProbeRun::ccFrom:
+            sink.send (juce::MidiMessage::controllerEvent (r.channel, r.cc, r.ccFromValue));
+            r.phase = ProbeRun::ccSettle;
+            r.t = 0;
+            break;
+        case ProbeRun::ccNote:
+            sink.send (juce::MidiMessage::noteOn (r.channel, r.note, (juce::uint8) 100));
+            r.phase = ProbeRun::ccWaitA;
+            r.t = 0;
+            r.peak = r.mainPeak = r.sidePeak = 0.0f;
+            break;
+        case ProbeRun::ccTo:
+            sink.send (juce::MidiMessage::controllerEvent (r.channel, r.cc, r.ccToValue));
+            r.phase = ProbeRun::ccWaitB;
+            r.t = 0;
+            break;
+        case ProbeRun::ccOff:
+        {
+            sink.send (juce::MidiMessage::noteOff (r.channel, r.note));
+            auto& res = r.result;
+            res.played = 1;
+            const double a = r.countA > 0 ? std::sqrt (r.sumA / r.countA) : 0.0;
+            const double b = r.countB > 0 ? std::sqrt (r.sumB / r.countB) : 0.0;
+            res.ccLevelA = (float) a;
+            res.ccLevelB = (float) b;
+            res.heard = a > 1.0e-4 || b > 1.0e-4 ? 1 : 0;
+            res.ccDb = a > 1.0e-6 && b > 1.0e-6 ? (float) (20.0 * std::log10 (b / a)) : 0.0f;
+            // brightness: the slope's share of the signal (what a first difference keeps grows with the highs)
+            const double ba = r.sumA > 1.0e-12 ? std::sqrt (r.diffA / r.sumA) : 0.0;
+            const double bb = r.sumB > 1.0e-12 ? std::sqrt (r.diffB / r.sumB) : 0.0;
+            res.ccBright = ba > 1.0e-9 ? (float) (bb / ba - 1.0) : 0.0f;
+            res.peakDb = juce::Decibels::gainToDecibels (r.peak, -100.0f);
+            res.clipped = r.peak >= 0.995f;
+            if (r.mainPeak > 0.003f) res.heardOn |= 1;
+            if (r.sidePeak > 0.003f) res.heardOn |= 2;
+            res.state = Probe::done;
+            r.phase = ProbeRun::off;
+            r.dirty = true;
+            probeRunning = false;
+            break;
+        }
+        default:
+            break;
+    }
+    if (r.dirty)
+        probePublish();
+}
+
+// through the block: the floor, the attacks, the levels
+void ReplikantProcessor::probeListen (const float* const* chans, int numIn, int n, const juce::AudioBuffer<float>& mainIn,
+                                      const juce::AudioBuffer<float>* side, bool echoed)
+{
+    auto& r = run;
+    if (r.phase == ProbeRun::off)
+        return;
+    if (echoed)
+        r.result.echoed = true;
+    const float sr = (float) sampleRate;
+    auto secs = [sr] (float s) { return (int) (s * sr); };
+    const float* l = numIn > 0 ? chans[0] : nullptr;
+    const float* rr = numIn > 1 ? chans[1] : l;
+    const int mainCh = mainIn.getNumChannels();
+    const int sideCh = side != nullptr ? side->getNumChannels() : 0;
+    for (int i = 0; i < n; ++i)
+    {
+        const float xl = l != nullptr ? l[i] : 0.0f, xr = rr != nullptr ? rr[i] : 0.0f;
+        const float a = juce::jmax (std::abs (xl), std::abs (xr));
+        const float mono = 0.5f * (xl + xr);
+        ++r.t;
+        switch ((int) r.phase)
+        {
+            case ProbeRun::floor:
+            case ProbeRun::ccSettle:
+                r.floorPeak = juce::jmax (r.floorPeak, a);
+                if (r.t >= secs (0.15f))
+                {
+                    r.thr = juce::jmax (r.floorPeak * 4.0f, 0.001f);
+                    r.result.floorDb = juce::Decibels::gainToDecibels (r.floorPeak, -100.0f);
+                    r.phase = r.result.ccTest ? (r.phase == ProbeRun::floor ? ProbeRun::ccFrom : ProbeRun::ccNote) : ProbeRun::quiet;
+                    r.t = 0;
+                    r.quietFor = 0;
+                    r.dirty = true;
+                }
+                break;
+            case ProbeRun::quiet:
+                r.quietFor = a < r.thr ? r.quietFor + 1 : 0;
+                if (r.quietFor >= secs (0.05f) || r.t >= secs (2.0f))
+                {
+                    if (r.quietFor < secs (0.05f))
+                        r.result.drone = true;
+                    r.phase = ProbeRun::noteOn;
+                }
+                break;
+            case ProbeRun::held:
+            case ProbeRun::ccWaitA:
+            case ProbeRun::ccWaitB:
+            case ProbeRun::ccMeasureA:
+            case ProbeRun::ccMeasureB:
+                if (r.phase == ProbeRun::held && r.onset < 0 && a > r.thr)
+                    r.onset = r.t - 1;
+                r.peak = juce::jmax (r.peak, a);
+                for (int c = 0; c < juce::jmin (2, mainCh); ++c)
+                    r.mainPeak = juce::jmax (r.mainPeak, std::abs (mainIn.getSample (c, i)));
+                for (int c = 0; c < juce::jmin (2, sideCh); ++c)
+                    r.sidePeak = juce::jmax (r.sidePeak, std::abs (side->getSample (c, i)));
+                if (r.phase == ProbeRun::ccMeasureA || r.phase == ProbeRun::ccMeasureB)
+                {
+                    const double d = mono - r.lastX;
+                    if (r.phase == ProbeRun::ccMeasureA) { r.sumA += mono * mono; r.diffA += d * d; ++r.countA; }
+                    else                                  { r.sumB += mono * mono; r.diffB += d * d; ++r.countB; }
+                }
+                if (r.phase == ProbeRun::held && r.t >= secs (0.4f))
+                    r.phase = ProbeRun::noteOff;
+                else if (r.phase == ProbeRun::ccWaitA && r.t >= secs (0.35f))     { r.phase = ProbeRun::ccMeasureA; r.t = 0; }
+                else if (r.phase == ProbeRun::ccMeasureA && r.t >= secs (0.2f))   r.phase = ProbeRun::ccTo;
+                else if (r.phase == ProbeRun::ccWaitB && r.t >= secs (0.35f))     { r.phase = ProbeRun::ccMeasureB; r.t = 0; }
+                else if (r.phase == ProbeRun::ccMeasureB && r.t >= secs (0.2f))   r.phase = ProbeRun::ccOff;
+                break;
+            case ProbeRun::gap:
+                if (r.t >= secs (0.2f))
+                {
+                    if (r.result.played < r.result.hits)
+                    {
+                        r.phase = ProbeRun::quiet;
+                        r.t = 0;
+                        r.quietFor = 0;
+                    }
+                    else
+                    {
+                        r.result.state = Probe::done;
+                        r.phase = ProbeRun::off;
+                        r.dirty = true;
+                        probeRunning = false;
+                    }
+                }
+                break;
+            default:
+                break;
+        }
+        r.lastX = mono;
+    }
+    if (r.dirty)
+        probePublish();
 }
 
 void ReplikantProcessor::audition (int note, int velocity, bool on)

@@ -4,6 +4,11 @@
 
 **Page de téléchargement** : https://distortedimages-code.github.io/REPLIKANT/
 
+## La version 0.4.8 : l'assistant de capture
+
+- **Assistant** (`te::CaptureAssistant`, `Source/ui/Assistant.cpp`) : un panneau sur l'écran et les encodeurs, des étapes selon le chemin (logiciel, source, MIDI ou branchements, piste, test), glissées à l'entrée (0,32 s), un rail en haut. L'hôte vient de `juce::PluginHostType` et de `wrapperType` (`ReplikantProcessor::hostInfo`), le nom de la piste de `updateTrackProperties` quand l'hôte le donne. Le bus IAC est cherché parmi les sorties MIDI chaque seconde ; les entrées audio viennent de Core Audio (`audioInputs`, dans un DAW : les noms seulement ; dans l'appli : l'appareil en service, réglable par `useAudioInput`). Les réglages de capture (source, sortie MIDI, canal, MONITOR) sont posés au fil des étapes ; les pages de capture sont refaites quand un port apparaît.
+- **Le test** (`startProbe`, `probeBegin` / `probeListen` dans `processBlock`, hors capture) : le plancher sur 150 ms, puis pour chaque note un silence attendu (50 ms sous le seuil, 2 s au plus, sinon « drone »), la note envoyée en début de bloc par le même chemin que l'enregistreur, l'attaque cherchée à plancher + 12 dB (−60 dBFS au moins) pendant 0,4 s, la crête, les crêtes de l'entrée principale et du sidechain à part (le son venu par l'autre porte : la source changée, le test refait), la sortie renvoyée par l'hôte repérée. Le test du CC : la note de CYCLES tenue, le CC à FROM puis à TO, le niveau et la brillance (la part de la dérivée) comparés. Une latence stable (moins de 1 ms d'écart) met ALIGN sur FIXED LATENCY. Vumètres : les crêtes par bloc de la source, de l'entrée et du sidechain, avec la page CAPTURE ouverte. `ProcessorTests` : trois notes revenues sur le synthé de test, une latence stable, le test du CC, trois notes vers la sortie MIDI de l'hôte sans retour, pas de test sans sortie MIDI.
+
 ## La version 0.4.7 : les mods partout, CUT
 
 - **Réglages crantés** (`snd::modulates`) : une liste de choix et de comptes qui peuvent changer d'un bloc à l'autre (modèles, formes, octaves, demi-tons, synchro, LENGTH, RX et MODE de la radio…) reçoivent les routes ; la valeur modulée est arrondie au cran (`fromNorm`). La radio lit RX, MODE et LENGTH modulés ; un changement de récepteur ou de mode est pris par un creux de 3 ms.

@@ -18,6 +18,7 @@
 namespace te
 {
     struct DrumEdit;
+    class CaptureAssistant;
 
     // a key of the body (a button drawn with the look)
     class Key : public juce::Button
@@ -56,6 +57,8 @@ namespace te
         void touch (const Ctl&);                   // the screen's readout follows
         void setKeyStyle (int style);              // CLASSIC, PADS, FLAT
         void setArmedMod (int mod);                // a mod armed (-1: none), as its key does
+        void openAssistant();                      // CAPTURE's assistant, over the screen and the encoders (0.4.8)
+        CaptureAssistant* captureAssistant()       { return assistant.get(); }
 
         void paint (juce::Graphics&) override;
         void paintOverChildren (juce::Graphics&) override;
@@ -148,6 +151,9 @@ namespace te
         std::unique_ptr<juce::Component> radioStrip, radioTuner;   // (RADIO: the pads in the keyboard's place, the tuner over the screen)
         std::unique_ptr<juce::Component> drumStrip;                // (DRUM: its tracks and steps in the keyboard's place)
         std::unique_ptr<DrumEdit> drumEdit;                         // (what the drum's screen, strip and encoders edit)
+        std::unique_ptr<CaptureAssistant> assistant;
+        bool assistantSeen = false;                                 // (opened by itself once, entering CAPTURE)
+        void captureSettingsChanged();                              // the assistant set the source, the port...
         bool tunerPage() const;
         int radioPad() const;
         juce::Rectangle<int> screenArea, keysArea, encArea, bottomArea, deckArea, inMeter, outMeter;

@@ -501,6 +501,68 @@ int main()
         CHECK (proc.getLatencySamples() == proc.limiter.latency() && proc.getLatencySamples() > 0, "the latency told: %d frames", proc.getLatencySamples());
     }
 
+    // (0.4.8) the assistant's test: three notes to the test synth, all heard, a steady latency; the CC test; the
+    // host's MIDI out carrying the notes when nothing comes back; no MIDI out at all, no test
+    {
+        using Probe = ReplikantProcessor::Probe;
+        ReplikantProcessor proc;
+        proc.options.source = ReplikantProcessor::Source::testSynth;
+        proc.settingsChanged();
+        proc.setRateAndBufferSizeDetails (48000.0, 256);
+        proc.prepareToPlay (48000.0, 256);
+        juce::AudioBuffer<float> buf (juce::jmax (proc.getTotalNumInputChannels(), proc.getTotalNumOutputChannels()), 256);
+        int notesOut = 0;
+        auto runUntilDone = [&]
+        {
+            for (int b = 0; b < 3000 && proc.probing(); ++b)
+            {
+                buf.clear();
+                juce::MidiBuffer midi;
+                proc.processBlock (buf, midi);
+                for (const auto m : midi)
+                    if (m.getMessage().isNoteOn())
+                        ++notesOut;
+            }
+            for (int b = 0; b < 4; ++b)     // (what it found, handed over)
+            {
+                buf.clear();
+                juce::MidiBuffer midi;
+                proc.processBlock (buf, midi);
+            }
+        };
+        juce::String why;
+        CHECK (proc.startProbe (false, why), "the test starts on the test synth: %s", why.toRawUTF8());
+        runUntilDone();
+        auto p = proc.probe();
+        CHECK (p.state == Probe::done, "the test ends: %d", (int) p.state);
+        CHECK (p.played == 3 && p.heard == 3, "three notes played, three heard: %d / %d", p.heard, p.played);
+        float lo = 1.0e9f, hi = -1.0f;
+        for (int i = 0; i < p.heard; ++i)
+        {
+            lo = juce::jmin (lo, p.latencyMs[i]);
+            hi = juce::jmax (hi, p.latencyMs[i]);
+        }
+        CHECK (lo >= 0.0f && hi < 60.0f && hi - lo < 1.0f, "a steady latency: %.2f .. %.2f ms", lo, hi);
+        CHECK (p.peakDb > -40.0f && p.peakDb < 0.0f && ! p.clipped && ! p.echoed, "a sound in range: %.1f dB", p.peakDb);
+        CHECK (proc.startProbe (true, why), "the CC test starts: %s", why.toRawUTF8());
+        runUntilDone();
+        p = proc.probe();
+        CHECK (p.state == Probe::done && p.ccTest && p.played == 1 && p.heard == 1, "the CC test: the note held, heard (%d)", p.heard);
+        CHECK (std::isfinite (p.ccDb) && std::isfinite (p.ccBright), "the CC test measures: %.2f dB, %.2f", p.ccDb, p.ccBright);
+        // nothing coming back: the notes go out to the host all the same, none heard
+        proc.options.source = ReplikantProcessor::Source::input;
+        proc.setMidiPort ("host", "DAW");
+        notesOut = 0;
+        CHECK (proc.startProbe (false, why), "the test starts on the host's MIDI out: %s", why.toRawUTF8());
+        runUntilDone();
+        p = proc.probe();
+        CHECK (p.state == Probe::done && p.heard == 0 && notesOut == 3, "silence: %d heard, %d notes sent to the host", p.heard, notesOut);
+        proc.setMidiPort ({}, {});
+        CHECK (! proc.startProbe (false, why) && why.isNotEmpty(), "no MIDI out: no test");
+        auto h = proc.hostInfo();
+        CHECK (h.format.isNotEmpty() && h.host == ReplikantProcessor::Host::other, "the host: %s %s", h.hostName.toRawUTF8(), h.format.toRawUTF8());
+    }
+
     // (0.4.5) a project from before: its six stages get ECHO before ESPACE; its ENV and FOLLOW stay one-way (+);
     // WTF?!'s seed comes back
     {

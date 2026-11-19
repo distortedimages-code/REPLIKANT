@@ -112,6 +112,56 @@ public:
     // the editor's keyboard
     void audition (int note, int velocity, bool on);
 
+    // CAPTURE's assistant (ui/Assistant.cpp): where REPLIK8 runs, what reaches its inputs, the Mac's audio inputs,
+    // and a test that plays a few notes to the synth and times their way back
+    enum class Host { live, logic, bitwig, reaper, cubase, studioOne, other, app };
+    struct HostInfo
+    {
+        Host host = Host::other;
+        juce::String hostName;              // as the host calls itself
+        juce::String format;                // AU, VST3, app
+        juce::String trackName;             // the track REPLIK8 is on, when the host says (else empty)
+        int mainInputs = 0, sidechainInputs = 0;     // the channels the host hands over (0: none, or off)
+    };
+    HostInfo hostInfo() const;
+    void updateTrackProperties (const TrackProperties&) override;
+    // the peaks since the last call (linear): the source recorded, the main input, the sidechain; and whether the
+    // input was our own output handed back
+    struct Heard { float source[2] {}, main[2] {}, side[2] {}; bool echoed = false; };
+    Heard heard();
+    // the Mac's audio inputs: the devices, the channels of one of them (`device`, else the one in use). The app
+    // knows the one it uses, and can change it
+    struct AudioIns
+    {
+        juce::StringArray devices;
+        juce::String current;               // (the app: the device it records from)
+        juce::String shown;                 // the device whose channels these are
+        juce::StringArray channels;
+        juce::BigInteger active;            // (the app: the channels it records)
+        bool app = false;
+    };
+    AudioIns audioInputs (const juce::String& device = {}) const;
+    bool useAudioInput (const juce::String& device, int firstChannel, bool stereo, juce::String& why);
+    // the test: `hits` notes (C3, velocity 100) on the capture's MIDI out and channel, each attack looked for in
+    // what comes back; or (ccTest) CAPTURE CYCLES' note held while its CC goes from FROM to TO, the sound compared
+    struct Probe
+    {
+        enum State { idle, running, done };
+        State state = idle;
+        bool ccTest = false;
+        int hits = 0, played = 0, heard = 0;
+        float latencyMs[8] {};              // the notes heard, in order
+        float peakDb = -100.0f, floorDb = -100.0f;
+        bool clipped = false, echoed = false, drone = false;
+        int heardOn = 0;                    // bit 1: the main input, bit 2: the sidechain
+        float ccDb = 0.0f, ccBright = 0.0f; // the CC test: the level moved (dB), the brightness (ratio, 0 = none)
+        float ccLevelA = 0.0f, ccLevelB = 0.0f;
+    };
+    bool startProbe (bool ccTest, juce::String& whyNot);
+    void stopProbe();
+    Probe probe() const;
+    bool probing() const                             { return probeRunning.load(); }
+
     // RÉÉCHANTILLONNER: what comes out of the effects recorded, then injected into the SAMPLER as a looped instrument
     // without a gap (the Player loops it meanwhile); the effects set to zero so nothing is processed twice
     struct ResampleOptions
@@ -231,6 +281,36 @@ public:
     std::atomic<bool> captureOpen { false };
 private:
     std::atomic<bool> thruAudio { false };
+
+    // the assistant's meters and its test (the audio thread runs it; what it found is copied under the lock)
+    std::atomic<float> heardSource[2] {}, heardMain[2] {}, heardSide[2] {};
+    std::atomic<bool> heardEcho { false };
+    std::atomic<int> probeWanted { 0 };              // 1: notes, 2: the CC; -1: stop
+    std::atomic<bool> probeRunning { false };
+    std::atomic<int> probeNote { 60 }, probeChannel { 1 }, probeCc { 74 }, probeCcFrom { 0 }, probeCcTo { 127 };
+    juce::String trackName;
+    mutable juce::SpinLock trackLock;
+    struct ProbeRun
+    {
+        enum Phase { off, floor, quiet, noteOn, held, noteOff, gap,
+                     ccFrom, ccSettle, ccNote, ccWaitA, ccMeasureA, ccTo, ccWaitB, ccMeasureB, ccOff };
+        Phase phase = off;
+        int t = 0, quietFor = 0, onset = -1;
+        float floorPeak = 0.0f, thr = 0.001f, peak = 0.0f, mainPeak = 0.0f, sidePeak = 0.0f;
+        double sumA = 0.0, diffA = 0.0, sumB = 0.0, diffB = 0.0;
+        float lastX = 0.0f;
+        int countA = 0, countB = 0;
+        int note = 60, channel = 1, cc = 74, ccFromValue = 0, ccToValue = 127;
+        bool dirty = false;
+        Probe result;
+    } run;
+    mutable juce::SpinLock probeLock;
+    Probe probeShared;
+    void probeBegin (Recorder::MidiSink&, int n);
+    void probeListen (const float* const* chans, int numIn, int n, const juce::AudioBuffer<float>& mainIn,
+                      const juce::AudioBuffer<float>* side, bool echoed);
+    void probePublish();
+
     juce::MidiMessageCollector toSynth, toPlayer;   // from the editor
     juce::MidiBuffer playMidi, outMidi, synthMidi;
     juce::AudioBuffer<float> synthBuffer, inputCopy, silence, followCopy;

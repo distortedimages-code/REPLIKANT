@@ -1,3 +1,12 @@
+**REPLIK8 0.4.8** : un assistant de capture, pas à pas, jusqu'à PRÊT.
+
+- **L'assistant de capture** : dans CAPTURE, choisis NOTES ou CYCLES (ou sa touche ? ASSISTANT) : il prend l'écran et te mène pas à pas, en cinq étapes au plus. LOGICIEL : il reconnaît Live, Logic, Bitwig, Reaper, Cubase ou Studio One (et le format, AU ou VST3), ou tu le choisis. SOURCE : un plugin dans ton logiciel, un synthé hardware, ou le synthé de test
+- **Un synthé logiciel** passe par le bus IAC, le câble MIDI intégré au Mac. S'il est éteint, un bouton ouvre Configuration audio et MIDI et l'assistant le guette : dès qu'il apparaît, il le coche et règle REPLIK8 (source, sortie MIDI, canal, écoute directe)
+- **Un synthé hardware** : ses ports MIDI et les entrées de ta carte son, sous les noms que leur donne ton Mac, à choisir d'un clic (mono ou stéréo). Dans l'appli, l'entrée choisie est réglée directement
+- **PISTE** : ce qu'il y a à régler dans ton logiciel, dessiné comme il le montre (l'entrée MIDI ou audio, le monitoring In/Auto/Off, l'ordre des plugins), ce qui est à changer en or, avec les raccourcis du Mac et le nom de ta piste quand le logiciel le donne
+- **TEST** : trois notes envoyées, ce qui revient écouté. Il vérifie que le son arrive, son niveau (ni trop faible, ni saturé), qu'il ne s'agit pas de la propre sortie de REPLIK8, et mesure la latence : stable, toutes les notes sont calées dessus. Pour les cycles, il vérifie aussi que le CC balayé change bien le son. Des vumètres, la latence sur une ligne de temps, et PRÊT quand tout va bien. Le son arrive par l'autre entrée (sidechain) ? Il change la source tout seul et refait le test
+- **SETTINGS › ASSISTANT** : OFF pour qu'il ne s'ouvre plus tout seul (sa touche reste dans CAPTURE)
+
 **REPLIK8 0.4.7** : les mods partout (les réglages crantés, le DRUM), un rythme découpé dans la radio, et le DRUM qu'on règle en l'écoutant.
 
 - **Assigner un mod, plus clair** : clique M1 (en bas à droite) : un bandeau sur l'écran dit quoi faire, les potards qu'il peut moduler s'entourent de sa couleur, les autres s'effacent. Tourne-en un : la distance devient la profondeur (vers la gauche, la modulation descend). Double-clic : la route retirée. Re-clique M1 pour finir

@@ -111,6 +111,11 @@
 <section class="mod" id="brancher">
   <h2><span>02 · Brancher</span><svg class="p" viewBox="0 0 24 24"><path d="M1 12h3"/><rect x="4" y="8.6" width="7" height="6.8" rx="1.4"/><path d="M11 10.3h6.5M11 13.7h6.5M17.5 10.3c3 0 3.5 1.7 4 1.7-.5 0-1 1.7-4 1.7"/></svg></h2>
   <p class="intro">Pour jouer, rien à brancher. Pour capturer, deux câbles&nbsp;: le <b>MIDI</b> vers ton synthé, sa <b>sortie audio</b> vers ta carte son. REPLIK8 pilote le synthé lui-même, quel que soit ton DAW.</p>
+  <p class="intro"><b>Le plus simple&nbsp;: l'assistant.</b> Dans <b>CAPTURE</b>, choisis NOTES ou CYCLES&nbsp;: il s'ouvre et te mène pas à pas. Il reconnaît ton logiciel, lit les vrais noms de tes ports MIDI et de ta carte son, règle REPLIK8 tout seul et te montre, en or, ce qu'il reste à régler dans ta piste. Un synthé logiciel passe par le <b>bus IAC</b> du Mac&nbsp;: s'il est éteint, l'assistant le guette pendant que tu l'allumes. Pour finir, il joue trois notes et écoute ce qui revient&nbsp;: le niveau, une boucle éventuelle, la latence (stable, il cale toutes les notes dessus). Quand il affiche <b class="y">PRÊT</b>, lance la capture. <small>Pour qu'il ne s'ouvre plus tout seul&nbsp;: SETTINGS › ASSISTANT sur OFF. Sa touche reste dans CAPTURE.</small></p>
+  <figure class="shot" style="margin:14px 24px 0"><img src="img/assistant-piste-1360.webp" srcset="img/assistant-piste-680.webp 680w, img/assistant-piste-1360.webp 1360w" sizes="(max-width: 1100px) 100vw, 1070px" width="1360" height="848" loading="lazy" alt="L'assistant, étape PISTE dans Live : les réglages de la piste du synthé dessinés à droite, ce qu'il faut changer en or, REPLIK8 après le synthé."></figure>
+  <p class="cap" style="margin:6px 24px 0">L'étape PISTE&nbsp;: la piste telle que ton logiciel la montre, ce qu'il faut régler en or.</p>
+  <figure class="shot" style="margin:14px 24px 0"><img src="img/assistant-pret-1360.webp" srcset="img/assistant-pret-680.webp 680w, img/assistant-pret-1360.webp 1360w" sizes="(max-width: 1100px) 100vw, 1070px" width="1360" height="848" loading="lazy" alt="Le test de l'assistant : trois notes revenues, le niveau, pas de boucle, la latence stable, les vumètres, et PRÊT."></figure>
+  <p class="cap" style="margin:6px 24px 0">Le test&nbsp;: trois notes revenues, la latence mesurée, PRÊT.</p>
   <div class="daw">
     <div><h3>L'appli (le plus simple)</h3><ol>
       <li><b>Fichier › Réglages audio et MIDI</b>&nbsp;: ta carte son et l'entrée du synthé.</li>
@@ -297,10 +302,15 @@
       <li>Lâche la note&nbsp;: au bout d'une seconde et demie de silence (ou STOP), la prise est découpée en cycles.</li>
       <li>Mode <b>SYNTH</b>, OSC A, Bank sur <b>CAPTURED</b>&nbsp;: tourne POSITION, ou glisse sur la pile de cycles.</li></ol></div>
     <div><h3>Un multisample, le temps d'un café</h3><ol>
-      <li><b>Capture › Source</b>&nbsp;: l'entrée où arrive ton synthé, et sa sortie MIDI.</li>
-      <li><b>Tester une note</b>&nbsp;: le niveau doit bouger.</li>
+      <li><b>Capture › Notes</b>&nbsp;: l'assistant s'ouvre. Suis-le jusqu'à <b>PRÊT</b>.</li>
       <li><b>Notes</b>&nbsp;: la plage, une note sur trois, deux ou trois vélocités.</li>
       <li><b>Lancer la capture</b>. À la fin, l'instrument joue dans le SAMPLER, ses boucles trouvées et ses touches calculées.</li></ol></div>
+    <div><h3>Sampler un synthé logiciel dans Live</h3><ol>
+      <li>Sur la piste MIDI du synthé, glisse <b>REPLIK8 juste après lui</b>.</li>
+      <li><b>Capture › Notes</b>&nbsp;: l'assistant reconnaît Live. Source&nbsp;: <b>un plugin</b>.</li>
+      <li>Le bus IAC éteint&nbsp;? Le bouton de l'assistant ouvre Configuration audio et MIDI&nbsp;: coche «&nbsp;en ligne&nbsp;», il le voit apparaître.</li>
+      <li>Dans Live, comme il le dessine&nbsp;: MIDI From sur le bus IAC, Monitor sur In, et dans les réglages MIDI, Track sur On pour l'IAC.</li>
+      <li><b>Test</b>&nbsp;: trois notes, la latence, PRÊT. Lance la capture.</li></ol></div>
     <div><h3>Une nappe qui pompe sur la grosse caisse</h3><ol>
       <li>REPLIK8 joue ta nappe. Dans le DAW, envoie la piste de grosse caisse dans son <b>sidechain</b>.</li>
       <li><b>SETTINGS › comp</b>&nbsp;: ON. Dans <b>comp +</b>, KEY sur <b>SIDECHAIN</b>.</li>
