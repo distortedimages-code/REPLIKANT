@@ -87,6 +87,8 @@ namespace snd
         rvDry, wtfLen,
         // (0.4.5) ECHO: a tape loop and its four heads
         ecOn, ecTime, ecSync, ecHeads, ecSpread, ecFeedback, ecTone, ecDir, ecMotion, ecSweep, ecRate, ecWidth, ecWear, ecMix,
+        // (0.4.5) COMP, at the end of the chain (SETTINGS)
+        cpOn, cpIn, cpGate, cpAmount, cpAttack, cpRelease, cpKey, cpDrive, cpMix, cpLevel,
         count
     };
 

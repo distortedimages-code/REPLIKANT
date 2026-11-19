@@ -16,6 +16,7 @@
 
 #include "Space.h"
 #include "Echo.h"
+#include "Comp.h"
 #include <memory>
 
 #include <array>

@@ -352,8 +352,10 @@ private:
     dsp::Space space;
 public:
     dsp::Echo echo;                      // (the screen reads its heads)
+    dsp::Comp comp;                      // (and COMP's reduction)
 private:
-    float wet[numStages] {};             // drive and the six effects, faded in and out
+    float wet[numStages + 1] {};         // drive, the six effects and COMP, faded in and out
+    int chunkPos = 0;                    // where the chunk the chain runs on starts in the block (FOLLOW's, COMP's keys)
     // the stage at position p: digit p (base 7); ECHO before ESPACE
     static constexpr int defaultOrder = 0 + 1 * 7 + 2 * 49 + 3 * 343 + 4 * 2401 + 6 * 16807 + 5 * 117649;
     std::atomic<int> orderWanted { defaultOrder };

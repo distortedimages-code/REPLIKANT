@@ -248,6 +248,16 @@ namespace
         { "ecWidth",   "Width",                       K::linear,  0, 1, 0.7f, 1, nullptr, true, "%" },
         { "ecWear",    "Wear",                        K::linear,  0, 1, 0.2f, 1, nullptr, true, "%" },
         { "ecMix",     "Wet",                         K::linear,  0, 1, 0.35f, 1, nullptr, true, "%" },
+        { "cpOn",      "Comp",                        K::toggle,  0, 1, 0, 1, nullptr, false, "" },
+        { "cpIn",      "In",                          K::linear,  0, 18, 0, 1, nullptr, true, "dB" },
+        { "cpGate",    "Gate",                        K::linear,  -80, 0, -80, 1, nullptr, false, "dB" },
+        { "cpAmount",  "Amount",                      K::linear,  0, 1, 0.25f, 1, nullptr, true, "%" },
+        { "cpAttack",  "Attack",                      K::choice,  0, 5, 2, 1, "0.05 MS|0.3 MS|1 MS|3 MS|10 MS|30 MS", false, "" },
+        { "cpRelease", "Release",                     K::choice,  0, 5, 5, 1, "20 MS|60 MS|150 MS|400 MS|1 S|AUTO", false, "" },
+        { "cpKey",     "Key",                         K::choice,  0, 10, 0, 1, "SELF|SIDECHAIN|INPUT|DRUM 1|DRUM 2|DRUM 3|DRUM 4|DRUM 5|DRUM 6|DRUM 7|DRUM 8", false, "" },
+        { "cpDrive",   "Drive",                       K::linear,  0, 1, 0, 1, nullptr, true, "%" },
+        { "cpMix",     "Mix",                         K::linear,  0, 1, 1, 1, nullptr, true, "%" },
+        { "cpLevel",   "Level",                       K::linear,  -24, 12, 0, 1, nullptr, true, "dB" },
     };
 
     std::string fmt (const char* f, double v)
@@ -445,6 +455,7 @@ std::string longName (int id)
     if (id == rvDry)               return "Espace Dry";
     if (id == wtfLen)              return "WTF?! Steps";
     if (in (ecTime, ecMix))        return "Echo " + name;
+    if (in (cpIn, cpLevel))        return "Comp " + name;
     if (in (rdTake, rdPads))       return "Radio " + name;
     if (in (rdPadTune, rdPadLevel)) return "Radio Pads " + name;
     return name;

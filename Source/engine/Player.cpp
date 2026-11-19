@@ -130,6 +130,7 @@ void Player::prepare (double sampleRate, int maxBlock)
     crush.prepare (sr);
     space.prepare (sr);
     echo.prepare (sr);
+    comp.prepare (sr);
     for (auto& w : wet)
         w = 0.0f;
     volumeGain = juce::Decibels::decibelsToGain (get (snd::volume));
@@ -163,6 +164,7 @@ void Player::resetEffects()
     crush.reset();
     space.reset();
     echo.reset();
+    comp.reset();
 }
 
 void Player::setInstrument (const Instrument* i)
@@ -1677,7 +1679,7 @@ void Player::modulate (int offset, int n, const Transport& t, Chunk& c, bool atR
     const bool neutralNow = neutral.load (std::memory_order_relaxed);
     if (neutralNow)
         for (int id : { (int) snd::fModel, (int) snd::dModel, (int) snd::spOn, (int) snd::piOn, (int) snd::chOn, (int) snd::crOn,
-                        (int) snd::rvOn, (int) snd::ecOn, (int) snd::wtf })
+                        (int) snd::rvOn, (int) snd::ecOn, (int) snd::cpOn, (int) snd::wtf })
             c.v[id] = 0.0f;
     if (wasNeutral && ! neutralNow)
         glidePrimed = false;        // let go: the settings as they are now, not glided to from before
@@ -1963,6 +1965,25 @@ void Player::runChain (float* L, float* R, int n, const Chunk& c)
             default:
                 break;
         }
+    }
+
+    // COMP (SETTINGS), at the end: what it listens to, the host's signal at this chunk (when there is none, itself)
+    {
+        dsp::CompSettings cs;
+        cs.inDb = c.v[snd::cpIn];
+        cs.gateDb = c.v[snd::cpGate];
+        cs.amount = c.v[snd::cpAmount];
+        cs.attack = (int) c.v[snd::cpAttack];
+        cs.release = (int) c.v[snd::cpRelease];
+        cs.drive = c.v[snd::cpDrive];
+        cs.mix = c.v[snd::cpMix];
+        cs.levelDb = c.v[snd::cpLevel];
+        comp.set (cs);
+        const int key = juce::jlimit (0, 10, (int) c.v[snd::cpKey]);
+        const int source = key == 0 ? -1 : (key == 1 ? 2 : (key == 2 ? 0 : key));   // SIDECHAIN 2, INPUT 0, DRUM n: 3 + n
+        const float* kl = source >= 0 && follow[(size_t) source].l != nullptr ? follow[(size_t) source].l + chunkPos : nullptr;
+        const float* kr = kl != nullptr && follow[(size_t) source].r != nullptr ? follow[(size_t) source].r + chunkPos : nullptr;
+        stage (numStages, c.v[snd::cpOn] > 0.5f, [this, kl, kr] (float* l, float* r, int m) { comp.process (l, r, m, kl, kr); });
     }
 
     resampleChunk (L, R, n, c);
@@ -2322,6 +2343,7 @@ void Player::render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi
                     R[pos + i] += b[i];
                 }
         }
+        chunkPos = pos;
         runChain (L + pos, R + pos, m, c);
         pos = end;
     }

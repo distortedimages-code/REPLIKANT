@@ -1628,6 +1628,13 @@ private:
             const auto& bankName = pg.banks[(size_t) bank].name;
             viz = bankName == "filter env" ? "fenv" : (bankName == "drive" ? "drive" : "filter");
         }
+        if (viz == "settings" && ! m.capture)
+        {
+            // COMP's banks: its curve
+            const int bank = juce::jlimit (0, (int) pg.banks.size() - 1, m.bankOf[pg.name + juce::String (m.mode)]);
+            if (pg.banks[(size_t) bank].name.startsWith ("comp"))
+                viz = "comp";
+        }
         if (viz == "dtrig" || viz == "dsrc" || viz == "dpitch" || viz == "damp" || viz == "dtone" || viz == "dseq")
             paintDrumViz (g, viz, in);
         else
@@ -2131,6 +2138,52 @@ private:
                 g.fillEllipse (x - 4.5f, y - 4.5f, 9.0f, 9.0f);
             }
             // (what it sends, after its depth: on its key, under the screen)
+        }
+        else if (viz == "comp")
+        {
+            // COMP: what comes out for what goes in (-60 .. 0 dB, IN and LEVEL included), the level now on it, and
+            // how much is taken (the bar on the right)
+            const bool on = P (p, snd::cpOn) > 0.5f;
+            dsp::CompSettings cs;
+            cs.amount = liveValue (p, snd::cpAmount);
+            const float inDb = liveValue (p, snd::cpIn), lvDb = liveValue (p, snd::cpLevel);
+            auto meter = r.removeFromRight (16.0f);
+            r.removeFromRight (10.0f);
+            auto plot = r.withSizeKeepingCentre (juce::jmin (r.getWidth(), r.getHeight() * 1.6f), r.getHeight());
+            auto xOf = [plot] (float db) { return plot.getX() + plot.getWidth() * juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 60.0f); };
+            auto yOf = [plot] (float db) { return plot.getBottom() - plot.getHeight() * juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 72.0f); };
+            g.setColour (col::screenGrid);
+            for (int db = -60; db <= 0; db += 12)
+            {
+                g.drawVerticalLine ((int) xOf ((float) db), plot.getY(), plot.getBottom());
+                g.drawHorizontalLine ((int) yOf ((float) db), plot.getX(), plot.getRight());
+            }
+            juce::Path diag, path;
+            diag.startNewSubPath (xOf (-60.0f), yOf (-60.0f));
+            diag.lineTo (xOf (0.0f), yOf (0.0f));
+            stroke (diag, col::screenGhost, 1.0f);
+            for (int i = 0; i <= 120; ++i)
+            {
+                const float x = -60.0f + 0.5f * (float) i;
+                const float y = dsp::Comp::curve (cs, x + inDb) + lvDb;
+                if (i == 0) path.startNewSubPath (xOf (x), yOf (y)); else path.lineTo (xOf (x), yOf (y));
+            }
+            stroke (path, on ? col::sOrange : col::screenGhost, 2.2f);
+            const float level = p.player.comp.shownLevel.load() - inDb;
+            if (on && level > -60.0f)
+            {
+                const float y = dsp::Comp::curve (cs, level + inDb) + lvDb;
+                g.setColour (col::screenText);
+                g.fillEllipse (xOf (level) - 4.5f, yOf (y) - 4.5f, 9.0f, 9.0f);
+            }
+            const float gr = on ? juce::jlimit (0.0f, 30.0f, p.player.comp.shownReduction.load()) : 0.0f;
+            g.setColour (col::screenLine);
+            g.fillRoundedRectangle (meter, 4.0f);
+            g.setColour (col::sOrange);
+            g.fillRoundedRectangle (meter.withHeight (meter.getHeight() * gr / 30.0f), 4.0f);
+            text (g, "-" + juce::String (gr, 1), meter.withY (meter.getBottom() - 14.0f).withHeight (14.0f).expanded (8.0f, 0.0f), mono (9.0f), col::screenDim,
+                  juce::Justification::centred);
+            text (g, on ? juce::String ("in → out") : juce::String ("off"), plot.removeFromTop (14.0f), mono (10.0f), col::screenDim, juce::Justification::topLeft);
         }
         else if (viz == "scenes")
         {
@@ -3135,6 +3188,10 @@ void Machine::buildPages()
         b.ctls.push_back (monitor);
         b.ctls.push_back (choiceCtl ("Keys to", { "replik8", "synth" }, [&o] { return o.thru ? 1 : 0; }, [this, &o] (int v) { o.thru = v == 1; proc.settingsChanged(); }));
         pg.banks.push_back (std::move (b));
+        // COMP: at the end of the chain, before the volume
+        pg.banks.push_back ({ "comp", { S (snd::cpOn, "On"), sep (S (snd::cpIn)), S (snd::cpAmount), sep (S (snd::cpAttack)), S (snd::cpRelease),
+                                        sep (S (snd::cpMix)), S (snd::cpLevel) } });
+        pg.banks.push_back ({ "comp +", { as (S (snd::cpKey), Ctl::Look::display), sep (S (snd::cpGate)), sep (S (snd::cpDrive)) } });
         return pg;
     };
     auto amp = [&] (bool withVoices)
@@ -3462,6 +3519,16 @@ void Machine::buildPages()
         tip (*v, snd::ecWidth, "Les têtes réparties dans la stéréo : à 0, toutes au centre."_fr);
         tip (*v, snd::ecWear, "L'usure de la bande : pleurage, scintillement, saturation, aigus perdus à chaque passage."_fr);
         tip (*v, snd::ecMix, "Le niveau des échos, ajoutés au son sec (qui reste tel quel)."_fr);
+        tip (*v, snd::cpOn, "COMP : la dynamique à la toute fin de la chaîne, avant le volume."_fr);
+        tip (*v, snd::cpIn, "Le gain avant tout (jusqu'à +18 dB) : il pousse le compresseur, la gate et le drive."_fr);
+        tip (*v, snd::cpAmount, "Un seul bouton pour le seuil, le taux et le rattrapage. De 0 à 50 % : de rien du tout à un limiteur, le son reste à peu près aussi fort en se resserrant. Après 50 % : au-delà du limiteur, les coups passent sous leurs propres queues (pompe, aspiration)."_fr);
+        tip (*v, snd::cpAttack, "Lente (10, 30 ms) : les transitoires passent, ça claque. Rapide : tout est aplati."_fr);
+        tip (*v, snd::cpRelease, "Le temps de revenir. Court : ça pompe. AUTO : un retour rapide pour les pics, lent pour ce qui tient (à l'aise sur les nappes)."_fr);
+        tip (*v, snd::cpKey, "Ce que le compresseur écoute : SELF (le son lui-même), le sidechain du DAW, l'entrée, ou une piste du DRUM (une grosse caisse qui fait pomper le reste)."_fr);
+        tip (*v, snd::cpGate, "La gate, avant le compresseur : sous ce seuil, le son se ferme (tout à gauche : pas de gate)."_fr);
+        tip (*v, snd::cpDrive, "Une saturation douce après le compresseur, qui rend aussi du niveau."_fr);
+        tip (*v, snd::cpMix, "Le son compressé contre le son tel qu'il arrive (compression parallèle : les attaques gardées, le corps épaissi)."_fr);
+        tip (*v, snd::cpLevel, "Le niveau de sortie du COMP."_fr);
         tip (*v, snd::fSmooth, "Le temps que met le point pour rejoindre X, Y et Z quand ils sautent (0 à 200 ms) : des transitions lisses, ou nerveuses."_fr);
         tip (*v, snd::fTrim, "Le niveau à la sortie du cube (-24 à +12 dB)."_fr);
         for (int mi = 0; mi < snd::numMods; ++mi)

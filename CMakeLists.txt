@@ -50,6 +50,7 @@ add_library(rk_core STATIC
     Source/dsp/Modulators.cpp
     Source/dsp/Space.cpp
     Source/dsp/Echo.cpp
+    Source/dsp/Comp.cpp
     Source/dsp/Effects.cpp
     Source/dsp/Cycles.cpp
     Source/dsp/Polyphase.cpp

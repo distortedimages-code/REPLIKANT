@@ -1066,6 +1066,102 @@ static void testEcho()
     }
 }
 
+// COMP (0.4.5): nothing at 0, a limiter at the middle, past it the louder comes out quieter, a key that pumps,
+// the gate
+static void testComp()
+{
+    const double sr = 48000.0, pi = 3.14159265358979;
+    auto sine = [sr, pi] (float level, double seconds)
+    {
+        std::vector<float> v ((size_t) (seconds * sr));
+        for (size_t i = 0; i < v.size(); ++i)
+            v[i] = level * (float) std::sin (2.0 * pi * 200.0 * (double) i / sr);
+        return v;
+    };
+    auto run = [sr] (CompSettings cs, std::vector<float> l, const std::vector<float>* key = nullptr)
+    {
+        Comp c;
+        c.prepare (sr);
+        c.set (cs);
+        c.reset();
+        auto r = l;
+        for (size_t at = 0; at < l.size(); at += 32)
+        {
+            const int n = (int) std::min<size_t> (32, l.size() - at);
+            c.process (l.data() + at, r.data() + at, n, key != nullptr ? key->data() + at : nullptr, nullptr);
+        }
+        return l;
+    };
+    auto peakDb = [] (const std::vector<float>& v, size_t from, size_t to)
+    {
+        float p = 0.0f;
+        for (size_t i = from; i < to && i < v.size(); ++i) p = std::max (p, std::abs (v[i]));
+        return 20.0f * std::log10 (p + 1.0e-9f);
+    };
+    {
+        CompSettings cs;
+        cs.amount = 0.0f;
+        auto in = sine (0.5f, 0.5);
+        auto out = run (cs, in);
+        float worst = 0.0f;
+        for (size_t i = 0; i < in.size(); ++i) worst = std::max (worst, std::abs (out[i] - in[i]));
+        CHECK (worst < 1.0e-4f, "AMOUNT 0: nothing done (%.2e)", worst);
+    }
+    {
+        CompSettings cs;
+        cs.amount = 0.5f;
+        cs.attack = 1;
+        cs.release = 1;
+        // loud and soft by turns (-6 and -18 dB, 150 ms each): the middle brings them together, past it the loud
+        // ones come out under the soft ones
+        auto turns = sine (0.5f, 2.0);
+        for (size_t i = 0; i < turns.size(); ++i)
+            if ((i / 7200) % 2 == 1)
+                turns[i] *= 0.25f;
+        auto out = run (cs, turns);
+        const float loud = peakDb (out, 7200 * 10 + 2400, 7200 * 11), soft = peakDb (out, 7200 * 11 + 2400, 7200 * 12);
+        CHECK (std::abs (loud - soft) < 2.0f, "the middle limits: -6 dB in → %.1f, -18 dB in → %.1f", loud, soft);
+        cs.amount = 1.0f;
+        out = run (cs, turns);
+        const float over = peakDb (out, 7200 * 10 + 2400, 7200 * 11), under = peakDb (out, 7200 * 11 + 2400, 7200 * 12);
+        CHECK (over < under - 2.0f, "past it, louder in comes out quieter: -6 dB → %.1f, -18 dB → %.1f", over, under);
+        // and the loudness kept, whatever AMOUNT
+        auto level = [] (const std::vector<float>& v) { double e = 0; for (size_t i = v.size() / 2; i < v.size(); ++i) e += (double) v[i] * v[i];
+                                                         return 10.0 * std::log10 (e / (double) (v.size() / 2) + 1e-30); };
+        const double ref = level (turns);
+        double worst = 0.0;
+        for (float a : { 0.25f, 0.5f, 0.75f, 1.0f })
+        {
+            cs.amount = a;
+            worst = std::max (worst, std::abs (level (run (cs, turns)) - ref));
+        }
+        CHECK (worst < 2.5, "COMP keeps the loudness (worst %.1f dB)", worst);
+    }
+    {
+        // a key bursting every 250 ms for 60 ms: the sine ducks with it
+        CompSettings cs;
+        cs.amount = 0.5f;
+        cs.attack = 0;
+        cs.release = 1;
+        auto in = sine (0.1f, 1.0);
+        std::vector<float> key (in.size(), 0.0f);
+        for (size_t i = 0; i < key.size(); ++i)
+            if (i % 12000 < 2880)
+                key[i] = 0.8f * (float) std::sin (2.0 * pi * 60.0 * (double) i / sr);
+        auto out = run (cs, in, &key);
+        const float during = peakDb (out, 24000 + 1500, 24000 + 2800), between = peakDb (out, 24000 + 9000, 24000 + 11900);
+        CHECK (during < between - 8.0f, "the key pumps it: %.1f dB under the burst, %.1f between", during, between);
+    }
+    {
+        CompSettings cs;
+        cs.gateDb = -40.0f;
+        auto out = run (cs, sine (0.001f, 0.5));
+        CHECK (peakDb (out, 12000, 24000) < -100.0f, "the gate closes under its threshold: %.1f dB", peakDb (out, 12000, 24000));
+        auto open = run (cs, sine (0.1f, 0.5));
+        CHECK (peakDb (open, 12000, 24000) > -21.0f, "and stays open over it: %.1f dB", peakDb (open, 12000, 24000));
+    }
+}
+
 int main()
 {
     testOversampler();
@@ -1077,6 +1173,7 @@ int main()
     testNoClicks();
     testEffectLevels();
     testEcho();
+    testComp();
     testModulators();
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;

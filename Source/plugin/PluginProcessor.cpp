@@ -824,7 +824,7 @@ void ReplikantProcessor::injectResample (rk::Channels audio)
     // the sound, to play it as it was heard (the Player holds the chain neutral until these are in)
     if (resampleOptions.resetFx)
         for (int id : { (int) snd::fModel, (int) snd::dModel, (int) snd::spOn, (int) snd::piOn, (int) snd::chOn, (int) snd::crOn,
-                        (int) snd::rvOn, (int) snd::ecOn, (int) snd::wtf })
+                        (int) snd::rvOn, (int) snd::ecOn, (int) snd::cpOn, (int) snd::wtf })
             setSoundParam (id, 0.0f);
     setSoundParam (snd::engine, (float) snd::sampler);
     setSoundParam (snd::playMode, 0.0f);

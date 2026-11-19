@@ -958,7 +958,7 @@ static void testSynth()
                 if (b == 0)
                     midi.addEvent (juce::MidiMessage::noteOn (1, 57, (juce::uint8) 127), 0);
                 if (reorder && b == 60)
-                    p.setFxOrder ({ 0, 1, 2, 3, 5, 4 });
+                    p.setFxOrder ({ 0, 1, 2, 3, 5, 6, 4 });
                 buf.clear();
                 p.render (buf, midi, {});
                 for (int i = 0; i < 256; ++i)
@@ -986,7 +986,7 @@ static void testSynth()
         CHECK (diff / (double) (a.size() - 25000) > 0.005 * Player::synthLevel && stepAtChange <= before * 1.05f, "reorder: %.4f apart, step %.3f against %.3f",
                diff / (double) (a.size() - 25000), stepAtChange, before);
         Player q;
-        q.setFxOrder ({ 0, 0, 1, 2, 3, 4 });
+        q.setFxOrder ({ 0, 0, 1, 2, 3, 4, 5 });
         CHECK (q.fxOrder()[1] == 1, "a stage twice is refused");
     }
 }
