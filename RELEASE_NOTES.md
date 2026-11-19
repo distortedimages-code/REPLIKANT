@@ -1,3 +1,9 @@
+**REPLIK8 0.4.15** : un S-mètre à aiguille et un VU de la radio.
+
+- **Les vu-mètres de la radio** : sur les pages TUNE, LISTEN, AIR, TAKE et PADS, la partie droite de l'écran montre maintenant un cadran à aiguille et, en dessous, une barre de niveau
+- **L'aiguille** : sur un récepteur ondes courtes, c'est son S-mètre, comme sur un vrai poste : de S1 à S9 (6 dB par point, S9 à -73 dBm), puis +20, +40, +60 en rouge pour les stations puissantes. Elle monte vite et redescend lentement, et aide à l'accord : elle grimpe quand tu tombes sur une station. Sur une station internet, sans signal radio à mesurer, c'est un VU-mètre de son son (0 VU à -18 dBFS)
+- **La barre** : le niveau du son tel qu'il arrive, avec son air, avant LEVEL, de -48 à 0 dBFS : sa moyenne allumée, ses crêtes par-dessus, la plus haute tenue un instant
+
 **REPLIK8 0.4.14** : le potard d'accord tourne lentement, et la bande défile sans coupure.
 
 - **Accord fin** : le gros potard FREQUENCY des ondes courtes tourne plus lentement que les autres : 40 pixels pour 1 kHz, un tour de son cadran (400 pixels) pour 10 kHz. Plus tu vas vite, plus il accélère (jusqu'à 10 kHz par pixel), pour traverser la bande d'un geste puis revenir lentement sur une station. Maj : encore plus fin. La molette : 1 kHz par cran (Maj : 0,1 kHz). L'afficheur montre toujours le dixième de kHz

@@ -1870,8 +1870,166 @@ private:
         }
         if (viz == "dtrig" || viz == "dsrc" || viz == "dpitch" || viz == "damp" || viz == "dtone" || viz == "dseq")
             paintDrumViz (g, viz, in);
+        else if (m.mode == Machine::radioMode && ! m.capture
+                 && (viz == "tune" || viz == "listen" || viz == "air" || viz == "take" || viz == "pads"))
+            paintRadioMeters (g, in);
         else
             paintViz (g, viz, in);
+    }
+
+    //------------------------------------------------------------------ (0.4.15) RADIO: its meters
+    // Above, a needle: a shortwave receiver's S-meter (S1 .. S9, 6 dB each, S9 at -73 dBm, then +20 .. +60 in red), or,
+    // for a station on the internet (nothing on the air to measure), a VU meter of its sound (0 VU at -18 dBFS RMS).
+    // Below, the sound's level as it comes through the air (before LEVEL): its RMS lit, its peaks over it, the highest
+    // held a moment
+    float needleAt = 0.0f, barRms = -90.0f, barPeak = -90.0f, holdDb = -90.0f;
+    double meterT = 0.0, holdT = 0.0;
+
+    void paintRadioMeters (juce::Graphics& g, juce::Rectangle<float> r)
+    {
+        auto& p = proc();
+        const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
+        const float dt = (float) juce::jlimit (0.0, 0.25, now - meterT);
+        meterT = now;
+        const int rx = juce::jlimit (0, radio::numRx - 1, (int) P (p, snd::rdRx));
+        const bool on = P (p, snd::rdOn) > 0.5f;
+        const int mc = p.radio.bank.rx[(size_t) rx].meterC.load (std::memory_order_relaxed);
+        const bool sw = p.hasRadioNet() && p.radioNet().getSource (rx).kind == 2;
+        const bool smeter = on && sw && mc != -32768;
+        const float rms = on ? p.radio.sigRms.load (std::memory_order_relaxed) : 0.0f;
+        const float pk = on ? p.radio.sigPeak.load (std::memory_order_relaxed) : 0.0f;
+        auto db = [] (float a) { return a > 1.0e-6f ? 20.0f * std::log10 (a) : -120.0f; };
+
+        // the needle's place (0 .. 1 along its scale)
+        const float dbm = (float) mc * 0.01f;
+        auto sPos = [] (float d)            // S0 (-127 dBm) .. S9 (-73): 0 .. 0.6; S9 .. +60 (-13): 0.6 .. 1
+        {
+            return d <= -73.0f ? 0.6f * juce::jlimit (0.0f, 1.0f, (d + 127.0f) / 54.0f) : 0.6f + 0.4f * juce::jlimit (0.0f, 1.0f, (d + 73.0f) / 60.0f);
+        };
+        auto vuPos = [] (float vu) { return juce::jlimit (0.0f, 1.0f, std::pow (10.0f, (vu - 3.0f) / 20.0f)); };   // a VU's face: in volts
+        const float vuNow = db (rms) + 18.0f;
+        const float target = ! on ? 0.0f : (smeter ? sPos (dbm) : vuPos (vuNow));
+        // its ballistics: an S-meter quick up and slow down, a VU as slow both ways
+        const float tc = smeter ? (target > needleAt ? 0.05f : 0.45f) : 0.3f;
+        needleAt += (target - needleAt) * (1.0f - std::exp (-dt / tc));
+
+        // ---- the needle's window
+        auto bar = r.removeFromBottom (juce::jmin (54.0f, r.getHeight() * 0.32f));
+        r.removeFromBottom (8.0f);
+        auto win = r;
+        g.setColour (col::screen.brighter (0.06f));
+        g.fillRoundedRectangle (win, 8.0f);
+        {
+            // a warm light behind the scale
+            juce::ColourGradient glow (col::sOrange.withAlpha (0.10f), win.getCentreX(), win.getY() + win.getHeight() * 0.35f,
+                                       col::sOrange.withAlpha (0.0f), win.getX(), win.getBottom(), true);
+            g.setGradientFill (glow);
+            g.fillRoundedRectangle (win, 8.0f);
+        }
+        g.setColour (col::screenLine);
+        g.drawRoundedRectangle (win, 8.0f, 1.0f);
+        {
+            juce::Graphics::ScopedSaveState keep (g);
+            g.reduceClipRegion (win.reduced (1.0f).toNearestInt());
+            const float half = juce::degreesToRadians (48.0f);
+            const juce::Point<float> pivot (win.getCentreX(), win.getBottom() + win.getHeight() * 0.62f);
+            const float R = pivot.y - (win.getY() + 30.0f);
+            auto at = [&] (float pos, float rad)
+            {
+                const float a = -half + 2.0f * half * pos;
+                return juce::Point<float> (pivot.x + std::sin (a) * rad, pivot.y - std::cos (a) * rad);
+            };
+            // the scale: its arc, white then red
+            const float redFrom = smeter ? 0.6f : vuPos (0.0f);
+            auto arc = [&] (float a0, float a1, juce::Colour c, float w)
+            {
+                juce::Path pa;
+                pa.addCentredArc (pivot.x, pivot.y, R, R, 0.0f, -half + 2.0f * half * a0, -half + 2.0f * half * a1, true);
+                g.setColour (c);
+                g.strokePath (pa, juce::PathStrokeType (w));
+            };
+            arc (0.0f, redFrom, col::screenText.withAlpha (0.8f), 1.5f);
+            arc (redFrom, 1.0f, col::sRed, 3.0f);
+            struct Mark { float pos; juce::String label; bool red; };
+            std::vector<Mark> marks;
+            if (smeter)
+            {
+                for (int s = 1; s <= 9; ++s)
+                    marks.push_back ({ sPos (-127.0f + 6.0f * (float) s), s % 2 == 1 ? juce::String (s) : juce::String(), false });
+                for (int plus : { 10, 20, 30, 40, 50, 60 })
+                    marks.push_back ({ sPos (-73.0f + (float) plus), plus % 20 == 0 ? "+" + juce::String (plus) : juce::String(), true });
+            }
+            else
+                for (int vu : { -20, -10, -7, -5, -3, -2, -1, 0, 1, 2, 3 })
+                    marks.push_back ({ vuPos ((float) vu), (vu == -20 || vu == -10 || vu == -5 || vu == -3 || vu == 0 || vu == 3) ? (vu > 0 ? "+" : "") + juce::String (vu) : juce::String(), vu > 0 });
+            for (auto& mk : marks)
+            {
+                const bool big = mk.label.isNotEmpty();
+                g.setColour (mk.red ? col::sRed : col::screenText.withAlpha (0.85f));
+                g.drawLine ({ at (mk.pos, R), at (mk.pos, R + (big ? 9.0f : 5.0f)) }, big ? 1.6f : 1.0f);
+                if (big)
+                    text (g, mk.label, juce::Rectangle<float> (34.0f, 14.0f).withCentre (at (mk.pos, R + 18.0f)), mono (11.0f, 600),
+                          mk.red ? col::sRed : col::screenText, juce::Justification::centred);
+            }
+            // what it reads, in its corners
+            text (g, smeter ? "S" : "VU", win.reduced (12.0f, 8.0f), grotesk (20.0f, 500), col::screenText.withAlpha (0.75f), juce::Justification::bottomLeft);
+            juce::String reading;
+            if (! on)
+                reading = "off air";
+            else if (smeter)
+            {
+                const int s = juce::jlimit (0, 9, (int) std::floor ((dbm + 127.0f) / 6.0f));
+                reading << "s" << s << (dbm > -73.0f ? "+" + juce::String (juce::roundToInt (dbm + 73.0f)) : juce::String())
+                        << " · "_fr << juce::roundToInt (dbm) << " dbm";
+            }
+            else
+                reading << (sw ? "no s-meter · " : "") << (vuNow < -40.0f ? juce::String ("--") : juce::String (juce::roundToInt (vuNow))) << " vu";
+            text (g, reading, win.reduced (12.0f, 9.0f), mono (11.0f), col::screenDim, juce::Justification::bottomRight);
+            // the needle, its shadow, the pivot's cap at the window's foot
+            const auto tip = at (needleAt, R + 12.0f), foot = at (needleAt, win.getHeight() * 0.05f);
+            g.setColour (juce::Colours::black.withAlpha (0.35f));
+            g.drawLine ({ foot.translated (2.0f, 2.0f), tip.translated (2.0f, 2.0f) }, 2.2f);
+            g.setColour (col::screenText);
+            g.drawLine ({ foot, tip }, 2.0f);
+            g.setColour (col::screen.darker (0.3f));
+            g.fillEllipse (juce::Rectangle<float> (64.0f, 64.0f).withCentre ({ pivot.x, win.getBottom() + 18.0f }));
+            g.setColour (col::screenLine);
+            g.drawEllipse (juce::Rectangle<float> (64.0f, 64.0f).withCentre ({ pivot.x, win.getBottom() + 18.0f }), 1.0f);
+        }
+
+        // ---- the bar: -48 .. 0 dBFS in segments (green, yellow from -12, red from -3)
+        const float rDb = db (rms), pDb = db (pk);
+        barRms += (rDb - barRms) * (1.0f - std::exp (-dt / (rDb > barRms ? 0.06f : 0.3f)));
+        barPeak = pDb > barPeak ? pDb : barPeak + (pDb - barPeak) * (1.0f - std::exp (-dt / 0.5f));
+        if (pDb >= holdDb || now - holdT > 1.5)
+        {
+            holdDb = pDb >= holdDb ? pDb : barPeak;
+            if (pDb >= holdDb - 0.01f)
+                holdT = now;
+        }
+        auto head = bar.removeFromTop (14.0f);
+        text (g, "audio", head, mono (10.0f), col::screenDim);
+        text (g, (! on || pDb < -90.0f) ? juce::String ("--") : juce::String (pDb, 1) + " dbfs", head, mono (10.0f), col::screenDim, juce::Justification::centredRight);
+        auto seg = bar.removeFromTop (16.0f);
+        auto labels = bar.removeFromTop (14.0f);
+        const int n = 36;
+        const float gap = 2.0f, sw2 = (seg.getWidth() - gap * (float) (n - 1)) / (float) n;
+        auto xOf = [&] (float d) { return seg.getX() + seg.getWidth() * juce::jlimit (0.0f, 1.0f, (d + 48.0f) / 48.0f); };
+        for (int i = 0; i < n; ++i)
+        {
+            const float d0 = -48.0f + 48.0f * (float) i / (float) n, d1 = -48.0f + 48.0f * (float) (i + 1) / (float) n;
+            const auto c = d1 > -3.0f ? col::sRed : (d1 > -12.0f ? col::sYellow : col::sGreen);
+            const bool lit = on && barRms >= d0, peakLit = on && barPeak >= d0, held = on && holdDb >= d0 && holdDb < d1;
+            const auto cell = juce::Rectangle<float> (seg.getX() + (float) i * (sw2 + gap), seg.getY(), sw2, seg.getHeight());
+            g.setColour (lit ? c : (peakLit ? c.withAlpha (0.45f) : (held ? c.withAlpha (0.9f) : col::screenLine.withAlpha (0.6f))));
+            g.fillRoundedRectangle (cell, 1.5f);
+        }
+        for (int d : { -48, -36, -24, -12, -6, -3, 0 })
+        {
+            const float x = xOf ((float) d);
+            text (g, juce::String (d), juce::Rectangle<float> (30.0f, 14.0f).withCentre ({ juce::jlimit (seg.getX() + 10.0f, seg.getRight() - 10.0f, x), labels.getCentreY() }),
+                  mono (9.0f), d > -3 ? col::sRed : col::screenDim, juce::Justification::centred);
+        }
     }
 
     // DRUM's pages: the track shown (its value on the first step lifted, if any)

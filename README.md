@@ -4,6 +4,11 @@
 
 **Page de téléchargement** : https://distortedimages-code.github.io/REPLIKANT/
 
+## La version 0.4.15 : les vu-mètres de la radio
+
+- **`Screen::paintRadioMeters`** (pages `tune`, `listen`, `air`, `take`, `pads` du mode RADIO, sous le rappel du réglage touché) : un cadran en arc (±48°, pivot sous la fenêtre). Ondes courtes avec S-mètre (`Rx::meterC`) : S0 à S9 (-127 à -73 dBm) sur 60 % de l'échelle, S9 à S9+60 (-13 dBm) sur le reste, montée 50 ms, descente 450 ms. Sinon : VU sur le RMS du son (`Engine::sigRms`, 0 VU = -18 dBFS), échelle en tension, 300 ms. Dessous : 36 segments de -48 à 0 dBFS (RMS 60/300 ms, crêtes `sigPeak` qui retombent en 0,5 s, la plus haute tenue 1,5 s).
+- **`radio::Engine::sigRms` / `sigPeak`** : le son après l'air, avant LEVEL et le squelch, mesuré bloc par bloc ; remis à zéro hors antenne.
+
 ## La version 0.4.14 : l'accord fin
 
 - **`Ctl::tuneGet` / `tuneSet` / `tuneRate`** : un potard `tuning` qui les a tourne au pixel en unités (0,025 kHz par pixel pour la fréquence), multiplié par 1 + (v / 250)² selon la vitesse lissée du geste v (pixels par seconde), 400 au plus ; Maj : ×0,4 sans accélération. L'`Encoder` garde la valeur fine (`tuneValue`), sous l'arrondi au dixième du setter ; la molette : `d` × 10 × 40 × `tuneRate` (1 kHz pour un cran de 0,1).

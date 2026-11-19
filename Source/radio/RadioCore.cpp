@@ -625,7 +625,8 @@ void Engine::listen (float* L, float* R, int n, const Settings& s)
     const float sgOpen = 1.0f / (0.002f * fsr), sgClose = 1.0f / (0.03f * fsr);
     const float shInc = shHz * isr;
     const float level = clamp01 (s.level) * 1.25f;
-    float peak = 0.0f;
+    float peak = 0.0f, sigPk = 0.0f;
+    double sigSum = 0.0;
 
     for (int i = 0; i < n; ++i)
     {
@@ -884,6 +885,8 @@ void Engine::listen (float* L, float* R, int n, const Settings& s)
                 dLp[c] += (y - dLp[c]) * dlpA;
                 x[c] += (dLp[c] - x[c]) * dmix;
             }
+        sigSum += (double) (x[0] * x[0] + x[1] * x[1]);
+        sigPk = std::max (sigPk, std::max (std::abs (x[0]), std::abs (x[1])));
         const float g = level * sqG;
         L[i] = x[0] * g;
         R[i] = x[1] * g;
@@ -894,6 +897,8 @@ void Engine::listen (float* L, float* R, int n, const Settings& s)
     loopSeconds.store (md == modeLive || cur < 0 ? 0.0f : (float) loopLen[cur] / (float) rate, std::memory_order_relaxed);
     gateOpen.store (sqG, std::memory_order_relaxed);
     heardLevel.store (std::max (peak, heardLevel.load (std::memory_order_relaxed) * 0.9f), std::memory_order_relaxed);
+    sigRms.store (n > 0 && std::isfinite (sigSum) ? (float) std::sqrt (sigSum / (2.0 * n)) : 0.0f, std::memory_order_relaxed);
+    sigPeak.store (std::isfinite (sigPk) ? sigPk : 0.0f, std::memory_order_relaxed);
     cutNow.store (md == modeCut ? cutStep : -1, std::memory_order_relaxed);
 
     // (nothing that isn't a number stays in the filters)
@@ -941,6 +946,8 @@ void Engine::render (float* L, float* R, int n, const Settings& s, const Event* 
         std::fill (R, R + n, 0.0f);
         mode = -1;
         heardLevel.store (0.0f, std::memory_order_relaxed);
+        sigRms.store (0.0f, std::memory_order_relaxed);
+        sigPeak.store (0.0f, std::memory_order_relaxed);
         gateOpen.store (1.0f, std::memory_order_relaxed);
         loopPos.store (-1.0f, std::memory_order_relaxed);
         int pos = 0;

@@ -206,6 +206,9 @@ namespace radio
         int64_t peaksWritten() const               { return peakW.load (std::memory_order_acquire); }
         float peakAt (int64_t index) const         { return peaks.empty() ? 0.0f : peaks[(size_t) (index % (int64_t) peaks.size())]; }
         std::atomic<float> loopPos { -1.0f }, loopSeconds { 0.0f }, gateOpen { 1.0f }, heardLevel { 0.0f };
+        // (0.4.15) the meters: the sound as it comes through the air (before LEVEL and the squelch), the last block's
+        // RMS and peak
+        std::atomic<float> sigRms { 0.0f }, sigPeak { 0.0f };
         std::array<std::atomic<float>, numPads> padGlow {};
         std::array<std::atomic<float>, numPads> padAt {};     // where each pad plays (0..1 of its slice), < 0 none
         // CUT: a new pattern at once (message thread); the screen: each step (-1 a rest, else its receiver, + 16 per
