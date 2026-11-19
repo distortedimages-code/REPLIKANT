@@ -49,6 +49,9 @@ namespace te
         int ticks = 0;                                   // the knob's graduations, evenly spread (0: none)
         // a choice's positions printed round its knob as pictures (a wave's shape...) instead of their names
         std::function<void (juce::Graphics&, int option, juce::Rectangle<float>, juce::Colour)> drawOption;
+        // (0.4.7) where a mod armed goes when this is turned, if not to `param` (a DRUM track's setting)
+        std::function<int()> modDest;
+        int routeDest() const                            { return modDest ? modDest() : param; }
         bool sepBefore = false;                          // a line before it on the desk (a new group)
         float quantum = 0.0f;                            // > 0: kept on whole multiples of it (in its own units)
         float dragPixels = 240.0f;                       // the drag that sweeps its whole range

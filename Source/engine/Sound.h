@@ -89,13 +89,28 @@ namespace snd
         ecOn, ecTime, ecSync, ecHeads, ecSpread, ecFeedback, ecTone, ecDir, ecMotion, ecSweep, ecRate, ecWidth, ecWear, ecMix,
         // (0.4.5) COMP, at the end of the chain (SETTINGS)
         cpOn, cpIn, cpGate, cpAmount, cpAttack, cpRelease, cpKey, cpDrive, cpMix, cpLevel,
+        // (0.4.7) RADIO's CUT: how many steps play, how wild they are
+        rdDensity, rdVary,
+        // (0.4.7) LIMIT, the last thing before the outputs (SETTINGS)
+        lmOn, lmCeiling, lmRelease, lmDrive,
         count
     };
 
     constexpr int numMods = 4, routesPerMod = 8, maxSteps = 16, numScenes = 16;
+    // (0.4.7) a mod can go to a DRUM track's setting too: those destinations come after the sound's own, a stride
+    // of 48 settings for each of the eight tracks
+    constexpr int drumDestStride = 48, drumDestTracks = 8;
+    inline int drumDest (int track, int param)      { return count + track * drumDestStride + param; }
+    inline bool isDrumDest (int d)                  { return d >= count && d < count + drumDestTracks * drumDestStride; }
+    inline int drumDestTrack (int d)                { return (d - count) / drumDestStride; }
+    inline int drumDestParam (int d)                { return (d - count) % drumDestStride; }
+    constexpr int numDests = count + drumDestTracks * drumDestStride;
     enum Engine { synth = 0, drum = 1, sampler = 2, radio = 3 };
     // what a scene can hold (everything but the scenes themselves and a few settings of the whole)
     bool sceneLockable (int id);
+    // what a mod can be routed to: the settings marked modulatable, and (0.4.7) the stepped ones that can change
+    // from one block to the next without harm (a choice, a count: the mod steps through them)
+    bool modulates (int id);
     enum ModSetting { mType, mShape, mSync, mDiv, mHz, mSmooth, mPolarity, mRetrig, mLen, mVari,
                       mAttack, mDecay, mSustain, mRelease, mSource, mGain, mAmt, modSettings };
     inline int modParam (int mod, ModSetting which)   { return m1Type + mod * modSettings + which; }

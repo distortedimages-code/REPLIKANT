@@ -525,6 +525,64 @@ static void testCpu()
     CHECK (secs / 10.0 < 0.08, "%.3f", secs / 10.0);
 }
 
+// (0.4.7) the mods on a track: taken at the hit (LEVEL down to nothing: silence), followed while it rings (the
+// cutoff closed by them halfway through a long noise), and what is turned on the track while it rings, followed too
+static void testMods()
+{
+    auto run = [] (float levelMod, float cutMod, float turnedCutoff)
+    {
+        Engine e;
+        e.allocate();
+        e.prepare (sr, 512);
+        e.setBanks (dsp::CycleBank::basics().get(), nullptr);
+        auto& tk = e.pattern (0).tr[0];
+        tk.reset (0);
+        tk.p[pSweep] = 0.0f; tk.p[pClick] = 0.0f; tk.p[pBody] = 0.0f; tk.p[pDrive] = 0.0f;
+        tk.p[pNoise] = 1.0f; tk.p[pTone] = 1.0f; tk.p[pDecay] = 1.0f;
+        tk.p[pFilter] = 0; tk.p[pCutoff] = 20000.0f; tk.p[pReso] = 0.0f; tk.p[pFEnv] = 0.0f;
+        std::vector<float> mods ((size_t) numTracks * Engine::modStride, 0.0f);
+        mods[(size_t) pLevel] = levelMod;
+        e.setMods (mods.data());
+        std::vector<float> l (512), r (512), out;
+        for (int b = 0; b < 40; ++b)
+        {
+            if (b == 20)
+            {
+                mods[(size_t) pCutoff] = cutMod;
+                e.setMods (mods.data());
+                if (turnedCutoff > 0.0f)
+                    tk.p[pCutoff] = turnedCutoff;
+            }
+            Engine::Event k { 0, firstNote, 127 };
+            e.render (l.data(), r.data(), 512, {}, 0.5f, &k, b == 0 ? 1 : 0);
+            out.insert (out.end(), l.begin(), l.end());
+        }
+        auto bright = [&out] (int from, int len)
+        {
+            double d = 0.0, a = 0.0;
+            for (int i = from; i < from + len; ++i)
+            {
+                const double x = out[(size_t) i], dx = x - out[(size_t) i - 1];
+                d += dx * dx;
+                a += x * x;
+            }
+            return std::sqrt (d / std::max (1.0e-12, a));
+        };
+        double e2 = 0.0;
+        for (int i = 0; i < 4096; ++i)
+            e2 += (double) out[(size_t) i] * out[(size_t) i];
+        return std::make_tuple (std::sqrt (e2 / 4096.0), bright (8192, 2048), bright (16384, 2048));
+    };
+    const auto [loud, b0, b1] = run (0.0f, 0.0f, 0.0f);
+    const auto [quiet, q0, q1] = run (-1.0f, 0.0f, 0.0f);
+    CHECK (loud > 0.05 && quiet < 1.0e-4, "LEVEL's mod taken at the hit: %.4f, down: %.6f", loud, quiet);
+    const auto [l2, c0, c1] = run (0.0f, -0.6f, 0.0f);
+    CHECK (c1 < 0.5 * c0 && std::abs (c0 - b0) < 0.2 * b0, "the cutoff closed by a mod while it rings: %.3f -> %.3f", c0, c1);
+    const auto [l3, t0, t1] = run (0.0f, 0.0f, 400.0f);
+    CHECK (t1 < 0.5 * t0, "the cutoff turned while it rings: %.3f -> %.3f", t0, t1);
+    (void) b1; (void) q0; (void) q1; (void) l2; (void) l3;
+}
+
 int main()
 {
     testParams();
@@ -534,6 +592,7 @@ int main()
     testKeysAndChoke();
     testSources();
     testFilterEnvelope();
+    testMods();
     testStorm();
     testCpu();
     std::printf ("%d checks, %d failed\n", checks, failures);

@@ -155,7 +155,23 @@ public:
         auto in = r.reduced (16.0f, 12.0f);
         zones.clear();
         tabs.clear();
-        paintTitle (g, in.removeFromTop (22.0f));
+        auto titleRow = in.removeFromTop (22.0f);
+        paintTitle (g, titleRow);
+        // (0.4.7) a mod armed: how to route it, over the title
+        if (m.arm.mod >= 0)
+        {
+            g.setColour (col::screen);
+            g.fillRect (titleRow.expanded (4.0f, 2.0f));
+            const auto c = col::mod (m.arm.mod);
+            auto pill = titleRow.withTrimmedRight (titleRow.getWidth() * 0.0f);
+            g.setColour (c.withAlpha (0.18f));
+            g.fillRoundedRectangle (pill, 6.0f);
+            g.setColour (c);
+            g.drawRoundedRectangle (pill, 6.0f, 1.2f);
+            text (g, "m" + juce::String (m.arm.mod + 1) + " · tourne un potard entouré : sa profondeur (à gauche : vers le bas) · double-clic : retirer · re-clique m"_fr
+                         + juce::String (m.arm.mod + 1) + " pour finir"_fr,
+                  pill.reduced (10.0f, 0.0f), mono (11.0f, 600), c.brighter (0.4f), juce::Justification::centredLeft, true);
+        }
         in.removeFromTop (8.0f);
         paintTabs (g, in);
         auto panel = in.removeFromRight (392.0f);
@@ -212,6 +228,11 @@ public:
                 repaint();
                 return;
             }
+        if (m.mode == Machine::radioMode && radioScreen.cutArea.contains (e.position))
+        {
+            proc().radio.cutRoll.store (true);         // CUT: another pattern
+            return;
+        }
         if (cubeShown && cubeArea.contains (e.position))
         {
             // the cube's point taken (X, Y, Z: the cutoff and the two settings, as automation gestures)
@@ -1843,6 +1864,8 @@ private:
             const int bank = juce::jlimit (0, (int) pg.banks.size() - 1, m.bankOf[pg.name + juce::String (m.mode)]);
             if (pg.banks[(size_t) bank].name.startsWith ("comp"))
                 viz = "comp";
+            else if (pg.banks[(size_t) bank].name == "limit")
+                viz = "limit";
         }
         if (viz == "dtrig" || viz == "dsrc" || viz == "dpitch" || viz == "damp" || viz == "dtone" || viz == "dseq")
             paintDrumViz (g, viz, in);
@@ -2409,6 +2432,47 @@ private:
                 g.fillEllipse (x - 4.5f, y - 4.5f, 9.0f, 9.0f);
             }
             // (what it sends, after its depth: on its key, under the screen)
+        }
+        else if (viz == "limit")
+        {
+            // LIMIT: how much it takes now (the last 4 s scrolling, newest on the right), CEILING
+            const bool on = P (p, snd::lmOn) > 0.5f;
+            const float gr = on ? juce::jlimit (0.0f, 24.0f, p.limiter.shownReduction.load()) : 0.0f;
+            const double t = juce::Time::getMillisecondCounterHiRes() * 0.001;
+            if (traceMod != 100)
+            {
+                trace.fill (0.0f);
+                traceMod = 100;
+            }
+            while (t - traceTime > 0.033)
+            {
+                traceTime = t - traceTime > 1.0 ? t : traceTime + 0.033;
+                trace[(size_t) traceAt] = gr;
+                traceAt = (traceAt + 1) % (int) trace.size();
+            }
+            auto head = r.removeFromTop (44.0f);
+            text (g, on ? "-" + juce::String (gr, 1) + " dB" : juce::String ("off"), head.removeFromLeft (head.getWidth() * 0.5f), grotesk (30.0f, 300),
+                  on ? col::screenText : col::screenDim, juce::Justification::centredLeft);
+            text (g, "ceiling " + juce::String (P (p, snd::lmCeiling), 1) + " dB", head, mono (11.0f), col::screenDim, juce::Justification::centredRight);
+            auto lane = r.reduced (0.0f, 6.0f);
+            g.setColour (col::screenGrid);
+            for (int db = 0; db <= 12; db += 3)
+                g.drawHorizontalLine ((int) (lane.getY() + lane.getHeight() * (float) db / 12.0f), lane.getX(), lane.getRight());
+            juce::Path path;
+            const int count = (int) trace.size();
+            for (int i = 0; i < count; ++i)
+            {
+                const float x = lane.getX() + lane.getWidth() * (float) i / (float) (count - 1);
+                const float y = lane.getY() + lane.getHeight() * juce::jlimit (0.0f, 1.0f, trace[(size_t) ((traceAt + i) % count)] / 12.0f);
+                if (i == 0)
+                    path.startNewSubPath (x, lane.getY());
+                path.lineTo (x, y);
+            }
+            path.lineTo (lane.getRight(), lane.getY());
+            path.closeSubPath();
+            g.setColour (col::sRed.withAlpha (on ? 0.35f : 0.12f));
+            g.fillPath (path);
+            text (g, "taken (0 to 12 dB)", lane.removeFromBottom (14.0f), mono (9.5f), col::screenDim, juce::Justification::bottomLeft);
         }
         else if (viz == "comp")
         {
@@ -3619,6 +3683,8 @@ void Machine::buildPages()
         pg.banks.push_back ({ "comp", { S (snd::cpOn, "On"), sep (S (snd::cpIn)), S (snd::cpAmount), sep (S (snd::cpAttack)), S (snd::cpRelease),
                                         sep (S (snd::cpMix)), S (snd::cpLevel) } });
         pg.banks.push_back ({ "comp +", { as (S (snd::cpKey), Ctl::Look::display), sep (S (snd::cpGate)), sep (S (snd::cpDrive)) } });
+        // LIMIT: the very last, after the volume
+        pg.banks.push_back ({ "limit", { S (snd::lmOn, "On"), sep (S (snd::lmCeiling)), S (snd::lmRelease), sep (S (snd::lmDrive)) } });
         return pg;
     };
     auto amp = [&] (bool withVoices)
@@ -3870,9 +3936,26 @@ void Machine::buildPages()
         tb.ctls.push_back (sep (S (snd::rdLevel)));
         tb.ctls.push_back (S (snd::rdStatic));
         v.push_back ({ "tune", "tune", { tb } });
-        v.push_back ({ "listen", "listen", { { "listen", { S (snd::rdOn), sep (S (snd::rdMode)), S (snd::rdTune), S (snd::rdLen, nullptr, loops),
-                                                              S (snd::rdSquelch, nullptr, modeIs (radio::modeLive)), S (snd::rdGrab, nullptr, modeIs (radio::modeLoop)),
-                                                              S (snd::rdDepth, nullptr, modeIs (radio::modeDig)), sep (S (snd::rdLevel)), S (snd::rdStatic) } } } });
+        // (CUT: its density and its variations in place of TUNE and STATIC; GRAB and DEPTH too)
+        auto notCut = [this] { return (int) P (proc, snd::rdMode) != radio::modeCut; };
+        auto cutOn = modeIs (radio::modeCut);
+        auto grabbing = [this] { const int rm = (int) P (proc, snd::rdMode); return rm == radio::modeLoop || rm == radio::modeCut; };
+        auto digging = [this] { const int rm = (int) P (proc, snd::rdMode); return rm == radio::modeDig || rm == radio::modeCut; };
+        auto rdTuneCtl = S (snd::rdTune);
+        rdTuneCtl.shown = notCut;
+        auto rdStaticCtl = S (snd::rdStatic);
+        rdStaticCtl.shown = notCut;
+        auto densityCtl = S (snd::rdDensity);
+        densityCtl.shown = cutOn;
+        auto varyCtl = S (snd::rdVary);
+        varyCtl.shown = cutOn;
+        auto grabCtl = S (snd::rdGrab);
+        grabCtl.shown = grabbing;
+        auto depthCtl = S (snd::rdDepth);
+        depthCtl.shown = digging;
+        v.push_back ({ "listen", "listen", { { "listen", { S (snd::rdOn), sep (S (snd::rdMode)), rdTuneCtl, S (snd::rdLen, nullptr, loops),
+                                                              S (snd::rdSquelch, nullptr, modeIs (radio::modeLive)), densityCtl, varyCtl, grabCtl,
+                                                              depthCtl, sep (S (snd::rdLevel)), rdStaticCtl } } } });
         v.push_back ({ "air", "air", { { "air", { S (snd::rdBand), S (snd::rdCentre), sep (S (snd::rdFade)), S (snd::rdRate), sep (S (snd::rdWhistle)),
                                                     S (snd::rdCrackle), sep (S (snd::rdDrive)), S (snd::rdStatic) } } } });
         v.push_back ({ "take", "take", { { "take", { S (snd::rdTake), sep (S (snd::rdSens)), S (snd::rdPads) } } } });
@@ -3892,12 +3975,14 @@ void Machine::buildPages()
         };
         rtip (snd::rdOn, "ON AIR : la radio écoutée. OFF : elle se tait (et lâche sa connexion au bout de 45 s), la prise et ses pads restent jouables."_fr);
         rtip (snd::rdRx, "Le récepteur écouté : quatre, chacun accordé dans la page TUNE (une station, ou une fréquence sur un récepteur ondes courtes). Seul celui qu'on écoute reste connecté."_fr);
-        rtip (snd::rdMode, "LIVE : ce que joue le récepteur, maintenant. LOOP : sa dernière LENGTH rejouée en mesure, une nouvelle prise au hasard (GRAB). DIG : à chaque tour, LENGTH prise plus loin en arrière (DEPTH)."_fr);
+        rtip (snd::rdMode, "LIVE : ce que joue le récepteur, maintenant. LOOP : sa dernière LENGTH rejouée en mesure, une nouvelle prise au hasard (GRAB). DIG : à chaque tour, LENGTH prise plus loin en arrière (DEPTH). CUT : un rythme découpé dans tous les récepteurs accordés à la fois, un morceau au hasard sur chaque pas (clique le motif sur l'écran pour en tirer un autre)."_fr);
         rtip (snd::rdTune, "En LIVE : le son décalé vers le haut ou le bas comme par un récepteur accordé à côté (±600 Hz, la voix de canard d'une BLU mal calée). En LOOP et DIG : la transposition, comme une bande."_fr);
-        rtip (snd::rdLen, "La boucle, du seizième à deux mesures, au tempo."_fr);
+        rtip (snd::rdLen, "La boucle, du seizième à deux mesures, au tempo. En CUT : combien de pas (des seizièmes)."_fr);
+        rtip (snd::rdDensity, "CUT : la part des pas qui jouent (le reste : des silences)."_fr);
+        rtip (snd::rdVary, "CUT : des pas en ratchet, joués à l'envers, coupés court. À 0, chaque pas joue son morceau tel quel."_fr);
         rtip (snd::rdSquelch, "Seul ce qui est assez fort passe (de -66 à -10 dB) : sur une voix, il hache entre les mots."_fr);
-        rtip (snd::rdGrab, "La chance qu'un tour prenne une nouvelle boucle. KEEP : la première reste. À fond : une nouvelle à chaque tour."_fr);
-        rtip (snd::rdDepth, "Jusqu'où DIG va chercher en arrière : de 1 à 20 s."_fr);
+        rtip (snd::rdGrab, "La chance qu'un tour prenne une nouvelle boucle (en CUT : que chaque pas soit tiré à nouveau). KEEP : la première reste. À fond : une nouvelle à chaque tour."_fr);
+        rtip (snd::rdDepth, "Jusqu'où DIG (et CUT) va chercher en arrière : de 1 à 20 s."_fr);
         rtip (snd::rdStatic, "Le souffle et les craquements de l'air : ce qu'on entend seul quand rien n'arrive."_fr);
         rtip (snd::rdBand, "La largeur du récepteur, de FULL à 250 Hz (un filtre à quatre pôles)."_fr);
         rtip (snd::rdCentre, "Où la bande se place quand elle se resserre, de 300 Hz à 3 kHz."_fr);
@@ -3956,6 +4041,10 @@ void Machine::buildPages()
         tip (*v, snd::cpDrive, "Une saturation douce après le compresseur, qui rend aussi du niveau."_fr);
         tip (*v, snd::cpMix, "Le son compressé contre le son tel qu'il arrive (compression parallèle : les attaques gardées, le corps épaissi)."_fr);
         tip (*v, snd::cpLevel, "Le niveau de sortie du COMP."_fr);
+        tip (*v, snd::lmOn, "LIMIT : la toute dernière étape, après le volume. Rien ne sort au-dessus de CEILING, quoi que fassent les filtres, les drives et les effets."_fr);
+        tip (*v, snd::lmCeiling, "Le plafond : rien ne sort au-dessus, crêtes entre les échantillons comprises (-0,3 dB par défaut)."_fr);
+        tip (*v, snd::lmRelease, "Le temps de remonter après une crête. Court : plus fort, plus serré. Long : plus doux."_fr);
+        tip (*v, snd::lmDrive, "Pousse le son dans le limiteur (jusqu'à +12 dB) : plus fort, plus dense."_fr);
         tip (*v, snd::fSmooth, "Le temps que met le point pour rejoindre X, Y et Z quand ils sautent (0 à 200 ms) : des transitions lisses, ou nerveuses."_fr);
         tip (*v, snd::fTrim, "Le niveau à la sortie du cube (-24 à +12 dB)."_fr);
         for (int mi = 0; mi < snd::numMods; ++mi)
@@ -4399,6 +4488,13 @@ void Machine::layoutEncoders()
         focus = shown[0];
     for (auto& e : encoders)
         e->focused = e->getCtl() != nullptr && e->getCtl() == focus;
+}
+
+void Machine::setArmedMod (int mod)
+{
+    arm.mod = juce::jlimit (-1, snd::numMods - 1, mod);
+    arm.scene = -1;
+    armChanged();
 }
 
 void Machine::setKeyStyle (int style)

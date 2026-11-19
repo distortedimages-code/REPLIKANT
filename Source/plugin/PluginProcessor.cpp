@@ -155,6 +155,8 @@ void ReplikantProcessor::prepareToPlay (double sr, int block)
     synthMidi.ensureSize (2048);
     radio.prepare (sr, block);
     drum.prepare (sr, juce::jmax (block, 4096) * 2);
+    limiter.prepare (sr);
+    setLatencySamples (limiter.latency());          // (LIMIT's look-ahead, on or off: always the same)
     radioBuffer.setSize (2, juce::jmax (block, 4096) * 2, false, true, false);
     followCopy.setSize (4, juce::jmax (block, 4096) * 2, false, true, false);
     outMidi.ensureSize (4096);
@@ -344,7 +346,9 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     // (the capture page over the RADIO: the radio quiet, as the other modes are, its receiver kept connected)
     const bool wanted = player.get (snd::rdOn) > 0.5f;
     const bool onAir = wanted && ! captureOpen.load();
-    radio.bank.use.store (radioOn && wanted && ! sampling ? 1 << juce::jlimit (0, radio::numRx - 1, (int) player.get (snd::rdRx)) : 0,
+    // (the receiver moved by a mod, or CUT playing them all: every receiver kept connected)
+    const bool allRx = player.modulatedNorm (snd::rdRx) >= 0.0f || (int) player.get (snd::rdMode) == radio::modeCut;
+    radio.bank.use.store (radioOn && wanted && ! sampling ? (allRx ? (1 << radio::numRx) - 1 : 1 << juce::jlimit (0, radio::numRx - 1, (int) player.get (snd::rdRx))) : 0,
                           std::memory_order_relaxed);
     const bool drumOn = (int) player.get (snd::engine) == snd::drum && drum.allocated();
     if (! sampling && (radioOn || drumOn) && n <= radioBuffer.getNumSamples())
@@ -364,9 +368,11 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         auto V = [this] (int id) { const float m = player.modulatedNorm (id); return m >= 0.0f ? snd::fromNorm (id, m) : player.get (id); };
         radio::Settings rs;
         rs.on = onAir;
-        rs.rx = (int) player.get (snd::rdRx);
-        rs.mode = (int) player.get (snd::rdMode);
-        rs.len = (int) player.get (snd::rdLen);
+        rs.rx = (int) V (snd::rdRx);
+        rs.mode = (int) V (snd::rdMode);
+        rs.len = (int) V (snd::rdLen);
+        rs.density = V (snd::rdDensity);
+        rs.vary = V (snd::rdVary);
         rs.squelch = V (snd::rdSquelch);
         rs.grab = V (snd::rdGrab);
         rs.depth = V (snd::rdDepth);
@@ -412,7 +418,9 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
             drumClockWas = own;
             dc.bpm = transport.bpm;
             static_assert (Player::numWtfPulls == drum::Engine::numWtf, "WTF's pulls, one for one");
-            drum.setWtf (player.wtfPulls());          // (the player's, a block late: drawn as it renders)
+            drum.setWtf (player.wtfPulls());
+            static_assert (drum::Engine::modStride == snd::drumDestStride && drum::numTracks == snd::drumDestTracks);
+            drum.setMods (player.drumMods());          // (the player's, a block late: drawn as it renders)
             drum.render (rl, rr, n, dc, player.get (snd::drSwing), radioEvents.data(), (int) radioEvents.size());
         }
         if (mon == 2 && kept[0] != nullptr)
@@ -434,6 +442,18 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         player.setFollowSignal (0, followIn[0], followIn[1]);
         player.setFollowSignal (2, followSc[0], followSc[1]);
         player.render (out, playMidi, transport, kept[0] != nullptr ? kept : nullptr, numIn, mon == 2);
+    }
+
+    // LIMIT: nothing past CEILING goes out (its settings as set: not moved by the mods)
+    {
+        dsp::LimiterSettings ls;
+        ls.on = player.get (snd::lmOn) > 0.5f;
+        ls.ceilingDb = player.get (snd::lmCeiling);
+        ls.releaseMs = player.get (snd::lmRelease);
+        ls.driveDb = player.get (snd::lmDrive);
+        limiter.set (ls);
+        if (out.getNumChannels() > 0)
+            limiter.process (out.getWritePointer (0), out.getWritePointer (juce::jmin (1, out.getNumChannels() - 1)), n);
     }
 
     rememberOutput (out, n);
@@ -1321,7 +1341,11 @@ juce::var ReplikantProcessor::modsToVar() const
             if (d < 0)
                 continue;
             auto* ro = new juce::DynamicObject();
-            ro->setProperty ("to", juce::String (snd::def (d).id));
+            // (a DRUM track's setting: "drum3.cut")
+            if (snd::isDrumDest (d))
+                ro->setProperty ("to", "drum" + juce::String (snd::drumDestTrack (d) + 1) + "." + juce::String (drum::def (snd::drumDestParam (d)).id));
+            else
+                ro->setProperty ("to", juce::String (snd::def (d).id));
             ro->setProperty ("amount", (double) r.amount.load());
             routes.add (juce::var (ro));
         }
@@ -1355,8 +1379,18 @@ void ReplikantProcessor::modsFromVar (const juce::var& v)
         if (auto* rs = o["routes"].getArray())
             for (auto& r : *rs)
             {
-                const int d = snd::find (r["to"].toString().toStdString());
-                if (d >= 0 && snd::def (d).modulatable)
+                const auto to = r["to"].toString();
+                int d = snd::find (to.toStdString());
+                if (to.startsWith ("drum") && to.containsChar ('.'))
+                {
+                    const int t = to.fromFirstOccurrenceOf ("drum", false, false).upToFirstOccurrenceOf (".", false, false).getIntValue() - 1;
+                    const auto id = to.fromFirstOccurrenceOf (".", false, false);
+                    d = -1;
+                    for (int q = 0; q < drum::numParams && t >= 0 && t < drum::numTracks; ++q)
+                        if (id == drum::def (q).id)
+                            d = snd::drumDest (t, q);
+                }
+                if (d >= 0 && snd::modulates (d))
                     player.setRoute (m, d, (float) (double) r["amount"]);
             }
         if (auto* st = o["steps"].getArray())

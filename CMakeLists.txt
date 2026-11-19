@@ -5,7 +5,7 @@ if(APPLE)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Universal binary")
 endif()
 
-project(REPLIKANT VERSION 0.4.6 LANGUAGES C CXX)
+project(REPLIKANT VERSION 0.4.7 LANGUAGES C CXX)
 
 # GitHub repository whose releases the plug-in checks for updates (public releases).
 set(RK_UPDATE_REPO "distortedimages-code/REPLIKANT" CACHE STRING "owner/repo checked for updates (empty = no update check)")
@@ -51,6 +51,7 @@ add_library(rk_core STATIC
     Source/dsp/Space.cpp
     Source/dsp/Echo.cpp
     Source/dsp/Comp.cpp
+    Source/dsp/Limiter.cpp
     Source/dsp/Effects.cpp
     Source/dsp/Cycles.cpp
     Source/dsp/Polyphase.cpp

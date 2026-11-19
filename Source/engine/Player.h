@@ -316,12 +316,15 @@ private:
     // WTF?!: what it pulls each setting by (drawn every eighth note, glided to), the draw's step
     static constexpr int wtfCount = 10;
     std::array<float, wtfCount> wtfTarget {}, wtfNow {};
+    std::array<float, snd::drumDestTracks * snd::drumDestStride> drumOff {};
     int64_t wtfStep = -1;
     uint32_t wtfRng = 0x7f4a7c15u, wtfSeedNow = 0x7f4a7c15u;
     void applyWtf (double ppq, int n, Chunk&);
 public:
     // WTF?!'s pulls now (normalised, its amount in them): the DRUM takes them for its hits
     const float* wtfPulls() const        { return wtfNow.data(); }
+    // (0.4.7) what the mods add to each DRUM track's settings (normalised), the last chunk's: track * 48 + setting
+    const float* drumMods() const        { return drumOff.data(); }
     static constexpr int numWtfPulls = wtfCount;
     // LOOP's draws come from this seed (kept with the sound): a new one, a new loop (LIVE: a new draw at once)
     std::atomic<uint32_t> wtfSeed { 0x7f4a7c15u };

@@ -199,7 +199,7 @@ void Player::allNotesOff (bool immediately)
 //============================================================================== routes
 bool Player::setRoute (int mod, int dest, float amount)
 {
-    if (mod < 0 || mod >= snd::numMods || dest < 0 || dest >= snd::count)
+    if (mod < 0 || mod >= snd::numMods || dest < 0 || dest >= snd::numDests)
         return false;
     auto& rs = routes[(size_t) mod];
     amount = juce::jlimit (-1.0f, 1.0f, amount);
@@ -1627,6 +1627,7 @@ void Player::modulate (int offset, int n, const Transport& t, Chunk& c, bool atR
 
     float off[snd::count] {};
     bool moved[snd::count] {};
+    std::fill (drumOff.begin(), drumOff.end(), 0.0f);
     for (int m = 0; m < snd::numMods; ++m)
         for (auto& r : routes[(size_t) m])
         {
@@ -1636,6 +1637,8 @@ void Player::modulate (int offset, int n, const Transport& t, Chunk& c, bool atR
                 off[d] += r.amount.load (std::memory_order_relaxed) * mv[m];
                 moved[d] = true;
             }
+            else if (snd::isDrumDest (d))
+                drumOff[(size_t) (d - snd::count)] += r.amount.load (std::memory_order_relaxed) * mv[m];   // (DRUM's, apart)
         }
     // the scenes: each setting held by scene A or B goes from one to the other as the fader goes (a setting held
     // by one only, from where it is); then the modulators on top
@@ -1649,7 +1652,7 @@ void Player::modulate (int offset, int n, const Transport& t, Chunk& c, bool atR
         const float la = scenes[(size_t) sa][(size_t) i].load (std::memory_order_relaxed);
         const float lb = scenes[(size_t) sb][(size_t) i].load (std::memory_order_relaxed);
         const bool scened = ! (std::isnan (la) && std::isnan (lb));
-        const bool modded = moved[i] && snd::def (i).modulatable;
+        const bool modded = moved[i] && snd::modulates (i);
         if (! scened && ! modded)
         {
             c.v[i] = raw;

@@ -734,11 +734,102 @@ static void testCpu()
     delete f;
 }
 
+// CUT (0.4.7): a rhythm cut out of two receivers at once (one at 440 Hz, the other at 1200 Hz, each struck every
+// eighth): both heard, the steps drawn from both, DENSITY 0 leaves only the first step; a switch of receiver in LIVE
+// (a mod stepping through them) is ducked, not cut
+static void testCut()
+{
+    const double sr = 48000.0;
+    auto e = std::make_unique<radio::Engine>();
+    e->prepare (sr, 512);
+    e->allocate();
+    e->bank.setState (0, radio::live, radio::web);
+    e->bank.setState (1, radio::live, radio::web);
+    std::vector<int16_t> c0 (1024), c1 (1024);
+    double ph0 = 0, ph1 = 0;
+    int t = 0;
+    auto feed = [&] ()
+    {
+        for (int i = 0; i < 512; ++i, ++t)
+        {
+            const double env = std::exp (-(double) (t % 6000) / 1500.0);
+            const auto a = (int16_t) (14000.0 * env * std::sin (ph0));
+            const auto b = (int16_t) (14000.0 * env * std::sin (ph1));
+            ph0 += twoPi * 440.0 / radio::rate;
+            ph1 += twoPi * 1200.0 / radio::rate;
+            c0[(size_t) (2 * i)] = c0[(size_t) (2 * i + 1)] = a;
+            c1[(size_t) (2 * i)] = c1[(size_t) (2 * i + 1)] = b;
+        }
+        e->bank.push (0, c0.data(), 512);
+        e->bank.push (1, c1.data(), 512);
+    };
+    radio::Settings q;
+    q.stat = 0.0f;
+    q.mode = radio::modeLive;
+    std::vector<float> L (512), R (512), out;
+    double ppq = 0.0;
+    auto block = [&] (bool keep)
+    {
+        feed();
+        q.ppq = ppq;
+        e->render (L.data(), R.data(), 512, q, nullptr, 0);
+        ppq += 512.0 / sr * 2.0;            // (120 bpm)
+        if (keep)
+            out.insert (out.end(), L.begin(), L.end());
+    };
+    // three seconds of LIVE first: the receivers' histories fill (and a switch from RX 1 to RX 2 at 2.5 s)
+    float worst = 0.0f;
+    for (int b = 0; b < (int) (3.0 * sr / 512); ++b)
+    {
+        q.rx = b < (int) (2.5 * sr / 512) ? 0 : 1;
+        block (false);
+        if (b > (int) (2.4 * sr / 512))
+            for (int i = 1; i < 512; ++i)
+                worst = std::max (worst, std::abs (L[(size_t) i] - L[(size_t) i - 1]));
+    }
+    // (a 1200 Hz tone at 0.43 moves 0.07 a sample at most)
+    CHECK (worst < 0.1f, "LIVE, RX 1 to RX 2: ducked, no click (worst step %.3f)", worst);
+    q.mode = radio::modeCut;
+    q.playing = true;
+    q.bpm = 120.0;
+    q.len = 7;                  // sixteen steps
+    q.density = 1.0f;
+    q.vary = 0.0f;
+    q.grab = 0.0f;
+    q.depth = 2.0f;
+    for (int b = 0; b < (int) (4.0 * sr / 512); ++b)
+        block (true);
+    int fromA = 0, fromB = 0;
+    for (int j = 0; j < 16; ++j)
+    {
+        const int v = e->cutShown[(size_t) j].load();
+        fromA += v >= 0 && (v & 15) == 0 ? 1 : 0;
+        fromB += v >= 0 && (v & 15) == 1 ? 1 : 0;
+    }
+    CHECK (fromA > 0 && fromB > 0 && fromA + fromB == 16, "CUT draws from both receivers: %d and %d of 16", fromA, fromB);
+    CHECK (e->cutCount.load() == 16 && e->cutNow.load() >= 0, "sixteen steps, one playing (%d)", e->cutNow.load());
+    const int n = (int) out.size();
+    const double a = peakHz (out.data() + n / 2, 32768, sr, 380, 500, 2.0), bz = peakHz (out.data() + n / 2, 32768, sr, 1100, 1300, 2.0);
+    const double level = rms (out.data() + n / 2, n / 2);
+    CHECK (std::abs (a - 440.0) < 6.0 && std::abs (bz - 1200.0) < 8.0 && level > 0.02, "both heard: %.0f Hz and %.0f Hz (rms %.3f)", a, bz, level);
+    // DENSITY 0, drawn again: only the first step plays
+    q.density = 0.0f;
+    e->cutRoll.store (true);
+    out.clear();
+    for (int b = 0; b < (int) (2.0 * sr / 512); ++b)
+        block (true);
+    int rests = 0;
+    for (int j = 1; j < 16; ++j)
+        rests += e->cutShown[(size_t) j].load() < 0 ? 1 : 0;
+    CHECK (rests == 15 && e->cutShown[0].load() >= 0, "DENSITY 0: the first step alone (%d rests)", rests);
+}
+
 int main()
 {
     testDecoder();
     testFeed();
     testListen();
+    testCut();
     testHeard();
     testSlicer();
     testPads();

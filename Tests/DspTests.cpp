@@ -1259,6 +1259,62 @@ static void testListen()
     CHECK (w.state.load() == CycleListener::idle && w.take().empty(), "stopped before the threshold: nothing");
 }
 
+// LIMIT (0.4.7): nothing past CEILING (between the samples either), what stays under it comes out as it went in, the
+// latency it says
+static void testLimiter()
+{
+    const double sr = 48000.0, pi = 3.14159265358979;
+    Limiter lim;
+    lim.prepare (sr);
+    LimiterSettings ls;
+    ls.ceilingDb = -1.0f;
+    lim.set (ls);
+    lim.reset();
+    const int lat = lim.latency();
+    CHECK (lat >= 70 && lat <= 80, "LIMIT's latency at 48 kHz: %d frames", lat);
+    // a loud mess: noise, bursts at +12 dB, a sine near Nyquist (its peaks fall between the samples)
+    std::vector<float> l ((size_t) sr * 3), r;
+    std::mt19937 rng (9);
+    std::uniform_real_distribution<float> u (-1.0f, 1.0f);
+    for (size_t i = 0; i < l.size(); ++i)
+    {
+        const bool burst = (i / 4800) % 5 == 0;
+        l[i] = (burst ? 4.0f : 0.8f) * u (rng) + 1.5f * (float) std::sin (2.0 * pi * 11025.0 * (double) i / sr + 0.4);
+    }
+    r = l;
+    for (size_t at = 0; at < l.size(); at += 256)
+        lim.process (l.data() + at, r.data() + at, (int) std::min<size_t> (256, l.size() - at));
+    const float ceil = std::pow (10.0f, -1.0f / 20.0f);
+    float worst = 0.0f, between = 0.0f;
+    for (size_t i = 3; i < l.size(); ++i)
+    {
+        worst = std::max (worst, std::abs (l[i]));
+        for (float f : { 0.25f, 0.5f, 0.75f })
+        {
+            const float p0 = l[i - 3], p1 = l[i - 2], p2 = l[i - 1], p3 = l[i];
+            const float c1 = 0.5f * (p2 - p0), c2 = p0 - 2.5f * p1 + 2.0f * p2 - 0.5f * p3, c3 = 0.5f * (p3 - p0) + 1.5f * (p1 - p2);
+            between = std::max (between, std::abs (((c3 * f + c2) * f + c1) * f + p1));
+        }
+    }
+    CHECK (worst <= ceil + 1.0e-6f, "nothing over CEILING: %.4f (%.4f)", worst, ceil);
+    CHECK (between <= ceil * 1.035f, "between the samples, at most 0.3 dB over: %.4f", between);
+    // quiet: as it went in, only late
+    Limiter q;
+    q.prepare (sr);
+    q.set (ls);
+    q.reset();
+    std::vector<float> a ((size_t) sr / 2), b;
+    for (size_t i = 0; i < a.size(); ++i)
+        a[i] = 0.3f * (float) std::sin (2.0 * pi * 220.0 * (double) i / sr);
+    auto in = a;
+    b = a;
+    q.process (a.data(), b.data(), (int) a.size());
+    float diff = 0.0f;
+    for (size_t i = (size_t) lat; i < a.size(); ++i)
+        diff = std::max (diff, std::abs (a[i] - in[i - (size_t) lat]));
+    CHECK (diff < 1.0e-6f, "under CEILING: untouched, %d frames late (%.2e)", lat, diff);
+}
+
 int main()
 {
     testOversampler();
@@ -1272,6 +1328,7 @@ int main()
     testEcho();
     testComp();
     testListen();
+    testLimiter();
     testModulators();
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;

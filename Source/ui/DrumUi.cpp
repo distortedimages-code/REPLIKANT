@@ -109,7 +109,24 @@ Ctl drumCtl (ReplikantProcessor& p, DrumEdit& e, int param, const char* label, s
                 tk.lock[s][param] = v;
         else
             tk.p[param] = v;
+        // (0.4.7) the drum stopped: the track heard as it is turned (a hit every 180 ms at most)
+        if (! pp->drum.runningNow.load() && param != drum::pProb && param != drum::pMicro && param != drum::pRetrig
+            && param != drum::pCount && param != drum::pCurve && param != drum::pRVel)
+        {
+            static double last = 0.0;
+            const double now = juce::Time::getMillisecondCounterHiRes();
+            if (now - last > 180.0)
+            {
+                last = now;
+                const int note = drum::firstNote + trackShown (*pp);
+                pp->audition (note, 100, true);
+                pp->audition (note, 0, false);
+            }
+        }
     };
+    // (0.4.7) a mod armed and this turned: the mod goes to this track's setting
+    if (param != drum::pSource && param != drum::pChoke)
+        c.modDest = [pp, param] { return snd::drumDest (trackShown (*pp), param); };
     c.text = [value, isLocked, param]
     {
         const auto t = juce::String::fromUTF8 (drum::text (param, value()).c_str());

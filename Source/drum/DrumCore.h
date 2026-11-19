@@ -134,6 +134,10 @@ namespace drum
         // track taking them in its own order
         static constexpr int numWtf = 10;
         void setWtf (const float* pulls)          { for (int j = 0; j < numWtf; ++j) wtf[(size_t) j] = pulls[j]; }
+        // (0.4.7) what the mods add to each track's settings (normalised; track * modStride + setting), once a
+        // block: taken at each hit, and followed while a hit rings by the settings that can move under it
+        static constexpr int modStride = 48;
+        void setMods (const float* offsets)       { std::copy (offsets, offsets + numTracks * modStride, mods.begin()); }
 
         // ---- the screen
         std::array<std::atomic<int>, numTracks> stepNow {};      // the step each track plays, -1: stopped
@@ -146,6 +150,8 @@ namespace drum
         std::vector<Pattern> pats;
         std::atomic<int> playing { 0 }, queued { -1 };
         std::array<float, numWtf> wtf {};
+        std::array<float, numTracks * modStride> mods {};
+        float modded (int track, int param, float v, float extra = 0.0f) const;   // a setting with the mods' share
         std::array<std::atomic<int>, 64> chainSlots {};
         std::atomic<int> chainLen { 0 };
         int chainAt = 0;
@@ -166,6 +172,9 @@ namespace drum
             int track = 0;
             const Sound* sound = nullptr;
             float p[numParams];
+            float base[numParams];                // (p before the mods: they keep moving the settings that can)
+            float atHit[numParams];               // (the track's settings when it was hit: turned since, they follow)
+            int fromStep = -1;                    // (the step it came from; -1: a key)
             double pos = 0.0, step = 1.0;         // SAMPLE / SLICES: where it reads, how fast (frames)
             int from = 0, to = 0;                 // the frames it plays
             double phase = 0.0, mphase = 0.0;     // SYNTH: the oscillator; PMOD's sine
@@ -180,7 +189,7 @@ namespace drum
         };
         std::array<Voice, numTracks * 2> voices;
         void hit (int track, int step, float velMul, bool retrig);
-        void startVoice (int track, const float* p, float vel);
+        void startVoice (int track, const float* p, float vel, const float* base = nullptr, int step = -1);
         void renderVoice (Voice&, float* L, float* R, float* F, int n);   // F: its track's own (mono, added)
         std::array<std::vector<float>, numTracks> trackOut;
         int trackFrames = 0;

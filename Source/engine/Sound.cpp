@@ -195,7 +195,7 @@ namespace
         { "subFollow", "Follow",                      K::toggle,  0, 1, 1, 1, nullptr, false, "" },
         { "mxSub",     "Sub",                         K::linear,  0, 1, 0.7f, 1, nullptr, true, "%" },
         { "rdRx",      "Receiver",                    K::choice,  0, 3, 0, 1, "RX 1|RX 2|RX 3|RX 4", false, "" },
-        { "rdMode",    "Mode",                        K::choice,  0, 2, 0, 1, "LIVE|LOOP|DIG", false, "" },
+        { "rdMode",    "Mode",                        K::choice,  0, 3, 0, 1, "LIVE|LOOP|DIG|CUT", false, "" },
         { "rdLen",     "Length",                      K::choice,  0, 9, 7, 1, "1/16|1/8|3/16|1/4|3/8|1/2|3/4|1 BAR|1.5 BAR|2 BARS", false, "" },
         { "rdSquelch", "Squelch",                     K::linear,  0, 1, 0, 1, nullptr, true, "rsq" },
         { "rdGrab",    "Grab",                        K::linear,  0, 1, 0.25f, 1, nullptr, true, "rgb" },
@@ -258,6 +258,12 @@ namespace
         { "cpDrive",   "Drive",                       K::linear,  0, 1, 0, 1, nullptr, true, "%" },
         { "cpMix",     "Mix",                         K::linear,  0, 1, 1, 1, nullptr, true, "%" },
         { "cpLevel",   "Level",                       K::linear,  -24, 12, 0, 1, nullptr, true, "dB" },
+        { "rdDensity", "Density",                     K::linear,  0, 1, 0.75f, 1, nullptr, true, "%" },
+        { "rdVary",    "Vary",                        K::linear,  0, 1, 0.35f, 1, nullptr, true, "%" },
+        { "lmOn",      "Limit",                       K::toggle,  0, 1, 1, 1, nullptr, false, "" },
+        { "lmCeiling", "Ceiling",                     K::linear,  -12, 0, -0.3f, 1, nullptr, false, "dB" },
+        { "lmRelease", "Release",                     K::log,     10, 1000, 120, 1, nullptr, false, "ms" },
+        { "lmDrive",   "Drive",                       K::linear,  0, 12, 0, 1, nullptr, false, "dB" },
     };
 
     std::string fmt (const char* f, double v)
@@ -290,6 +296,24 @@ bool sceneLockable (int id)
 {
     return id >= 0 && id < count && id != xfade && id != sceneA && id != sceneB && id != tempo && id != quality
         && id != voices && id != voiceMode && id != engine && id != wtfMode;
+}
+
+bool modulates (int id)
+{
+    if (isDrumDest (id))
+        return true;                       // (DRUM: what can't move is left alone by the drum itself)
+    if (id < 0 || id >= count)
+        return false;
+    if (table[id].modulatable)
+        return true;
+    static const int stepped[] = { transpose, reverse, fModel, fType, dModel, spOct, spWave, piA, piB, chMode, oaBank, oaOct, oaSemi,
+                                   obBank, obOct, obSemi, orAlgo, orOct, orSemi, s1Wave, s2Wave, subMode, subOct, rdRx, rdMode, rdLen,
+                                   spClock, spMult, spDiv, spAssign, fCube, wtfMode, wtfLen, ecSync, ecHeads, ecDir, ecMotion,
+                                   cpAttack, cpRelease };
+    for (int s : stepped)
+        if (s == id)
+            return true;
+    return false;
 }
 
 const Def& def (int id)
@@ -456,6 +480,8 @@ std::string longName (int id)
     if (id == wtfLen)              return "WTF?! Steps";
     if (in (ecTime, ecMix))        return "Echo " + name;
     if (in (cpIn, cpLevel))        return "Comp " + name;
+    if (id == rdDensity || id == rdVary) return "Radio " + name;
+    if (in (lmOn, lmDrive))        return id == lmOn ? std::string ("Output Limit") : "Limit " + name;
     if (in (rdTake, rdPads))       return "Radio " + name;
     if (in (rdPadTune, rdPadLevel)) return "Radio Pads " + name;
     return name;

@@ -201,6 +201,12 @@ int main (int argc, char** argv)
     run (90);
     shoot ("51-reglages-comp.png");
     set (snd::cpOn, 0.0f);
+    // (0.4.7) LIMIT, pushed
+    set (snd::lmDrive, 12.0f);
+    view->showBank (3);
+    run (200);
+    shoot ("59-reglages-limit.png");
+    set (snd::lmDrive, 0.0f);
     // (0.4.5) the keyboard's three looks, a chord held
     view->showPage (0);
     for (int n : { 48, 52, 55, 58 })
@@ -214,6 +220,12 @@ int main (int argc, char** argv)
     view->setKeyStyle (0);
     run (20);
     shoot ("56-clavier-classic.png");
+    // (0.4.7) M1 armed on the filter's page: what it can go to ringed, the hint over the screen's title
+    view->showPage (5);
+    view->setArmedMod (0);
+    run (10);
+    shoot ("58-mod-arme.png");
+    view->setArmedMod (-1);
     for (int n : { 48, 52, 55, 58 })
         proc.audition (n, 0, false);
     set (snd::wtf, 0.0f);
@@ -494,6 +506,13 @@ int main (int argc, char** argv)
         view->showPage (3);
         realtime (0.6);
         shoot ("35-radio-prise.png");
+        // (0.4.7) CUT
+        set (snd::rdMode, 3.0f);
+        set (snd::rdVary, 0.6f);
+        view->showPage (1);
+        realtime (3.0);
+        shoot ("57-radio-cut.png");
+        set (snd::rdMode, 0.0f);
         view->showPage (2);
         realtime (0.6);
         shoot ("38-radio-air.png");

@@ -88,6 +88,7 @@ public:
     void stopSampling();
     bool isSampling() const                          { return worker.isSampling() || recorder.isRunning() || listener.busy(); }
     CycleListener listener;                          // CAPTURE CYCLES, LISTEN
+    dsp::Limiter limiter;                            // LIMIT, the last thing before the outputs
 
     InstrumentPtr getInstrument() const;
     void newInstrument();

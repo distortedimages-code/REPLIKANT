@@ -392,7 +392,7 @@ void Engine::schedule (int n, const Clock& c, float swing)
                 r.lastStep = j;
                 if (! tk.trig[s] || mute[t].load (std::memory_order_relaxed))
                     continue;
-                const float prob = tk.at (s, pProb);
+                const float prob = modded (t, pProb, tk.at (s, pProb));
                 if (prob < 0.999f && rng.uni() >= prob)
                     continue;
                 // the last hit's retrigs up to this one; then its own retrig, or its ratchet: the step split evenly
@@ -485,7 +485,7 @@ void Engine::schedule (int n, const Clock& c, float swing)
 }
 
 //============================================================================== the voices
-void Engine::startVoice (int track, const float* p, float vel)
+void Engine::startVoice (int track, const float* p, float vel, const float* base, int step)
 {
     // CHOKE: the others of its group cut (5 ms)
     const int group = idx (p[pChoke], 5);
@@ -504,6 +504,13 @@ void Engine::startVoice (int track, const float* p, float vel)
     v.active = true;
     v.track = track;
     std::memcpy (v.p, p, sizeof (v.p));
+    std::memcpy (v.base, base != nullptr ? base : p, sizeof (v.base));
+    v.fromStep = step;
+    {
+        const auto& tk = pats[(size_t) playing.load()].tr[track];
+        for (int i = 0; i < numParams; ++i)
+            v.atHit[i] = step >= 0 ? tk.at (step, i) : tk.p[i];
+    }
     const int src = idx (p[pSource], 3);
     const float fsr = (float) sr;
     v.sound = src == synth ? nullptr : usedSound[(size_t) track].load (std::memory_order_acquire);
@@ -552,6 +559,14 @@ void Engine::startVoice (int track, const float* p, float vel)
     v.fadeStep = 0.0f;
 }
 
+float Engine::modded (int track, int param, float v, float extra) const
+{
+    const float o = mods[(size_t) (track * modStride + param)] + extra;
+    if (! (std::abs (o) > 1.0e-5f))
+        return v;
+    return legal (param, fromNorm (param, clampf (toNorm (param, v) + o, 0.0f, 1.0f)));
+}
+
 void Engine::hit (int track, int step, float velMul, bool)
 {
     const auto& tk = pats[(size_t) playing.load()].tr[track];
@@ -571,7 +586,13 @@ void Engine::hit (int track, int step, float velMul, bool)
             id = pPosition;
         p[id] = legal (id, fromNorm (id, clampf (toNorm (id, p[id]) + o, 0.0f, 1.0f)));
     }
-    startVoice (track, p, p[pVel] * velMul);
+    // the mods: every setting of the hit (but its source and its choke group); the voice keeps where they started
+    float base[numParams];
+    std::memcpy (base, p, sizeof (base));
+    for (int i = 0; i < numParams; ++i)
+        if (i != pSource && i != pChoke)
+            p[i] = modded (track, i, p[i]);
+    startVoice (track, p, p[pVel] * velMul, base, step);
     glow[(size_t) track].store (1.0f, std::memory_order_relaxed);
 }
 
@@ -758,6 +779,20 @@ void Engine::render (float* L, float* R, int n, const Clock& c, float swing, con
             usedSound[(size_t) t].store (s, std::memory_order_release);
         }
     }
+    // what the mods move while a hit rings (block by block): its filter, drive, level, pan, colour
+    // (and what is turned on the track while it rings: followed too)
+    static const int moving[] = { pCutoff, pReso, pFEnv, pDrive, pLevel, pPan, pTone, pPmod, pNoise, pBody, pClick };
+    for (auto& v : voices)
+        if (v.active)
+        {
+            const auto& tk = pats[(size_t) playing.load()].tr[v.track];
+            for (int i : moving)
+            {
+                const float now = v.fromStep >= 0 ? tk.at (v.fromStep, i) : tk.p[i];
+                const float turned = toNorm (i, now) - toNorm (i, v.atHit[i]);
+                v.p[i] = modded (v.track, i, v.base[i], turned);
+            }
+        }
     hits.clear();
     schedule (n, c, swing);
     // the keys: track 1 on C1
@@ -780,7 +815,10 @@ void Engine::render (float* L, float* R, int n, const Clock& c, float swing, con
         if (h.velAbs >= 0.0f)
         {
             const auto& tk = pats[(size_t) playing.load()].tr[h.track];
-            startVoice (h.track, tk.p, h.velAbs);
+            float p[numParams];
+            for (int i = 0; i < numParams; ++i)
+                p[i] = i == pSource || i == pChoke ? tk.p[i] : modded (h.track, i, tk.p[i]);
+            startVoice (h.track, p, h.velAbs, tk.p, -1);
             glow[(size_t) h.track].store (1.0f, std::memory_order_relaxed);
         }
         else

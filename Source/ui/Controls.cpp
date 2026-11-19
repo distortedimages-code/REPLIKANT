@@ -275,7 +275,7 @@ void Encoder::setCtl (const Ctl* c)
 
 int Encoder::armedMod() const
 {
-    return ctl != nullptr && arm.mod >= 0 && ctl->param >= 0 && arm.player != nullptr && snd::def (ctl->param).modulatable ? arm.mod : -1;
+    return ctl != nullptr && arm.mod >= 0 && arm.player != nullptr && snd::modulates (ctl->routeDest()) ? arm.mod : -1;
 }
 
 int Encoder::armedScene() const
@@ -298,19 +298,19 @@ float Encoder::shownNorm() const
 
 juce::String Encoder::valueText (const Ctl& c, const Arming& arm)
 {
-    if (c.param >= 0 && arm.player != nullptr)
+    if (arm.player != nullptr && (c.param >= 0 || c.modDest))
     {
-        if (arm.mod >= 0 && snd::def (c.param).modulatable)
+        if (arm.mod >= 0 && snd::modulates (c.routeDest()))
         {
             // (+40 %: up from the setting, -40 %: down; ±40 %: both ways, inv: the other way round)
-            const float a = arm.player->routeAmount (arm.mod, c.param);
+            const float a = arm.player->routeAmount (arm.mod, c.routeDest());
             const bool bi = arm.player->get (snd::modParam (arm.mod, snd::mPolarity)) < 0.5f;
             const juce::String pct = juce::String (juce::roundToInt (std::abs (a) * 100.0f)) + " %";
             if (bi)
                 return "m" + juce::String (arm.mod + 1) + " " + juce::String::fromUTF8 ("\xc2\xb1") + pct + (a < 0 ? " inv" : "");
             return "m" + juce::String (arm.mod + 1) + " " + (a > 0 ? "+" : a < 0 ? "-" : "") + pct;
         }
-        if (arm.scene >= 0 && snd::sceneLockable (c.param))
+        if (c.param >= 0 && arm.scene >= 0 && snd::sceneLockable (c.param))
         {
             const float l = arm.player->sceneLock (arm.scene, c.param);
             if (! std::isnan (l))
@@ -386,7 +386,12 @@ void Encoder::paint (juce::Graphics& g)
     auto area = r;                                              // the control itself
     const float value = shownNorm();
     const int n = juce::jmax (1, ctl->options.size());
-    const int chosen = n > 1 ? juce::jlimit (0, n - 1, juce::roundToInt (value * (float) (n - 1))) : 0;
+    // (a choice moved by the mods, the scenes or WTF?!: the one it is on now; armed, the one set)
+    float live = value;
+    if (ctl->param >= 0 && arm.player != nullptr && armedMod() < 0 && armedScene() < 0)
+        if (const float now = arm.player->modulatedNorm (ctl->param); now >= 0.0f)
+            live = now;
+    const int chosen = n > 1 ? juce::jlimit (0, n - 1, juce::roundToInt (live * (float) (n - 1))) : 0;
     const bool sceneEdit = armedScene() >= 0;
 
     // a lamp: a lens in a dark bezel, lit (its glow round it) or dark, a glint on top
@@ -565,7 +570,7 @@ void Encoder::paint (juce::Graphics& g)
             if (const int m = armedMod(); m >= 0)
             {
                 // (±: both ways around the setting; +: one way, up or down as the amount goes)
-                const float a = arm.player->routeAmount (m, ctl->param);
+                const float a = arm.player->routeAmount (m, ctl->routeDest());
                 const bool bi = arm.player->get (snd::modParam (m, snd::mPolarity)) < 0.5f;
                 modTo = juce::jlimit (0.0f, 1.0f, value + a);
                 if (bi)
@@ -579,7 +584,7 @@ void Encoder::paint (juce::Graphics& g)
                 {
                     modTo = now;
                     for (int k = 0; k < snd::numMods; ++k)
-                        if (std::abs (arm.player->routeAmount (k, ctl->param)) > 1.0e-4f)
+                        if (std::abs (arm.player->routeAmount (k, ctl->routeDest())) > 1.0e-4f)
                         {
                             modColour = col::mod (k);
                             break;
@@ -606,15 +611,15 @@ void Encoder::paint (juce::Graphics& g)
         g.drawRoundedRectangle (lcd, 4.0f, 1.0f);
         text (g, valueText (*ctl, arm), lcd, mono (12.0f, 500), on ? juce::Colour (0xffd9e2e6) : juce::Colour (0xff6a7276), juce::Justification::centred);
     }
-    if (ctl->param >= 0 && arm.player != nullptr)
+    if (ctl->routeDest() >= 0 && arm.player != nullptr)
     {
         auto tag = tags;
         juce::Array<juce::Colour> marks;
         juce::String held;
         for (int m = 0; m < snd::numMods; ++m)
-            if (std::abs (arm.player->routeAmount (m, ctl->param)) > 1.0e-4f)
+            if (std::abs (arm.player->routeAmount (m, ctl->routeDest())) > 1.0e-4f)
                 marks.add (col::mod (m));
-        for (int side = 0; side < 2; ++side)
+        for (int side = 0; side < 2 && ctl->param >= 0; ++side)
         {
             const int sc = (int) arm.player->get (side == 0 ? snd::sceneA : snd::sceneB) - 1;
             if (! std::isnan (arm.player->sceneLock (sc, ctl->param)))
@@ -630,6 +635,21 @@ void Encoder::paint (juce::Graphics& g)
         }
         if (held.isNotEmpty())
             text (g, held, { x, tag.getY(), 18.0f, tag.getHeight() }, mono (11.0f, 600), col::violet);
+    }
+    // (0.4.7) a mod armed: what it can go to ringed in its colour, the rest veiled
+    if (arm.mod >= 0 && arm.player != nullptr)
+    {
+        const auto box = getLocalBounds().toFloat().reduced (3.0f);
+        if (armedMod() >= 0)
+        {
+            g.setColour (col::mod (arm.mod).withAlpha (0.9f));
+            g.drawRoundedRectangle (box, 11.0f, 1.6f);
+        }
+        else
+        {
+            g.setColour ((col::deck == col::body ? col::body : col::deck).withAlpha (0.6f));
+            g.fillRoundedRectangle (box, 11.0f);
+        }
     }
 }
 
@@ -647,7 +667,7 @@ void Encoder::setFrom (float norm)
     // (a route: -100 % .. +100 %, down from the setting as well as up)
     if (const int m = armedMod(); m >= 0)
     {
-        arm.player->setRoute (m, ctl->param, juce::jlimit (-1.0f, 1.0f, norm));
+        arm.player->setRoute (m, ctl->routeDest(), juce::jlimit (-1.0f, 1.0f, norm));
         if (arm.changed) arm.changed();
         if (ctl->changed)
             ctl->changed();
@@ -673,7 +693,7 @@ void Encoder::nudge (float delta, bool fine)
         return;
     if (const int m = armedMod(); m >= 0)
     {
-        const float a = arm.player->routeAmount (m, ctl->param);
+        const float a = arm.player->routeAmount (m, ctl->routeDest());
         setFrom (a + delta * (fine ? 0.15f : 1.0f));
         return;
     }
@@ -686,7 +706,7 @@ void Encoder::mouseDown (const juce::MouseEvent& e)
         return;
     dragged = false;
     stepAccum = 0.0f;
-    dragStart = armedMod() >= 0 ? arm.player->routeAmount (armedMod(), ctl->param) : shownNorm();
+    dragStart = armedMod() >= 0 ? arm.player->routeAmount (armedMod(), ctl->routeDest()) : shownNorm();
     juce::ignoreUnused (e);
     if (ctl->begin && ! arm.any())
     {
@@ -773,7 +793,7 @@ void Encoder::mouseDoubleClick (const juce::MouseEvent&)
         return;
     if (const int m = armedMod(); m >= 0)
     {
-        arm.player->setRoute (m, ctl->param, 0.0f);       // the route gone
+        arm.player->setRoute (m, ctl->routeDest(), 0.0f);       // the route gone
         if (arm.changed) arm.changed();
     }
     else if (const int sc = armedScene(); sc >= 0)
@@ -810,11 +830,12 @@ void Encoder::refreshIfChanged()
         return;
     juce::String sig;
     sig << shownNorm() << "|" << valueText (*ctl, arm) << "|" << (int) ctl->isEnabled() << "|" << (int) focused;
-    if (ctl->param >= 0 && arm.player != nullptr)
+    if (ctl->routeDest() >= 0 && arm.player != nullptr)
     {
-        sig << "|" << arm.player->modulatedNorm (ctl->param);
+        if (ctl->param >= 0)
+            sig << "|" << arm.player->modulatedNorm (ctl->param);
         for (int m = 0; m < snd::numMods; ++m)
-            sig << "|" << arm.player->routeAmount (m, ctl->param);
+            sig << "|" << arm.player->routeAmount (m, ctl->routeDest());
         sig << "|" << arm.mod << arm.scene << (int) arm.player->get (snd::sceneA) << (int) arm.player->get (snd::sceneB);
     }
     if (sig != lastSig)

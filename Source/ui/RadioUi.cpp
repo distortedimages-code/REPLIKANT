@@ -68,7 +68,9 @@ void RadioScreen::paint (juce::Graphics& g, juce::Rectangle<float> r, ReplikantP
         auto head = live.removeFromTop (14.0f);
         const int mode = (int) P (p, snd::rdMode);
         juce::String what = "heard · last "_fr + juce::String (juce::roundToInt (secs)) + " s";
-        if (mode != radio::modeLive && e.loopSeconds.load() > 0.0f)
+        if (mode == radio::modeCut)
+            what << " · cut "_fr << e.cutCount.load() << " steps";
+        else if (mode != radio::modeLive && e.loopSeconds.load() > 0.0f)
             what << " · "_fr << (mode == radio::modeLoop ? "loop " : "dig ") << juce::String (e.loopSeconds.load(), 2) << " s";
         text (g, what, head, mono (10.0f), col::screenDim);
         auto w = live;
@@ -116,9 +118,54 @@ void RadioScreen::paint (juce::Graphics& g, juce::Rectangle<float> r, ReplikantP
             g.fillRect (w.withLeft (w.getRight() - 40.0f));
             text (g, "sql", { w.getRight() - 40.0f, w.getY(), 40.0f, 12.0f }, mono (9.0f, 600), col::sYellow, juce::Justification::centred);
         }
+        // CUT: the pattern, a cell a step (its receiver's colour, its ratchets, backwards, cut short), the step
+        // playing lit; a click on it draws another
+        cutArea = {};
+        if (mode == radio::modeCut && P (p, snd::rdOn) > 0.5f)
+        {
+            const int count = juce::jlimit (1, radio::cutSteps, e.cutCount.load());
+            const int now = e.cutNow.load();
+            cutArea = w.removeFromBottom (juce::jmin (34.0f, w.getHeight() * 0.3f)).reduced (0.0f, 2.0f);
+            g.setColour (col::screen.withAlpha (0.85f));
+            g.fillRect (cutArea.expanded (0.0f, 2.0f));
+            const juce::Colour rxCol[radio::numRx] = { col::sYellow, col::sBlue, col::sOrange, col::sViolet };
+            const float cw = cutArea.getWidth() / (float) juce::jmax (16, count);
+            for (int j = 0; j < count; ++j)
+            {
+                const auto cell = juce::Rectangle<float> (cutArea.getX() + cw * (float) j, cutArea.getY(), cw, cutArea.getHeight()).reduced (1.5f, 0.0f);
+                const int v = e.cutShown[(size_t) j].load();
+                const bool lit = j == now;
+                if (v < 0)
+                {
+                    g.setColour (lit ? col::screenDim : col::screenLine);
+                    g.drawRoundedRectangle (cell.reduced (0.5f), 3.0f, 1.0f);
+                    continue;
+                }
+                const auto c = rxCol[juce::jlimit (0, radio::numRx - 1, v & 15)];
+                const int hits = 1 + ((v >> 4) & 15);
+                auto body = (v & 512) != 0 ? cell.withWidth (cell.getWidth() * 0.6f) : cell;
+                g.setColour (c.withAlpha (lit ? 1.0f : 0.55f));
+                g.fillRoundedRectangle (body, 3.0f);
+                for (int h = 1; h < hits; ++h)
+                {
+                    g.setColour (col::screen.withAlpha (0.8f));
+                    g.fillRect (cell.getX() + cell.getWidth() * (float) h / (float) hits - 0.75f, cell.getY() + 3.0f, 1.5f, cell.getHeight() - 6.0f);
+                }
+                if ((v & 256) != 0)
+                {
+                    juce::Path a;
+                    const float y = cell.getCentreY(), x0 = cell.getX() + 3.0f;
+                    a.addTriangle (x0, y, x0 + 5.0f, y - 4.0f, x0 + 5.0f, y + 4.0f);
+                    g.setColour (col::screen);
+                    g.fillPath (a);
+                }
+            }
+            text (g, "cut · clique pour un autre motif"_fr, cutArea.withY (cutArea.getY() - 13.0f).withHeight (12.0f), mono (9.0f), col::screenDim,
+                  juce::Justification::centredRight);
+        }
         // the loop playing (LOOP, DIG): where in it
         const float lp = e.loopPos.load();
-        if (mode != radio::modeLive && lp >= 0.0f)
+        if (mode != radio::modeLive && mode != radio::modeCut && lp >= 0.0f)
         {
             auto bar = w.removeFromBottom (3.0f).withTrimmedLeft (w.getWidth() * 0.75f);
             g.setColour (col::screenLine);

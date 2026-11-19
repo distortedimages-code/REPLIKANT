@@ -21,6 +21,7 @@ namespace te
         const radio::Take* cachedTake = nullptr;
         juce::Path takeWave;
         float cachedW = 0.0f, cachedH = 0.0f;
+        juce::Rectangle<float> cutArea;          // CUT's pattern (a click: another one)
         void paint (juce::Graphics&, juce::Rectangle<float>, ReplikantProcessor&, int selectedPad);
     };
 

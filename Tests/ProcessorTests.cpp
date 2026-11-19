@@ -493,6 +493,14 @@ int main()
         CHECK (before.options.monitor == 0, "a 0.3.4 project's DIRECT back to OFF: %d", before.options.monitor);
     }
 
+    // (0.4.7) LIMIT's look-ahead told to the host
+    {
+        ReplikantProcessor proc;
+        proc.setRateAndBufferSizeDetails (48000.0, 512);
+        proc.prepareToPlay (48000.0, 512);
+        CHECK (proc.getLatencySamples() == proc.limiter.latency() && proc.getLatencySamples() > 0, "the latency told: %d frames", proc.getLatencySamples());
+    }
+
     // (0.4.5) a project from before: its six stages get ECHO before ESPACE; its ENV and FOLLOW stay one-way (+);
     // WTF?!'s seed comes back
     {
@@ -502,6 +510,8 @@ int main()
         set (snd::m2Polarity, 0.0f);
         proc.player.setFxOrder ({ 0, 5, 1, 2, 3, 4, 6 });
         proc.player.wtfSeed = 12345u;
+        proc.player.setRoute (0, snd::drumDest (2, drum::pCutoff), 0.5f);
+        proc.player.setRoute (1, snd::rdLen, -0.3f);
         juce::MemoryBlock st;
         proc.getStateInformation (st);
         ReplikantProcessor same;
@@ -509,6 +519,8 @@ int main()
         CHECK (same.player.fxOrder() == proc.player.fxOrder(), "the chain's order comes back");
         CHECK (same.player.wtfSeed.load() == 12345u, "WTF?!'s seed comes back: %u", same.player.wtfSeed.load());
         CHECK (same.player.get (snd::m2Polarity) < 0.5f, "a FOLLOW saved in ± stays ±");
+        CHECK (std::abs (same.player.routeAmount (0, snd::drumDest (2, drum::pCutoff)) - 0.5f) < 1.0e-6f, "a route to DRUM 3's cutoff comes back");
+        CHECK (std::abs (same.player.routeAmount (1, snd::rdLen) + 0.3f) < 1.0e-6f, "a route to a stepped setting (RADIO's LENGTH) comes back");
         // as a 0.4.4 project had them: six stages, no polarity mark
         auto xml = juce::AudioProcessor::getXmlFromBinary (st.getData(), (int) st.getSize());
         xml->setAttribute ("fxOrder", "[\"drive\", \"espace\", \"spectre\", \"pitch\", \"chorus\", \"crush\"]");

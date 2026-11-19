@@ -250,6 +250,7 @@ void Engine::allocate()
     bank.allocate();
     for (auto& l : loops)
         l.assign ((size_t) loopFrames * 2, 0);
+    cutBuf.assign ((size_t) cutSteps * cutFrames * 2, 0);
     makeHeard();
     reset();
     armed.store (true, std::memory_order_release);
@@ -280,6 +281,10 @@ void Engine::reset()
 {
     mode = -1;
     rxNow = -1;
+    cutMade = false;
+    cutStep = -1;
+    cv[0] = cv[1] = {};
+    duckG = 1.0f;
     cur = -1;
     loopLen[0] = loopLen[1] = 0;
     for (auto& h : heads) h = {};
@@ -324,14 +329,127 @@ void Engine::takeLoop (const Rx& r, int L, bool dig, float depth)
     cur = b;
 }
 
+// CUT: a step drawn (a rest by DENSITY, else a receiver among those that play, its ratchets, backwards, cut short)
+void Engine::rollStep (int j, const int* rxs, int rxCount, float density, float vary)
+{
+    auto& c = cut[(size_t) j];
+    c = CutStep {};
+    const float dens = clamp01 (density), var = clamp01 (vary);
+    if (rxCount <= 0 || rng.uni() > (j == 0 ? std::max (dens, 0.85f) : dens))
+    {
+        c.rx = -1;
+        cutShown[(size_t) j].store (-1, std::memory_order_relaxed);
+        return;
+    }
+    c.rx = rxs[std::min (rxCount - 1, (int) (rng.uni() * (float) rxCount))];
+    if (rng.uni() < var * 0.3f)
+        c.hits = 2 + (int) (rng.uni() * 2.99f);
+    c.reverse = rng.uni() < var * 0.25f;
+    if (rng.uni() < var * 0.45f)
+        c.gate = 0.3f + 0.4f * rng.uni();
+    c.fresh = true;
+    cutShown[(size_t) j].store (c.rx + 16 * (c.hits - 1) + (c.reverse ? 256 : 0) + (c.gate < 1.0f ? 512 : 0), std::memory_order_relaxed);
+}
+
+// CUT: a step's sound, from its receiver's last DEPTH seconds, on the strongest attack near where chance put it
+void Engine::fillStep (int j, float depth, double sixteenth)
+{
+    auto& c = cut[(size_t) j];
+    c.fresh = false;
+    c.len = 0;
+    if (c.rx < 0)
+        return;
+    const Rx& r = bank.rx[c.rx];
+    if (r.hw < (int64_t) rate)
+        return;
+    const int L = std::min (cutFrames, (int) (sixteenth / sr * rate) + (int) (0.006 * rate));
+    const double reach = std::min ((double) std::max (0.5f, depth), (double) (histFrames - 2 * rate) / rate - 1.0);
+    const int64_t oldest = r.hw - (int64_t) (histFrames - 2 * rate);
+    int64_t end = r.hw - 8 - (int64_t) (rng.uni() * reach * rate);
+    // the attack: in the 120 ms before, the 64-frame window whose energy rises most
+    const int win = 64, wins = (int) (0.12 * rate) / win;
+    const int16_t* h = r.hist.data();
+    auto energy = [&] (int64_t from)
+    {
+        double e = 0.0;
+        for (int i = 0; i < win; ++i)
+        {
+            const size_t at = (size_t) ((from + i) & histMask) * 2;
+            const double a = h[at], b = h[at + 1];
+            e += a * a + b * b;
+        }
+        return e;
+    };
+    int64_t start = end - (int64_t) L;
+    double prev = energy (end - (int64_t) (wins + 1) * win), best = -1.0;
+    for (int w = wins; w > 0; --w)
+    {
+        const int64_t at = end - (int64_t) w * win;
+        const double e = energy (at);
+        if (e - prev > best)
+        {
+            best = e - prev;
+            start = at - (int64_t) (0.002 * rate);
+        }
+        prev = e;
+    }
+    if (start + L > r.hw - 8)
+        start = r.hw - 8 - L;
+    if (start < oldest)
+        start = oldest;
+    int16_t* dst = cutBuf.data() + (size_t) j * cutFrames * 2;
+    for (int i = 0; i < L; ++i)
+    {
+        const size_t from = (size_t) ((start + i) & histMask) * 2;
+        dst[2 * i] = h[from];
+        dst[2 * i + 1] = h[from + 1];
+    }
+    c.len = L;
+}
+
+// CUT: a step struck (its sound fetched the first time), `within` frames into it; the voice playing fades out
+void Engine::cutTrigger (int j, float within, double sixteenth)
+{
+    auto& c = cut[(size_t) j];
+    const int old = cv[0].on && cv[0].dg >= 0.0f ? 0 : (cv[1].on && cv[1].dg >= 0.0f ? 1 : -1);
+    const float out = 1.0f / (0.003f * (float) sr);
+    if (old >= 0)
+        cv[old].dg = -out;
+    if (c.rx < 0 || c.len <= 0)
+        return;
+    const int nw = old == 0 ? 1 : 0;
+    auto& v = cv[nw];
+    v.on = true;
+    v.step = j;
+    v.dir = c.reverse ? -1.0f : 1.0f;
+    const float stepLen = (float) sixteenth / (float) c.hits;
+    v.pos = c.reverse ? (float) c.len - 2.0f - within * (float) rate / (float) sr : within * (float) rate / (float) sr;
+    v.g = 0.0f;
+    v.dg = 1.0f / (0.001f * (float) sr);
+    v.left = std::max (0.0f, c.gate * stepLen - within);
+}
+
 void Engine::listen (float* L, float* R, int n, const Settings& s)
 {
-    const int k = std::max (0, std::min (numRx - 1, s.rx));
+    const int kWant = std::max (0, std::min (numRx - 1, s.rx));
+    const int mdWant = std::max (0, std::min (3, s.mode));
+    // a receiver or a mode changed (a mod stepping through them): out in 3 ms, switched, back in (CUT plays them
+    // all: its receiver changing changes nothing)
+    int k = kWant, md = mdWant;
+    bool ducking = false;
+    if (mode >= 0 && (mdWant != mode || (kWant != rxNow && mdWant != modeCut)) && duckG > 0.0f)
+    {
+        k = rxNow;
+        md = mode;
+        ducking = true;
+    }
+    if (md == modeCut && mode == modeCut)
+        rxNow = k;
     const Rx& r = bank.rx[k];
     const float fsr = (float) sr, isr = 1.0f / fsr;
     const double inc = (double) rate / sr;
     const int st = r.state.load (std::memory_order_relaxed);
-    const int md = std::max (0, std::min (2, s.mode));
+    const float duckStep = 1.0f / (0.003f * fsr);
 
     // the period of a loop (LENGTH, on the tempo), and where in it the transport is
     const double bpm = s.bpm > 1.0 ? s.bpm : 120.0;
@@ -361,10 +479,63 @@ void Engine::listen (float* L, float* R, int n, const Settings& s)
         el = target;
     }
 
+    // CUT: the receivers that play, the pattern (drawn, or drawn again), where the transport is in it
+    int heardRx[numRx], heardCount = 0;
+    const int steps = std::max (1, std::min (cutSteps, (int) lenSixteenths (s.len)));
+    if (md == modeCut)
+    {
+        for (int q = 0; q < numRx; ++q)
+        {
+            const int qs = bank.rx[q].state.load (std::memory_order_relaxed);
+            if ((qs == live || qs == buffering || qs == standby) && bank.rx[q].hw > (int64_t) rate)
+                heardRx[heardCount++] = q;
+        }
+        if (! cutMade || cutRoll.exchange (false))
+        {
+            for (int j = 0; j < cutSteps; ++j)
+                rollStep (j, heardRx, heardCount, s.density, s.vary);
+            cutMade = true;
+        }
+        cutCount.store (steps, std::memory_order_relaxed);
+        if (s.playing)
+        {
+            const double ph16 = s.ppq * 4.0;
+            const double whole = std::floor (ph16);
+            int at = (int) std::fmod (whole, (double) steps);
+            if (at < 0)
+                at += steps;
+            const double within = (ph16 - whole) * sixteenth;
+            if (at != cutStep || std::abs (within - cutEl) > 256.0)
+            {
+                const bool newStep = at != cutStep;
+                cutStep = at;
+                cutEl = within;
+                if (newStep)
+                {
+                    if (cut[(size_t) at].fresh)
+                        fillStep (at, s.depth, sixteenth);
+                    cutHit = 0;
+                    cutTrigger (at, (float) within, sixteenth);
+                }
+            }
+        }
+        else if (cutStep < 0)
+        {
+            cutStep = steps - 1;
+            cutEl = sixteenth;          // (stopped: from the first step, on REPLIK8's own tempo)
+        }
+    }
+    else
+    {
+        cutStep = -1;
+        cutNow.store (-1, std::memory_order_relaxed);
+    }
+
     // TUNE: LIVE a shift (Hz), LOOP and DIG a transposition
     const float shHz = md == modeLive ? shiftHz (s.tune) : 0.0f;
     const bool shift = std::abs (shHz) > 0.5f;
     const float pinc = md == modeLive ? 1.0f : (float) inc * semis (s.tune);
+    const float cutOut = 1.0f / (0.004f * fsr);
     const int L0 = (int) std::max (64.0, std::min ((double) loopFrames, period * inc));
     // (a seam's crossfade: 4 ms, a quarter of the loop at most)
     const float xf = std::max (8.0f, std::min (0.004f * fsr, std::min ((float) period * 0.25f, (float) L0 / std::max (pinc, 1.0e-3f) * 0.25f)));
@@ -421,6 +592,59 @@ void Engine::listen (float* L, float* R, int n, const Settings& s)
             x[1] = bank.at (r, p, 1);
             p += inc;
         }
+        else if (md == modeCut)
+        {
+            // the next sixteenth: its step (a turn of the pattern: each step drawn again by chance, GRAB); a
+            // ratchet's next strike inside the step
+            cutEl += 1.0;
+            if (cutEl >= sixteenth)
+            {
+                cutEl -= sixteenth;
+                cutStep = (cutStep + 1) % steps;
+                if (cutStep == 0)
+                    for (int j = 0; j < cutSteps; ++j)
+                        if (rng.uni() < clamp01 (s.grab))
+                            rollStep (j, heardRx, heardCount, s.density, s.vary);
+                if (cut[(size_t) cutStep].fresh)
+                    fillStep (cutStep, s.depth, sixteenth);
+                cutHit = 0;
+                cutTrigger (cutStep, 0.0f, sixteenth);
+            }
+            else if (cutStep >= 0)
+            {
+                const auto& c = cut[(size_t) cutStep];
+                const double every = sixteenth / c.hits;
+                if (c.hits > 1 && cutHit + 1 < c.hits && cutEl >= every * (cutHit + 1))
+                {
+                    ++cutHit;
+                    cutTrigger (cutStep, 0.0f, sixteenth);
+                }
+            }
+            for (auto& v : cv)
+            {
+                if (! v.on)
+                    continue;
+                const auto& c = cut[(size_t) v.step];
+                const int16_t* b = cutBuf.data() + (size_t) v.step * cutFrames * 2;
+                if (c.len > 2 && v.pos >= 0.0f && v.pos < (float) (c.len - 1))
+                {
+                    const int i0 = (int) v.pos;
+                    const float f = v.pos - (float) i0;
+                    const float gg = v.g * v.g * (3.0f - 2.0f * v.g) * (1.0f / 32768.0f);
+                    x[0] += gg * ((float) b[2 * i0] + f * (float) (b[2 * i0 + 2] - b[2 * i0]));
+                    x[1] += gg * ((float) b[2 * i0 + 1] + f * (float) (b[2 * i0 + 3] - b[2 * i0 + 1]));
+                }
+                else if (v.dg >= 0.0f)
+                    v.dg = -cutOut;                                   // (its sound ran out)
+                v.pos += v.dir * pinc;
+                v.left -= 1.0f;
+                if (v.left <= 0.0f && v.dg >= 0.0f)
+                    v.dg = -cutOut;                                   // (cut short, or its ratchet's slice over)
+                v.g += v.dg;
+                if (v.g >= 1.0f) { v.g = 1.0f; v.dg = 0.0f; }
+                if (v.g <= 0.0f && v.dg < 0.0f) { v.g = 0.0f; v.on = false; }
+            }
+        }
         else
         {
             // at the period's turn: a new loop (LOOP: by chance, GRAB; DIG: always, from further back), from its start
@@ -476,6 +700,10 @@ void Engine::listen (float* L, float* R, int n, const Settings& s)
             if (heads[m2].on && loopLen[headBuf[m2]] > 0)
                 loopPos.store (heads[m2].pos / (float) loopLen[headBuf[m2]], std::memory_order_relaxed);
         }
+        // (a switch: the source out, then back in)
+        duckG = ducking ? std::max (0.0f, duckG - duckStep) : std::min (1.0f, duckG + duckStep);
+        x[0] *= duckG;
+        x[1] *= duckG;
         // TUNE on LIVE: the signal moved up or down (a quarter turn apart: one chain a sample later)
         if (shift)
         {
@@ -610,6 +838,7 @@ void Engine::listen (float* L, float* R, int n, const Settings& s)
     loopSeconds.store (md == modeLive || cur < 0 ? 0.0f : (float) loopLen[cur] / (float) rate, std::memory_order_relaxed);
     gateOpen.store (sqG, std::memory_order_relaxed);
     heardLevel.store (std::max (peak, heardLevel.load (std::memory_order_relaxed) * 0.9f), std::memory_order_relaxed);
+    cutNow.store (md == modeCut ? cutStep : -1, std::memory_order_relaxed);
 
     // (nothing that isn't a number stays in the filters)
     bool reset = false;

@@ -17,6 +17,10 @@
 //             whistle beating against it), CRACKLE (crackle, past 70 % the crashes of a storm far away), DRIVE (the
 //             detector and the small speaker pushed), STATIC (the hiss and the crackle of the air, alone when
 //             nothing comes in)
+//  CUT        (0.4.7) a rhythm cut out of all the receivers at once: LENGTH steps (sixteenths), each one a receiver
+//             taken at random and a moment of its last DEPTH seconds (on an attack nearby), or a rest (DENSITY); VARY
+//             gives some steps ratchets, some played backwards, some cut short. The pattern loops; at each turn GRAB
+//             is the chance for each step to be drawn again (a click on the pattern: all of them now)
 //  TAKES      what was heard (the air included) is kept for 32 s: a take is its last few seconds (GRAB) or what
 //             was heard between REC and STOP. Cut at its attacks into up to sixteen pads (RadioSlicer), played on
 //             the keys from C1, or sent whole (or one pad) to the SAMPLER.
@@ -51,7 +55,9 @@ namespace radio
     // (no one listens to it: the network let the connection go)
     enum State { none = 0, off, connecting, buffering, live, tuning, busy, failed, standby };
     enum Kind { web = 0, shortwave = 1 };
-    enum Mode { modeLive = 0, modeLoop, modeDig };
+    enum Mode { modeLive = 0, modeLoop, modeDig, modeCut };
+    constexpr int cutSteps = 32;                // CUT: two bars of sixteenths at most
+    constexpr int cutFrames = 1 << 15;          // a step's sound: 0.68 s at most
 
     // the knobs' values
     float lenSixteenths (int index);                       // LENGTH: 1/16 .. 2 bars
@@ -156,6 +162,7 @@ namespace radio
         float squelch = 0.0f, grab = 0.25f, depth = 6.0f, tune = 0.0f, stat = 0.15f, level = 0.8f;
         float band = 0.0f, centre = 1000.0f, fade = 0.0f, fadeRate = 0.3f, whistle = 0.0f, crackle = 0.0f, drive = 0.0f;
         float padTune = 0.0f, padDecay = 1.0f, padLevel = 0.8f;
+        float density = 0.75f, vary = 0.35f;       // CUT
         bool choke = false;
         double bpm = 120.0, ppq = 0.0;
         bool playing = false;
@@ -199,6 +206,11 @@ namespace radio
         std::atomic<float> loopPos { -1.0f }, loopSeconds { 0.0f }, gateOpen { 1.0f }, heardLevel { 0.0f };
         std::array<std::atomic<float>, numPads> padGlow {};
         std::array<std::atomic<float>, numPads> padAt {};     // where each pad plays (0..1 of its slice), < 0 none
+        // CUT: a new pattern at once (message thread); the screen: each step (-1 a rest, else its receiver, + 16 per
+        // ratchet past one, + 256 backwards, + 512 cut short), how many play, the one playing
+        std::atomic<bool> cutRoll { false };
+        std::array<std::atomic<int>, cutSteps> cutShown {};
+        std::atomic<int> cutCount { 0 }, cutNow { -1 };
 
     private:
         double sr = 48000.0;
@@ -228,6 +240,19 @@ namespace radio
         float dLp[2] {}, dPh = 0.0f, swPh = 0.0f;
         float lvl = 0.0f;
         void takeLoop (const Rx&, int frames, bool dig, float depth);
+        // ---- CUT
+        struct CutStep { int rx = -1, hits = 1, len = 0; bool reverse = false, fresh = true; float gate = 1.0f; };
+        std::array<CutStep, cutSteps> cut;
+        std::vector<int16_t> cutBuf;                  // each step's sound (stereo)
+        bool cutMade = false;
+        int cutStep = -1, cutHit = 0;
+        double cutEl = 0.0;
+        struct CutVoice { bool on = false; int step = 0; float pos = 0.0f, dir = 1.0f, g = 0.0f, dg = 0.0f, left = 0.0f; };
+        CutVoice cv[2];
+        float duckG = 1.0f;                           // a receiver or a mode changed: out, switched, back in
+        void rollStep (int j, const int* rxs, int rxCount, float density, float vary);
+        void fillStep (int j, float depth, double sixteenth);
+        void cutTrigger (int j, float within, double sixteenth);
         void listen (float* L, float* R, int n, const Settings&);
 
         // ---- what was heard

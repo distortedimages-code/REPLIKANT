@@ -211,6 +211,7 @@
   <ul class="steps-list">
     <li><kbd>TUNE</kbd><b>Quatre récepteurs</b>&nbsp;: chacun sur une station internet (l'annuaire libre des stations, par nom, genre ou pays) ou sur un récepteur ondes courtes partagé sur le réseau, à la fréquence que tu veux, en AM, USB, LSB ou CW. Le flux garde toujours une seconde d'avance, sans jamais dériver.</li>
     <li><kbd>LIVE</kbd><b>Ce qui passe maintenant</b>, décalé comme par un récepteur accordé à côté, haché par le squelch entre les mots. <b>LOOP</b> rejoue sa dernière mesure au tempo, <b>DIG</b> va chercher plus loin en arrière, à chaque tour.</li>
+    <li><kbd>CUT</kbd><b>Un rythme découpé dans toutes tes radios à la fois</b>&nbsp;: chaque pas prend un récepteur au hasard et un moment de ses dernières secondes, calé sur une attaque, ou se tait. Des ratchets, des pas à l'envers, des pas coupés court&nbsp;; le motif boucle, se renouvelle peu à peu (GRAB), et un clic sur lui en tire un autre.</li>
     <li><kbd>AIR</kbd><b>L'air entre les deux</b>&nbsp;: la bande étroite du récepteur, le fading des ondes courtes, une porteuse qui siffle, un orage au loin, le petit haut-parleur poussé, le souffle.</li>
     <li><kbd>GRAB</kbd><b>Les dernières secondes entendues</b> (de 1 à 30), ou <b>REC</b> jusqu'à STOP. La prise est coupée à ses attaques en 4, 8 ou 16 pads, jouables sur ton clavier à partir de C1.</li>
     <li><kbd>→</kbd><b>Vers le sampler</b>&nbsp;: la prise entière, bouclée, ou un seul pad, en un clic. Elle profite alors de tout&nbsp;: le moteur de lecture, le SUB, ORBITE, les filtres. <b>Vers le drum</b>&nbsp;: la prise sur une piste, une tranche par pas, ou un seul pad.</li>
@@ -229,6 +230,7 @@
     <li><kbd>PAS</kbd><b>Chaque pas a sa vie</b>&nbsp;: lève-le et tourne les encodeurs, il garde ses propres réglages. Glisse-le vers le haut pour un ratchet. Ajoute une probabilité, un micro-décalage, un roulement dont les coups se resserrent et s'éteignent.</li>
     <li><kbd>SEQ</kbd><b>Une longueur et une vitesse par piste</b>&nbsp;: une piste de 12 pas contre une de 16, une en ternaire contre les autres. Le swing pour toute la machine.</li>
     <li><kbd>PTN</kbd><b>128 patterns</b>, de A01 à H16. Le suivant part à la fin de celui qui joue, ou au bout de quelques mesures&nbsp;; enchaîne-les, copie-les, vide-les.</li>
+    <li><kbd>EDIT</kbd><b>Régler un son en l'écoutant</b>&nbsp;: choisis la piste, puis les pages SOURCE, PITCH, AMP, TONE. À l'arrêt, chaque potard tourné rejoue la piste&nbsp;; en lecture, ce que tu tournes s'entend tout de suite, même sur le coup qui sonne. Et chaque réglage peut recevoir un mod.</li>
     <li><kbd>▶</kbd><b>Sur le transport du DAW</b>, ou sur la touche lecture dans l'appli. Les pistes se jouent aussi au clavier, de C1 à G1, et tout passe dans les filtres et les effets.</li>
   </ul>
   <figure class="shot"><img src="img/drum-1360.webp" srcset="img/drum-680.webp 680w, img/drum-1360.webp 1360w" sizes="(max-width: 1100px) 100vw, 1070px" width="1360" height="848" loading="lazy" alt="Le DRUM : la grille des huit pistes, les seize pas de la piste choisie, ses ratchets."></figure>
@@ -246,6 +248,7 @@
     <li><kbd>DRV</kbd><b>Drive</b>&nbsp;: lampe, console ou bande magnétique.</li>
     <li><kbd>FX</kbd><b>Six effets</b>&nbsp;: spectre (le son redessiné par une nuée d'oscillateurs, analysé en libre, sur la grille, à chaque note ou à chaque attaque&nbsp;; ses partiels resserrés ou écartés, dans une bande ou autour d'un notch, figés, en fondu de l'ancienne hauteur à la nouvelle, et son feedback jusqu'au drone), pitch (deux voix, cristaux), chorus, crush, espace (une réverbération immense, avec shimmer, son sec et son mouillé chacun leur niveau), écho. SPECTRE montre ses partiels à l'écran, avec leur traînée quand ils glissent. <b>Garde un bloc appuyé une seconde</b>&nbsp;: il sort de son emplacement, les autres se poussent pendant que tu le glisses, et il s'enfonce à sa nouvelle place quand tu le lâches. <b>Un interrupteur sur chaque bloc</b> le coupe ou le remet, sans toucher à son réglage. Et chaque effet garde le volume du son&nbsp;: tu l'ouvres, il s'ajoute, rien ne se creuse.</li>
     <li><kbd>ECHO</kbd><b>Une bande et quatre têtes de lecture</b>&nbsp;: réparties sur le temps de la bande, chacune de son côté dans la stéréo. Elles lisent dans le sens de la bande, à l'envers, ou une sur deux à l'envers&nbsp;; elles restent en place, se balancent, glissent le long de la bande (chaque écho monte ou descend, jusqu'à l'octave, et le feedback les fait spiraler) ou sautent ailleurs au rythme que tu choisis. L'usure de la bande&nbsp;: pleurage, saturation, aigus perdus. À l'écran, la bande, ses têtes et l'endroit où tombent les échos.</li>
+    <li><kbd>LIMIT</kbd><b>Un limiteur de haute qualité, tout au bout</b>, dans SETTINGS et allumé d'origine&nbsp;: rien ne sort au-dessus du plafond, même entre les échantillons, quoi que fassent les filtres et les effets. Il voit venir les crêtes (1,5&nbsp;ms, compensées par le DAW) et descend avant elles, sans écraser le son.</li>
     <li><kbd>COMP</kbd><b>Un compresseur en sortie</b>, dans SETTINGS&nbsp;: un seul bouton pour le seuil, le taux et le rattrapage, de rien du tout jusqu'au limiteur, puis au-delà&nbsp;: les coups passent sous leurs propres queues. Six attaques (les lentes laissent claquer les transitoires), cinq relâchements et AUTO pour les nappes. Il écoute le son lui-même, le sidechain du DAW, l'entrée ou une piste du DRUM. Gate, drive, mélange parallèle, et le volume qui reste à sa place.</li>
     <li><kbd>IN</kbd><b>Multi-effet</b>&nbsp;: en insert sur une piste, REPLIK8 traite n'importe quelle source, et tu peux rééchantillonner le résultat.</li>
   </ul>
@@ -262,7 +265,7 @@
   <h2><span>10 · Moduler</span><svg class="p" viewBox="0 0 24 24"><circle cx="5" cy="6" r="2.8"/><circle cx="19" cy="6" r="2.8"/><circle class="f" cx="5" cy="6" r=".9"/><circle class="f" cx="19" cy="6" r=".9"/><path d="M5 8.8c0 15 14 15 14 0"/></svg></h2>
   <ul class="steps-list">
     <li><kbd>M</kbd><b>Quatre modulateurs</b>&nbsp;: onde, pas dessinés à la souris, hasard qui revient en boucle, enveloppe, suiveur. Le suiveur écoute l'entrée audio, l'instrument lui-même, le sidechain du DAW, ou une seule piste du DRUM, et l'écran trace ce qu'il envoie.</li>
-    <li><kbd>1</kbd><b>Assigner, c'est tourner</b>&nbsp;: clique M1, tourne n'importe quel potard, la distance devient la profondeur&nbsp;: vers la droite, la modulation monte&nbsp;; vers la gauche, elle descend. En polarité ±, elle s'étend des deux côtés du réglage. Un double-clic pour défaire.</li>
+    <li><kbd>1</kbd><b>Assigner, c'est tourner</b>&nbsp;: clique M1 (en bas à droite)&nbsp;; un bandeau s'affiche sur l'écran et les potards qu'il peut moduler s'entourent de sa couleur. Tourne-en un&nbsp;: la distance devient la profondeur, vers la droite la modulation monte, vers la gauche elle descend. En polarité ±, elle s'étend des deux côtés du réglage. Double-clic sur le potard pour défaire, re-clique M1 pour finir. Les réglages crantés aussi (modèles, formes d'onde, octaves, LENGTH…)&nbsp;: le mod passe d'un cran à l'autre. Et ceux de chaque piste du DRUM.</li>
     <li><kbd>AB</kbd><b>Seize scènes</b>&nbsp;: verrouille des réglages dans une scène, puis glisse de A à B avec le fader, à la main, en automation ou par un modulateur.</li>
     <li><kbd>WTF</kbd><b>WTF?!</b>&nbsp;: les réglages qui comptent tirés au sort à chaque croche, en direct ou en boucle de 2 à 16 tirages (clique les points). Le dé en tire une autre&nbsp;; BACK pour revenir.</li>
     <li><kbd>⇔</kbd><b>À la souris, sur l'écran</b>&nbsp;: glisse la courbe du filtre (coupure et résonance), les enveloppes, la pile de cycles, la bande du spectre, la bande de l'écho, la courbe du compresseur. Double-clic&nbsp;: retour au réglage d'origine.</li>
@@ -325,6 +328,18 @@
       <li>Un truc passe&nbsp;: <b>GRAB</b> prend les dernières secondes, découpées en pads.</li>
       <li>Choisis la piste dans le DRUM, puis sur la ligne <b>take</b>, la touche <b>drum</b>&nbsp;: une tranche par pas. Ou un seul pad, sur la ligne <b>pad</b>.</li>
       <li>Mode <b>DRUM</b>&nbsp;: la piste joue la prise, lève des pas pour changer leur tranche.</li></ol></div>
+    <div><h3>Un rythme dans quatre radios</h3><ol>
+      <li><b>RADIO › TUNE</b>&nbsp;: accorde deux, trois ou quatre récepteurs sur des stations différentes.</li>
+      <li>Page <b>LISTEN</b>&nbsp;: MODE sur <b>CUT</b>, LENGTH sur 1 BAR (seize pas).</li>
+      <li>DENSITY pour la part des pas qui jouent, VARY pour les ratchets et les pas à l'envers, DEPTH pour aller chercher plus loin en arrière.</li>
+      <li>GRAB&nbsp;: à 0 le motif reste, plus haut il se renouvelle pas à pas. Un clic sur le motif à l'écran&nbsp;: un autre, tout de suite.</li>
+      <li>Arme un mod sur LENGTH ou sur le récepteur, en LIVE&nbsp;: il passe d'un cran à l'autre, sans un clic.</li></ol></div>
+    <div><h3>Régler la grosse caisse du DRUM</h3><ol>
+      <li>Mode <b>DRUM</b>, choisis la piste de la grosse caisse (sa touche dans la bande des pistes).</li>
+      <li><b>PITCH</b>&nbsp;: TUNE pour la hauteur, SWEEP et son temps pour la chute du kick.</li>
+      <li><b>AMP</b>&nbsp;: DECAY pour sa longueur, CLICK pour l'attaque, BODY pour le corps.</li>
+      <li>À l'arrêt, chaque potard tourné la rejoue&nbsp;; en lecture, ça s'entend tout de suite.</li>
+      <li>Clique M1, tourne DECAY ou CUTOFF&nbsp;: la piste respire avec le mod.</li></ol></div>
     <div><h3>Sculpter à la souris</h3><ol>
       <li>Page <b>FILTER</b>&nbsp;: glisse sur la courbe, de côté pour la coupure, de haut en bas pour la résonance.</li>
       <li>Page <b>ENV</b>&nbsp;: à gauche l'attaque, au milieu la décroissance et le maintien, à droite le relâchement.</li>

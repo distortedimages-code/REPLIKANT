@@ -55,6 +55,7 @@ namespace te
         bool captureShown() const                  { return capture; }
         void touch (const Ctl&);                   // the screen's readout follows
         void setKeyStyle (int style);              // CLASSIC, PADS, FLAT
+        void setArmedMod (int mod);                // a mod armed (-1: none), as its key does
 
         void paint (juce::Graphics&) override;
         void paintOverChildren (juce::Graphics&) override;
