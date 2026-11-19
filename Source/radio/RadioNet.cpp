@@ -636,6 +636,7 @@ struct RadioNet::Rx : juce::Thread
         bool ready = false, live = false;
         juce::int64 lastKeep = nowMs(), lastMsg = nowMs(), lastTune = 0, liveAt = 0;
         juce::String pendingMod;
+        bool gentle = false;                // (0.4.14) a small turn of the knob: tuned without a break
         std::vector<juce::uint8> m;
         int result = R_RETRY;
         lastErr = "la connexion au récepteur a lâché"_fr;
@@ -648,15 +649,24 @@ struct RadioNet::Rx : juce::Thread
             {
                 int nv; const Source ns = current (&nv);
                 if (! ns.sameStream (s)) { result = R_CHANGED; break; }
+                // (0.4.14) a few kHz in the same mode, while it plays: the band heard going by, as on a receiver (what
+                // was buffered plays out, the new frequency follows); further, or another mode: a break (MORPH)
+                const bool small = live && ns.mode == s.mode && std::abs (ns.khz - s.khz) <= 5.0 && (pendingMod.isEmpty() || gentle);
                 s = ns; v = nv;
                 pendingMod = modCmd (s, foff);
-                setState (radio::tuning, {}, false);
+                gentle = small;
+                if (! small)
+                    setState (radio::tuning, {}, false);
             }
             if (pendingMod.isNotEmpty() && ready && nowMs() - lastTune >= 200)
             {
                 ws.text (pendingMod); pendingMod.clear(); lastTune = nowMs();
-                net.bank.flush (k);
-                live = false;
+                if (! gentle)
+                {
+                    net.bank.flush (k);
+                    live = false;
+                }
+                gentle = false;
             }
             if (nowMs() - lastKeep >= 1000) { ws.text ("SET keepalive"); lastKeep = nowMs(); }
             const int r = ws.recv (m, 250);

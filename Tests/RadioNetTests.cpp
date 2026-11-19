@@ -249,6 +249,20 @@ int main()
         check ("SW: one connection, two frequencies", (int) st["ws"] == 1 && st["mods"].size() == 2 && std::abs ((double) st["mods"][1] - 11850.0) < 0.01,
                juce::JSON::toString (st, true));
     }
+    // (0.4.14) a small turn of the knob: tuned over the connection without a break (never out of LIVE)
+    w.khz = 11852.5;
+    net->setSource (1, w);
+    bool stayed = true;
+    for (int i = 0; i < 60; ++i)
+    {
+        run (0.025, false);
+        stayed = stayed && net->getStatus (1).state == radio::live;
+    }
+    {
+        const auto st = stats();
+        check ("SW: a small turn, no break", stayed && st["mods"].size() == 3 && std::abs ((double) st["mods"][2] - 11852.5) < 0.01,
+               juce::JSON::toString (st, true));
+    }
     // the same receiver on RX 4: refused
     net->setSource (3, w);
     check ("SW: never two connections on one receiver", waitState (3, radio::busy, 3), net->getStatus (3).msg);
@@ -270,7 +284,7 @@ int main()
         const auto v = net->toVar();
         RadioNet n2 (e.bank);
         n2.fromVar (juce::JSON::parse (juce::JSON::toString (v)));
-        check ("project: the sources kept", n2.getSource (1).kind == 2 && n2.getSource (1).khz == 11850.0 && n2.getSource (0).url == base + "/aac"
+        check ("project: the sources kept", n2.getSource (1).kind == 2 && std::abs (n2.getSource (1).khz - 11852.5) < 0.01 && n2.getSource (0).url == base + "/aac"
                                                 && n2.getSource (2).port == port + 2);
         n2.clearAll();
     }

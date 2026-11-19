@@ -1,3 +1,10 @@
+**REPLIK8 0.4.14** : le potard d'accord tourne lentement, et la bande défile sans coupure.
+
+- **Accord fin** : le gros potard FREQUENCY des ondes courtes tourne plus lentement que les autres : 40 pixels pour 1 kHz, un tour de son cadran (400 pixels) pour 10 kHz. Plus tu vas vite, plus il accélère (jusqu'à 10 kHz par pixel), pour traverser la bande d'un geste puis revenir lentement sur une station. Maj : encore plus fin. La molette : 1 kHz par cran (Maj : 0,1 kHz). L'afficheur montre toujours le dixième de kHz
+- **SPECTRAL et FREEZE depuis SAMPLE** : la banque freeze marche aussi quand le son est en SAMPLE. Choisir SPECTRAL ou allumer FREEZE passe le son en STRETCH tout seul. Si tu repasses en SAMPLE, les réglages de SPECTRAL restent visibles mais grisés
+- **Les scènes A et B, plus directes** : appuie sur **A**, tu es en p-lock dans la scène A et le fader passe côté A, pour entendre ce que tu règles. Les potards tournés y sont verrouillés. Appuie sur **B**, pareil côté B. Réappuie sur la touche allumée pour sortir, puis glisse de l'une à l'autre avec le fader. Pendant que A ou B est allumé, une case (1 à 16) choisit quelle scène il joue. Clic droit sur A ou B : effacer sa scène. Les cases seules marchent comme avant (une case allumée : ses réglages verrouillés)
+- **La bande entendue en tournant** : un petit mouvement (jusqu'à 5 kHz, même mode) accorde le récepteur sans couper le son, comme sur un vrai poste. Le changement de mode ou un grand saut passent toujours par le fondu MORPH
+
 **REPLIK8 0.4.13** : un instant du son tenu sans fin, en nappe, et joué sur le clavier.
 
 - **STRETCH › SPECTRAL** : dans le SAMPLER, page PLAY, deuxième banque (appuie à nouveau sur PLAY). ENGINE passe de GRAINS à SPECTRAL : le son n'est plus relu en grains. Un instant du son est analysé, ses phases sont tirées à nouveau au hasard, et il est rejoué sans fin, lisse, sans boucle audible. SPEED le fait avancer (à 0,05, vingt fois plus lent), SPRAY le brouille

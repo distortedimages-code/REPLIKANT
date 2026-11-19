@@ -175,6 +175,8 @@ static void radioAsAHost()
             chunk[(size_t) (2 * i)] = chunk[(size_t) (2 * i + 1)] = (int16_t) (v * 30000.0);
         }
         bank.push (0, chunk.data(), frames);
+        // (the network's own thread for RX 1, started late on a busy machine, could set it back to idle: fed by hand, live)
+        bank.setState (0, radio::live, radio::web);
     };
     double energy = 0.0;
     float peak = 0.0f;

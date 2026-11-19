@@ -714,12 +714,24 @@ void Encoder::nudge (float delta, bool fine)
     setFrom (shownNorm() + delta * (fine ? 0.15f : 1.0f));
 }
 
+bool Encoder::tuning() const
+{
+    return ctl != nullptr && ctl->look == Ctl::Look::tuning && ctl->tuneGet && ctl->tuneSet && armedMod() < 0 && armedScene() < 0;
+}
+
 void Encoder::mouseDown (const juce::MouseEvent& e)
 {
     if (ctl == nullptr || ! ctl->isEnabled())
         return;
     dragged = false;
     stepAccum = 0.0f;
+    if (tuning())
+    {
+        tuneValue = ctl->tuneGet();
+        lastDragY = 0.0f;
+        lastDragTime = juce::Time::getMillisecondCounterHiRes() * 0.001;
+        dragSpeed = 0.0f;
+    }
     dragStart = armedMod() >= 0 ? arm.player->routeAmount (armedMod(), ctl->routeDest()) : shownNorm();
     juce::ignoreUnused (e);
     if (ctl->begin && ! arm.any())
@@ -739,6 +751,25 @@ void Encoder::mouseDrag (const juce::MouseEvent& e)
     if (std::abs (dy) > 2.0f)
         dragged = true;
     const bool fine = e.mods.isShiftDown();
+    if (tuning())
+    {
+        // the tuning knob: by the pixel, slowly; the faster the hand, the faster it goes (a flick crosses the band);
+        // Shift: finer still, never faster
+        const float step = dy - lastDragY;
+        lastDragY = dy;
+        const double t = juce::Time::getMillisecondCounterHiRes() * 0.001;
+        const float dt = (float) juce::jmax (0.004, t - lastDragTime);
+        lastDragTime = t;
+        dragSpeed = 0.6f * dragSpeed + 0.4f * std::abs (step) / dt;
+        const float k = dragSpeed / 250.0f;
+        const double mult = fine ? 0.4 : (double) juce::jlimit (1.0f, 400.0f, 1.0f + k * k);
+        tuneValue += (double) step * ctl->tuneRate * mult;
+        ctl->tuneSet (tuneValue);
+        tuneValue = juce::jlimit (ctl->tuneGet() - 0.5, ctl->tuneGet() + 0.5, tuneValue);   // (held at the ends of the range)
+        if (ctl->changed) ctl->changed();
+        repaint();
+        return;
+    }
     if (ctl->steps > 1 && ctl->steps <= 16 && armedMod() < 0)
     {
         // a few values: one per 14 pixels
@@ -832,6 +863,17 @@ void Encoder::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelD
     const float d = (std::abs (w.deltaY) > 0.0f ? w.deltaY : -w.deltaX) * (w.isReversed ? -1.0f : 1.0f);
     if (ctl->steps > 1 && ctl->steps <= 16)
         nudge (d > 0.0f ? 1.0f / (float) (ctl->steps - 1) : -1.0f / (float) (ctl->steps - 1), false);
+    else if (tuning() && ctl->isEnabled())
+    {
+        // the tuning knob: a notch (about 0.1), 1 kHz; Shift, a tenth of that (what's below the rounding kept)
+        const double now = ctl->tuneGet();
+        if (std::abs (now - tuneValue) > 0.051)
+            tuneValue = now;
+        tuneValue += (double) d * (e.mods.isShiftDown() ? 1.0 : 10.0) * ctl->tuneRate * 40.0;
+        ctl->tuneSet (tuneValue);
+        if (ctl->changed) ctl->changed();
+        repaint();
+    }
     else if (ctl->look == Ctl::Look::tuning)
         nudge (d * 0.08f * juce::jmin (1.0f, 240.0f / ctl->dragPixels), e.mods.isShiftDown());   // (small steps: it's for tuning)
     else

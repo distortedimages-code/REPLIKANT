@@ -2898,14 +2898,13 @@ public:
             g.fillRect (juce::Rectangle<float>::leftTopRightBottom (juce::jmin (c, c + w), bar.getY(), juce::jmax (c, c + w), bar.getBottom()));
         }
         const int a = (int) P (p, snd::sceneA) - 1, b = (int) P (p, snd::sceneB) - 1;
-        const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
-        if (assigning >= 0 && now > assignUntil)
-            assigning = -1;
-        const bool blink = assigning >= 0 && std::fmod (now, 0.5) < 0.3;
+        // (0.4.14) A or B pressed: that side's scene in p-lock (the knobs turned go into it)
+        const int side = editingSide();
         text (g, "scenes", sceneTitle, mono (12.0f, 600), col::ink);
-        if (assigning >= 0)
-            text (g, juce::String ("pick a scene for ") + (assigning == snd::sceneA ? "a" : "b"), sceneTitle, mono (12.0f, 600), col::red,
-                  juce::Justification::centredRight);
+        if (side >= 0)
+            text (g, "p-lock " + juce::String (side == snd::sceneA ? "a" : "b") + " · scène "_fr + juce::String ((side == snd::sceneA ? a : b) + 1)
+                       + " · une case : une autre"_fr,
+                  sceneTitle, mono (12.0f, 600), col::violet, juce::Justification::centredRight, true);
         else
             text (g, "a " + juce::String (a + 1) + " → b "_fr + juce::String (b + 1) + " · "_fr + juce::String (juce::roundToInt (liveNorm (p, snd::xfade) * 100.0f)) + " %",
                   sceneTitle, mono (12.0f), col::ink2, juce::Justification::centredRight, true);
@@ -2919,20 +2918,29 @@ public:
                 g.setColour (col::violet);
                 g.fillRoundedRectangle (k.reduced (1.0f), 5.0f);
             }
-            if (assigning >= 0)
+            if (side >= 0 && ! armed)
             {
-                // waiting for a scene: every pad offered
-                g.setColour (col::red.withAlpha (blink ? 0.55f : 0.3f));
-                g.drawRoundedRectangle (k.reduced (0.5f), 5.0f, 1.4f);
+                // a side in p-lock: every pad offered (a click: that side's scene)
+                g.setColour (col::violet.withAlpha (0.35f));
+                g.drawRoundedRectangle (k.reduced (0.5f), 5.0f, 1.2f);
             }
             text (g, juce::String (i + 1), k, mono (11.0f, holds ? 600 : 400), armed ? juce::Colours::white : (holds ? col::ink : col::ink3), juce::Justification::centred);
             if (i == a || i == b)
                 text (g, i == a ? "a" : "b", k.reduced (3.0f, 1.0f), mono (9.0f, 600), armed ? juce::Colours::white : col::violet, juce::Justification::topRight);
         }
-        key (g, aKey, assigning == snd::sceneA ? (blink ? KeyState::accent : KeyState::normal) : KeyState::on, false, 8.0f);
-        key (g, bKey, assigning == snd::sceneB ? (blink ? KeyState::accent : KeyState::normal) : KeyState::normal, false, 8.0f);
-        text (g, "a" + juce::String (a + 1), aKey.withTrimmedBottom (3.0f), mono (13.0f, 500), col::keyOnInk, juce::Justification::centred);
-        text (g, "b" + juce::String (b + 1), bKey.withTrimmedBottom (3.0f), mono (13.0f, 500), col::ink, juce::Justification::centred);
+        for (int s = 0; s < 2; ++s)
+        {
+            const auto& kk = s == 0 ? aKey : bKey;
+            const bool on = side == (s == 0 ? snd::sceneA : snd::sceneB);
+            key (g, kk, on ? KeyState::on : KeyState::normal, false, 8.0f);
+            if (on)
+            {
+                g.setColour (col::violet);
+                g.fillRoundedRectangle (kk.withTrimmedBottom (3.0f).reduced (1.5f), 7.0f);
+            }
+            text (g, (s == 0 ? "a" : "b") + juce::String ((s == 0 ? a : b) + 1), kk.withTrimmedBottom (3.0f), mono (13.0f, 500),
+                  on ? juce::Colours::white : col::ink, juce::Justification::centred);
+        }
         auto slot = fader.withSizeKeepingCentre (fader.getWidth(), 10.0f);
         g.setColour (col::well);
         g.fillRoundedRectangle (slot, 5.0f);
@@ -2965,12 +2973,13 @@ public:
         for (int i = 0; i < snd::numScenes; ++i)
             if (sceneKeys[i].contains (e.position))
             {
-                // A (or B) pressed just before: this pad becomes its scene
-                if (assigning >= 0 && ! e.mods.isPopupMenu())
+                // a side in p-lock (A or B lit): this pad becomes its scene, in p-lock now
+                if (const int sd = editingSide(); sd >= 0 && ! e.mods.isPopupMenu())
                 {
-                    setSound (p, assigning, (float) (i + 1));
-                    assigning = -1;
+                    setSound (p, sd, (float) (i + 1));
+                    m.arm.scene = i;
                     m.proc.settingsChanged();
+                    m.armChanged();
                     repaint();
                     return;
                 }
@@ -2983,24 +2992,40 @@ public:
                 }
                 m.arm.scene = m.arm.scene == i ? -1 : i;
                 m.arm.mod = -1;
+                slot = -1;
                 m.armChanged();
                 return;
             }
-        // A or B: waits a few seconds for the pad that becomes its scene (again: no more waiting)
+        // (0.4.14) A or B: that side's scene in p-lock, the fader taken to that side (heard as it's set); the other
+        // side: over to it; the same again: out. Right click: that scene cleared
         auto pick = [&] (int id)
         {
-            if (m.arm.scene >= 0)
+            const int sc = (int) P (p, id) - 1;
+            if (e.mods.isPopupMenu())
             {
-                setSound (p, id, (float) (m.arm.scene + 1));     // a scene being set: it, at once
-                assigning = -1;
+                juce::PopupMenu menu;
+                menu.addItem (1, "Effacer la scène "_fr + juce::String (sc + 1) + (id == snd::sceneA ? " (a)" : " (b)"));
+                menu.showMenuAsync ({}, [this, sc] (int r) { if (r == 1) { m.proc.player.clearScene (sc); m.proc.settingsChanged(); m.armChanged(); } });
+                return;
             }
-            else if (assigning == id)
-                assigning = -1;
+            if (editingSide() == id)
+            {
+                m.arm.scene = -1;
+                slot = -1;
+            }
             else
             {
-                assigning = id;
-                assignUntil = juce::Time::getMillisecondCounterHiRes() * 0.001 + 4.0;
+                slot = id;
+                m.arm.scene = sc;
+                m.arm.mod = -1;
+                if (auto* x = p.params.getParameter (snd::def (snd::xfade).id))
+                {
+                    x->beginChangeGesture();
+                    x->setValueNotifyingHost (id == snd::sceneA ? 0.0f : 1.0f);
+                    x->endChangeGesture();
+                }
             }
+            m.armChanged();
             repaint();
         };
         if (aKey.contains (e.position)) { pick (snd::sceneA); return; }
@@ -3035,8 +3060,15 @@ private:
     Machine& m;
     juce::Rectangle<float> modKeys[snd::numMods], sceneKeys[snd::numScenes], sceneTitle, aKey, bKey, fader;
     bool dragging = false;
-    int assigning = -1;                 // snd::sceneA or sceneB: waiting for a pad
-    double assignUntil = 0.0;
+    int slot = -1;                      // (0.4.14) snd::sceneA or sceneB: the side put in p-lock by its key
+
+    // the side in p-lock: its key pressed, and its scene still the one armed (a mod armed since, or a pad: no more)
+    int editingSide() const
+    {
+        if (slot < 0 || m.arm.scene < 0)
+            return -1;
+        return (int) P (m.proc, slot) - 1 == m.arm.scene ? slot : -1;
+    }
 
     void layout()
     {
@@ -3958,15 +3990,35 @@ void Machine::buildPages()
         auto& v = pages[samplerMode];
         v.clear();
         // (0.4.13) STRETCH's second bank: its engine, FREEZE, and the spectral engine's settings
-        auto spectral = [this] { return P (proc, snd::playMode) > 0.5f && (int) P (proc, snd::elEngine) == 1; };
+        // (0.4.14) ENGINE and FREEZE work from SAMPLE too: SPECTRAL or FREEZE turned on there puts the sound in STRETCH.
+        // The spectral settings show with SPECTRAL; greyed while it plays as a SAMPLE
+        auto spectral = [this] { return (int) P (proc, snd::elEngine) == 1; };
         auto grains = [this] { return P (proc, snd::playMode) > 0.5f && (int) P (proc, snd::elEngine) != 1; };
+        auto intoStretch = [this] (Ctl c)
+        {
+            auto set = c.setNorm;
+            auto* mode = proc.params.getParameter (snd::def (snd::playMode).id);
+            c.setNorm = [set, mode] (float t)
+            {
+                set (t);
+                if (t > 0.5f && mode != nullptr && mode->getValue() < 0.5f)
+                {
+                    mode->beginChangeGesture();
+                    mode->setValueNotifyingHost (1.0f);
+                    mode->endChangeGesture();
+                }
+            };
+            return c;
+        };
         v.push_back ({ "play", "lecture", { { "play", { S (snd::playMode), S (snd::start), S (snd::speed, nullptr, elastic), S (snd::grain, nullptr, grains),
                                                               S (snd::spray, nullptr, elastic), S (snd::transients, nullptr, [elastic] { return ! elastic(); }),
                                                               sep (S (snd::reverse)), sep (S (snd::alias)) } },
-                                            { "freeze", { disabledUnless (S (snd::elEngine), elastic), disabledUnless (S (snd::elFreeze), elastic),
-                                                          sep (S (snd::elSmear, nullptr, spectral)), S (snd::elTonal, nullptr, spectral),
-                                                          S (snd::elHarm, nullptr, spectral), S (snd::elShimmer, nullptr, spectral),
-                                                          S (snd::elWidth, nullptr, spectral) } } } });
+                                            { "freeze", { intoStretch (S (snd::elEngine)), intoStretch (S (snd::elFreeze)),
+                                                          sep (disabledUnless (S (snd::elSmear, nullptr, spectral), elastic)),
+                                                          disabledUnless (S (snd::elTonal, nullptr, spectral), elastic),
+                                                          disabledUnless (S (snd::elHarm, nullptr, spectral), elastic),
+                                                          disabledUnless (S (snd::elShimmer, nullptr, spectral), elastic),
+                                                          disabledUnless (S (snd::elWidth, nullptr, spectral), elastic) } } } });
         v.push_back ({ "loop", "loop", { { "loop", { S (snd::loops), sep (S (snd::loopStart)), S (snd::loopSize), S (snd::loopXfade), sep (S (snd::bits)) } } } });
         v.push_back ({ "pitch", "pitch", { { "pitch", { S (snd::tune), S (snd::transpose), S (snd::fine), S (snd::glide), S (snd::bend), sep (S (snd::pmSource)),
                                                             S (snd::pmRatio, nullptr, [this] { const int s = (int) P (proc, snd::pmSource); return s == 1 || s == 2; }),
@@ -3997,17 +4049,28 @@ void Machine::buildPages()
                                 auto s = proc.radioNet().getSource (rxNow());
                                 if (s.kind != 2)
                                     return;
-                                s.khz = std::round (khz * 10.0) / 10.0;
+                                s.khz = std::round (juce::jlimit (10.0, 30000.0, khz) * 10.0) / 10.0;
                                 proc.radioNet().setSource (rxNow(), s);
                             },
-                            [] (double khz) { return juce::String (khz, khz < 10000.0 ? 1 : 0) + " khz"; }, true);
+                            [] (double khz) { return juce::String (khz, 1) + " khz"; }, true);
         f.shown = shortwave;
         // (0.4.12) the big tuning knob: one turn of its dial, 10 kHz (its figures read the kHz)
         f.look = Ctl::Look::tuning;
         f.spin = [this, rxNow] { return proc.hasRadioNet() ? (float) (proc.radioNet().getSource (rxNow()).khz / 10.0) : 0.0f; };
+        // (0.4.14) it turns slowly: 40 pixels a kHz (a turn of its dial, 400 pixels), faster as the hand goes faster
+        f.tuneGet = [this, rxNow] { return proc.hasRadioNet() ? proc.radioNet().getSource (rxNow()).khz : 9420.0; };
+        f.tuneSet = f.setNorm ? std::function<void (double)> ([this, rxNow] (double khz)
+                    {
+                        auto s = proc.radioNet().getSource (rxNow());
+                        if (s.kind != 2)
+                            return;
+                        s.khz = std::round (juce::jlimit (10.0, 30000.0, khz) * 10.0) / 10.0;
+                        proc.radioNet().setSource (rxNow(), s);
+                    }) : nullptr;
+        f.tuneRate = 0.025;
         f.dragPixels = 12000.0f;
         f.sepBefore = true;
-        f.tip = "Le gros potard d'accord : glisse pour parcourir la bande (environ 7 kHz par pixel vers 10 MHz ; Maj : 1 kHz), la molette pour les petits pas. Un tour de son cadran = 10 kHz : ses chiffres lisent les kHz."_fr;
+        f.tip = "Le gros potard d'accord tourne lentement : 40 pixels pour 1 kHz, un tour de son cadran pour 10 kHz (ses chiffres lisent les kHz). Plus tu vas vite, plus il accélère, pour traverser la bande d'un geste. Maj : encore plus fin. La molette : 1 kHz par cran (Maj : 0,1)."_fr;
         tb.ctls.push_back (f);
         auto md = choiceCtl ("Demod", { "am", "usb", "lsb", "cw" },
                              [this, rxNow]
@@ -4104,8 +4167,8 @@ void Machine::buildPages()
     // (0.4.13) STRETCH, its second bank
     {
         auto& sv = pages[samplerMode];
-        tip (sv, snd::elEngine, "GRAINS : le son relu en grains (GRAIN, SPRAY). SPECTRAL : un instant du son tenu et rejoué sans fin, lisse, comme une nappe ; SPEED le fait avancer, très lentement si tu veux, et FREEZE l'arrête."_fr);
-        tip (sv, snd::elFreeze, "La lecture arrêtée là où elle est : le son tenu tant que la note dure. À moduler, ou à jouer sur une scène."_fr);
+        tip (sv, snd::elEngine, "GRAINS : le son relu en grains (GRAIN, SPRAY). SPECTRAL : un instant du son tenu et rejoué sans fin, lisse, comme une nappe ; SPEED le fait avancer, très lentement si tu veux, et FREEZE l'arrête. Choisi depuis SAMPLE, il passe le son en STRETCH."_fr);
+        tip (sv, snd::elFreeze, "La lecture arrêtée là où elle est : le son tenu tant que la note dure. À moduler, ou à jouer sur une scène. Allumé depuis SAMPLE, il passe le son en STRETCH."_fr);
         tip (sv, snd::elSmear, "La longueur de l'instant tenu : court, le son garde son grain ; long, il se fond en nappe."_fr);
         tip (sv, snd::elTonal, "Les partiels gardés, ce qui est dessous enfoncé : un bruit, une radio deviennent des notes qui brillent."_fr);
         tip (sv, snd::elHarm, "Le son passé à travers les harmoniques de la note jouée : à fond, il ne reste qu'elles. Un bruit, une voix, une station deviennent des accords."_fr);

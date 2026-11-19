@@ -459,6 +459,11 @@ int main (int argc, char** argv)
     view->showBank (1);
     run (120);
     shoot ("73-sampler-freeze.png");
+    // (0.4.14) the same bank in SAMPLE: SPECTRAL's settings greyed, ENGINE and FREEZE at hand
+    set (snd::playMode, 0.0f);
+    set (snd::elFreeze, 0.0f);
+    run (60);
+    shoot ("74-sampler-freeze-sample.png");
     view->showBank (0);
     for (int id : { (int) snd::playMode, (int) snd::elEngine, (int) snd::elFreeze, (int) snd::elHarm, (int) snd::elShimmer })
         set (id, 0.0f);
@@ -472,6 +477,25 @@ int main (int argc, char** argv)
     view->showPage (5);
     run (60);
     shoot ("15-sampler-filtre-wtf.png");
+    // (0.4.14) A pressed: scene A in p-lock, the fader to A (a click on the scenes' panel, as the hand would)
+    {
+        const juce::Point<int> inPanel (1000, 700);
+        if (auto* panel = view->getComponentAt (inPanel))
+        {
+            const auto local = juce::Point<float> (35.0f, (float) panel->getHeight() - 32.0f);
+            auto src = juce::Desktop::getInstance().getMainMouseSource();
+            const auto t = juce::Time::getCurrentTime();
+            juce::MouseEvent down (src, local, juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier), 1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                   panel, panel, t, local, t, 1, false);
+            panel->mouseDown (down);
+            panel->mouseUp (down.withNewPosition (local));
+            run (30);
+            shoot ("75-scene-a-plock.png");
+            panel->mouseDown (down);           // out again
+            panel->mouseUp (down.withNewPosition (local));
+            run (10);
+        }
+    }
     for (int n : { 48, 55 })
         proc.audition (n, 0, false);
     run (40);

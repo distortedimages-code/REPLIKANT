@@ -59,6 +59,11 @@ namespace te
         float quantum = 0.0f;                            // > 0: kept on whole multiples of it (in its own units)
         float dragPixels = 240.0f;                       // the drag that sweeps its whole range
         std::function<float()> spin;                     // (tuning) how far round the knob is, in turns
+        // (0.4.14, tuning) its value in its own units, read and set: the knob then turns by the pixel, slowly (tuneRate
+        // units a pixel), faster the faster it's dragged (up to 400 times), and keeps what's below the setter's rounding
+        std::function<double()> tuneGet;
+        std::function<void (double)> tuneSet;
+        double tuneRate = 0.025;
         std::function<void()> begin, end;                // the gesture (a host records automation between them)
         std::function<void()> changed;                   // after it was set
         juce::String tip;
@@ -120,6 +125,10 @@ namespace te
         const Ctl* ctl = nullptr;
         float dragStart = 0.0f, stepAccum = 0.0f;
         bool dragged = false, inGesture = false;
+        // (tuning) the value as dragged (finer than the setter keeps), the last pixel, when, how fast
+        double tuneValue = 0.0, lastDragTime = 0.0;
+        float lastDragY = 0.0f, dragSpeed = 0.0f;
+        bool tuning() const;
         juce::String lastSig;
     };
 }
