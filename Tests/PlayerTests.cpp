@@ -1403,6 +1403,29 @@ static void testReadingEngine()
 }
 
 //==============================================================================
+// (0.4.16) the mixer's mutes: OSC A muted is silent (ramped: no click); unmuted, back as it was
+static void testMutes()
+{
+    Player p;
+    p.set (snd::engine, (float) snd::synth);
+    plain (p);
+    p.set (snd::fModel, 0.0f);
+    p.set (snd::obLevel, 0.0f);
+    p.set (snd::oaLevel, 1.0f);
+    auto open = play (p, 1.0, { { 0.0, 60, 127 } });
+    const double heard = rms (open, 24000, 48000);
+    Player q;
+    q.set (snd::engine, (float) snd::synth);
+    plain (q);
+    q.set (snd::fModel, 0.0f);
+    q.set (snd::obLevel, 0.0f);
+    q.set (snd::oaLevel, 1.0f);
+    q.set (snd::muteA, 1.0f);
+    auto muted = play (q, 1.0, { { 0.0, 60, 127 } });
+    CHECK (heard > 0.05 && rms (muted, 0, 48000) < 1.0e-4, "OSC A muted: %.4f (open %.3f)", rms (muted, 0, 48000), heard);
+}
+
+//==============================================================================
 // ORBITE: on the note (harmonic while synced), clean far up, its timbre turning with ORBITE while the pitch stays,
 // every algorithm bounded; in the SAMPLER's mix and as its phase modulator
 static void testOrbite()
@@ -1786,6 +1809,7 @@ int main()
     testSub();
     testReverseElasticLoops();
     testSpectralStretch();
+    testMutes();
     testFarPitch();
     testScenes();
     testVoices();

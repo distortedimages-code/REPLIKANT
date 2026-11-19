@@ -47,8 +47,9 @@ namespace radio
     constexpr int loopFrames = 1 << 18;         // a loop (LOOP, DIG): 5.4 s at most
     constexpr int numPads = 16;
     constexpr int firstPadNote = 36;            // C1: the pads on the keys, one a semitone
-    constexpr double heardSeconds = 32.0;       // what was heard, kept (the takes come from it)
-    constexpr double longestTake = 30.0;
+    // (0.4.16) what was heard, kept two minutes (in 16 bits: ±2 full scale), and the margin the writing needs
+    constexpr double heardSeconds = 124.0, memorySeconds = 120.0;
+    constexpr double longestTake = 30.0;        // GRAB and REC (a passage chosen on the screen: up to memorySeconds)
     constexpr int peakFrames = 256;             // the screen: a peak every 256 frames of what was heard
 
     // a receiver's state (the network sets it): nothing tuned, off, connecting, waiting for its sound (and the
@@ -194,6 +195,15 @@ namespace radio
 
         // what was heard (message thread): its last seconds; REC .. STOP
         bool grab (double seconds, Take::Audio& out) const;
+        // (0.4.16) the memory: where it's written now and how far back it goes (in frames, counted from the start), a
+        // passage of it as a take; replayed from a moment (what's heard instead of the live sound, until it catches up
+        // with it), back to live
+        int64_t heardNow() const                   { return heardW.load (std::memory_order_acquire); }
+        int64_t heardOldest() const;
+        bool takeRange (int64_t from, int64_t to, Take::Audio& out) const;
+        void replayFrom (int64_t frame)            { replayCmd.store (std::max ((int64_t) 0, frame), std::memory_order_release); }
+        void replayStop()                          { replayCmd.store (-2, std::memory_order_release); }
+        int64_t replaying() const                  { return replayShown.load (std::memory_order_acquire); }
         void recStart();
         void recCancel()                           { recFrom.store (-1); }
         bool recording() const                     { return recFrom.load() >= 0; }
@@ -261,7 +271,14 @@ namespace radio
         void listen (float* L, float* R, int n, const Settings&);
 
         // ---- what was heard
-        std::vector<float> heardL, heardR;
+        std::vector<int16_t> heardL, heardR;     // (0.4.16) in 16 bits, ±2 full scale
+        static int16_t toPcm (float x)            { return (int16_t) std::lround (std::max (-1.99994f, std::min (1.99994f, std::isfinite (x) ? x : 0.0f)) * 16384.0f); }
+        static float fromPcm (int16_t v)          { return (float) v * (1.0f / 16384.0f); }
+        // the replay: asked (a frame, -2 to stop, -1 nothing), where it reads, how far it's mixed in
+        std::atomic<int64_t> replayCmd { -1 }, replayShown { -1 };
+        int64_t replayPos = -1, replayNext = -1, replayEnd = -1, replayEndNext = -1;
+        float replayMix = 0.0f, replayTo = 0.0f;
+        void replay (float* L, float* R, int n);
         // ---- (0.4.12) MORPH: the station left (a new frequency, another station, another receiver), its last half second
         // held as overlapping grains, darkening as it fades, while the next one comes in over it
         static constexpr int holdFrames = rate / 2;
@@ -276,7 +293,7 @@ namespace radio
         std::vector<float> peaks;
         std::atomic<int64_t> peakW { 0 };
         float peakAcc = 0.0f; int peakN = 0;
-        bool copyHeard (int64_t from, int64_t to, Take::Audio& out) const;
+        bool copyHeard (int64_t from, int64_t to, Take::Audio& out, double longest = longestTake) const;
 
         // ---- the pads
         struct PadVoice

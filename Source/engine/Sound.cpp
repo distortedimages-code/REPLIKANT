@@ -272,6 +272,11 @@ namespace
         { "elHarm",    "Harmonics",                   K::linear,  0, 1, 0, 1, nullptr, true, "%" },
         { "elShimmer", "Shimmer",                     K::linear,  0, 1, 0, 1, nullptr, true, "%" },
         { "elWidth",   "Width",                       K::linear,  0, 1, 0.6f, 1, nullptr, true, "%" },
+        { "muteA",     "Mute A",                      K::toggle,  0, 1, 0, 1, nullptr, false, "" },
+        { "muteB",     "Mute B",                      K::toggle,  0, 1, 0, 1, nullptr, false, "" },
+        { "muteSub",   "Mute Sub",                    K::toggle,  0, 1, 0, 1, nullptr, false, "" },
+        { "muteNoise", "Mute Noise",                  K::toggle,  0, 1, 0, 1, nullptr, false, "" },
+        { "muteOrb",   "Mute Orbite",                 K::toggle,  0, 1, 0, 1, nullptr, false, "" },
     };
 
     std::string fmt (const char* f, double v)
@@ -490,6 +495,7 @@ std::string longName (int id)
     if (in (cpIn, cpLevel))        return "Comp " + name;
     if (id == rdDensity || id == rdVary || id == rdMorph) return "Radio " + name;
     if (in (elEngine, elWidth))    return "Stretch " + name;
+    if (in (muteA, muteOrb))       return "Mixer " + name;
     if (in (lmOn, lmDrive))        return id == lmOn ? std::string ("Output Limit") : "Limit " + name;
     if (in (rdTake, rdPads))       return "Radio " + name;
     if (in (rdPadTune, rdPadLevel)) return "Radio Pads " + name;

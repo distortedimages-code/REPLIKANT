@@ -2123,6 +2123,28 @@ bool ReplikantProcessor::radioGrab (juce::String& why)
     return true;
 }
 
+bool ReplikantProcessor::radioTakeRange (int64_t from, int64_t to, juce::String& why)
+{
+    auto a = std::make_shared<radio::Take::Audio>();
+    float peak = 0.0f;
+    if (radio.takeRange (std::min (from, to), std::max (from, to), *a))
+        for (size_t i = 0; i < a->l.size(); ++i)
+            peak = juce::jmax (peak, std::abs (a->l[i]), std::abs (a->r[i]));
+    if (a->l.size() < (size_t) (0.05 * radio.sampleRate()))
+    {
+        why = "Trop court : glisse sur un passage plus long."_fr;
+        return false;
+    }
+    if (peak < 1.0e-4f)
+    {
+        why = "Rien n'a été entendu à ce moment-là."_fr;
+        return false;
+    }
+    const auto station = radioStationName ((int) player.get (snd::rdRx));
+    useTake (a, (station.isNotEmpty() ? station : juce::String ("radio")) + " " + juce::Time::getCurrentTime().formatted ("%H-%M-%S"), true);
+    return true;
+}
+
 bool ReplikantProcessor::radioRec (juce::String& why)
 {
     if (! radio.recording())

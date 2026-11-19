@@ -1721,6 +1721,13 @@ void Player::modulate (int offset, int n, const Transport& t, Chunk& c, bool atR
         shownMoved[(size_t) i].store (true, std::memory_order_relaxed);
     }
 
+    // (0.4.16) the mixer's mutes: the levels at nothing (each voice ramps its levels: no click)
+    if (c.v[snd::muteA] > 0.5f)     c.v[snd::oaLevel] = c.v[snd::mxSample] = 0.0f;
+    if (c.v[snd::muteB] > 0.5f)     c.v[snd::obLevel] = 0.0f;
+    if (c.v[snd::muteSub] > 0.5f)   c.v[snd::subLevel] = c.v[snd::mxSub] = 0.0f;
+    if (c.v[snd::muteNoise] > 0.5f) c.v[snd::noiseLevel] = 0.0f;
+    if (c.v[snd::muteOrb] > 0.5f)   c.v[snd::mxOrbite] = 0.0f;
+
     glidePrimed = true;
     c.ppq = ppq;
     c.bpm = bpm;

@@ -102,6 +102,7 @@ int main (int argc, char** argv)
     for (int pg = 0; pg < 10; ++pg)
     {
         set (snd::orOn, pg == 2 || pg == 3 ? 1.0f : 0.0f);      // ORBITE on for its pages
+        set (snd::muteNoise, pg == 3 ? 1.0f : 0.0f);            // (the mixer: a mute shown)
         view->showPage (pg);
         run (60);
         shoot (synthShots[pg]);
@@ -650,6 +651,12 @@ int main (int argc, char** argv)
         shoot ("34-radio-ecoute.png");
         proc.audition (radio::firstPadNote + 2, 0, false);
         proc.audition (radio::firstPadNote + 5, 0, false);
+        // (0.4.16) the memory: replayed from 4 s back (its head on the strip)
+        proc.radio.replayFrom (proc.radio.heardNow() - (int64_t) (4.0 * proc.radio.sampleRate()));
+        realtime (0.6);
+        shoot ("76-radio-memoire.png");
+        proc.radio.replayStop();
+        realtime (0.05);
         view->showPage (3);
         realtime (0.6);
         shoot ("35-radio-prise.png");

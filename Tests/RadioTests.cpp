@@ -504,11 +504,11 @@ static void testHeard()
     radio::Take::Audio a;
     CHECK (e->grab (2.0, a), "grab");
     CHECK (std::abs ((double) a.l.size() - 2.0 * sr) < 2.0, "grab length %zu", a.l.size());
-    // the very same frames as were heard
+    // the very same frames as were heard (kept in 16 bits, ±2 full scale: within one step)
     double diff = 0;
     for (size_t i = 0; i < a.l.size(); ++i)
         diff = std::max (diff, (double) std::abs (a.l[i] - out[out.size() - a.l.size() + i]));
-    CHECK (diff == 0.0, "grab is what was heard: %g", diff);
+    CHECK (diff <= 0.5 / 16384.0 + 1.0e-7, "grab is what was heard: %g", diff);
     // REC .. STOP
     e->recStart();
     run (*e, *f, s, 1.5);
@@ -522,6 +522,35 @@ static void testHeard()
     e->recStart();
     run (*e, *f, s, 33.0);
     CHECK (e->recStop (c) && std::abs ((double) c.l.size() / sr - radio::longestTake) < 0.05, "a long take: %.2f s", (double) c.l.size() / sr);
+
+    // (0.4.16) two minutes kept: 125 s heard (a tone, then quiet for the last 5 s), a passage of the full two minutes
+    // taken from the screen, the tone at its start
+    run (*e, *f, s, 120.0);
+    e->bank.setState (0, radio::failed, radio::web);
+    run (*e, *f, s, 5.0);
+    const int64_t now = e->heardNow();
+    CHECK (e->heardOldest() <= now - (int64_t) (radio::memorySeconds * sr), "two minutes kept: %.1f s", (double) (now - e->heardOldest()) / sr);
+    radio::Take::Audio d;
+    CHECK (e->takeRange (now - (int64_t) (radio::memorySeconds * sr), now, d) && std::abs ((double) d.l.size() / sr - radio::memorySeconds) < 0.05,
+           "a passage of two minutes: %.2f s", (double) d.l.size() / sr);
+    CHECK (rms (d.l.data(), 4800) > 0.2 && rms (d.l.data() + d.l.size() - 4800, 4800) < 1.0e-3, "its start heard, its end quiet: %g %g",
+           rms (d.l.data(), 4800), rms (d.l.data() + d.l.size() - 4800, 4800));
+    // replayed from 10 s back: the tone heard again (instead of the quiet) up to where it was asked, then live again
+    e->replayFrom (now - (int64_t) (10.0 * sr));
+    auto replayed = run (*e, *f, s, 2.0);
+    CHECK (rms (replayed.data() + 4800, 9600) > 0.2 && e->replaying() >= 0, "replayed: %g", rms (replayed.data() + 4800, 9600));
+    float jump = 0.0f;
+    for (size_t i = 1; i < 2400; ++i)
+        jump = std::max (jump, std::abs (replayed[i] - replayed[i - 1]));
+    CHECK (jump < 0.2f, "in without a click: %g", (double) jump);
+    auto caught = run (*e, *f, s, 10.0);
+    CHECK (e->replaying() < 0 && rms (caught.data() + caught.size() - 4800, 4800) < 1.0e-3, "caught up, live again");
+    // stopped: out at once (10 ms)
+    e->replayFrom (e->heardNow() - (int64_t) (8.0 * sr));
+    run (*e, *f, s, 0.5);
+    e->replayStop();
+    auto stopped = run (*e, *f, s, 0.2);
+    CHECK (rms (stopped.data() + 4800, 4800) < 1.0e-3, "stopped: %g", rms (stopped.data() + 4800, 4800));
     delete f;
 }
 

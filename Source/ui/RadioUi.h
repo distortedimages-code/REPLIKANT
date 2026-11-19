@@ -23,6 +23,25 @@ namespace te
         float cachedW = 0.0f, cachedH = 0.0f;
         juce::Rectangle<float> cutArea;          // CUT's pattern (a click: another one)
         void paint (juce::Graphics&, juce::Rectangle<float>, ReplikantProcessor&, int selectedPad);
+
+        // (0.4.16) the memory, two minutes: the strip a window on it (its length and how far back it ends; 0: auto, now),
+        // held still while a hand is on it; a passage chosen (frames, from the start), the replay
+        juce::Rectangle<float> heardArea;
+        double viewSecs = 0.0, viewBack = 0.0;
+        int64_t heldRight = -1;                  // (a hand on the strip: the window stays where it was)
+        int64_t selA = -1, selB = -1;
+        double sr = 48000.0;
+        int64_t shownRight = 0;
+        double shownSecs = 12.0;
+        int64_t frameAt (float x) const
+        {
+            const float t = heardArea.getWidth() > 0.0f ? juce::jlimit (0.0f, 1.0f, (x - heardArea.getX()) / heardArea.getWidth()) : 1.0f;
+            return shownRight - (int64_t) ((1.0 - (double) t) * shownSecs * sr);
+        }
+        float xOf (int64_t frame) const
+        {
+            return heardArea.getRight() - heardArea.getWidth() * (float) ((double) (shownRight - frame) / (shownSecs * sr));
+        }
     };
 
     // under the screen: the pads, REC, GRAB, and what goes to the SAMPLER or to a DRUM track

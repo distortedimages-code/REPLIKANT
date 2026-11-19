@@ -1,3 +1,10 @@
+**REPLIK8 0.4.16** : la radio garde deux minutes, le mixer se joue sur l'écran, et la façade est sérigraphiée.
+
+- **Deux minutes de radio en mémoire** : la bande « heard » de l'écran radio est une fenêtre sur les deux dernières minutes entendues. La molette zoome (de 2 s à 2 min), et de côté (ou avec Maj) elle remonte dans le temps. Un **clic** réécoute à partir de là, jusqu'au moment du clic, puis repasse en direct ; un clic au bout droit revient au direct tout de suite. Un **glissé** choisit un passage, qui devient la prise, découpée en pads comme avec GRAB. Un double-clic remet la fenêtre comme avant. Pendant que ta main est dessus, la fenêtre ne défile pas
+- **Le mixer se joue sur l'écran** : sur la page MIXER, les faders de l'écran se tirent directement à la souris (double-clic : leur valeur par défaut), et chaque voie a un **M** pour la couper d'un clic, sans perdre son niveau. Les coupures sont gardées avec le son
+- **La façade sérigraphiée** : des liserets entourent les réglages qui vont ensemble, leur nom imprimé dans le trait (SOURCES, ORBITE, ENVELOPE, RECEIVER, OUTPUT…). Des traits relient le nom d'un groupe de boutons à chacun d'eux (RECEIVER vers RX 1 à 4, DEMOD vers AM, USB, LSB, CW, les listes à voyants), des flèches montrent le chemin du son (du récepteur à la fréquence puis à la démodulation), et le mixer finit par une flèche vers le filtre
+- **Les interrupteurs à côté de ce qu'ils allument** : un interrupteur prend moins de place, et se met juste devant le réglage qu'il commande. Dans le mixer, ON est collé à LEVEL dans le liseret ORBITE (et SUB dans le sampler)
+
 **REPLIK8 0.4.15** : un S-mètre à aiguille et un VU de la radio.
 
 - **Les vu-mètres de la radio** : sur les pages TUNE, LISTEN, AIR, TAKE et PADS, la partie droite de l'écran montre maintenant un cadran à aiguille et, en dessous, une barre de niveau

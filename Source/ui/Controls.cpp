@@ -479,6 +479,19 @@ void Encoder::paint (juce::Graphics& g)
             const int rows = (n + perRow - 1) / perRow;
             const float cellW = juce::jmin (38.0f, (area.getWidth() - 8.0f) / (float) perRow), rowH = 54.0f;
             auto block = juce::Rectangle<float> (cellW * (float) perRow, rowH * (float) rows).withCentre (area.getCentre());
+            // (0.4.16) the silkscreen: from the name down to a line, and from it to each lamp (the first row's)
+            if (n > 1)
+            {
+                const int inRow0 = juce::jmin (perRow, n);
+                const float x0 = block.getCentreX() - cellW * (float) inRow0 * 0.5f + cellW * 0.5f, x1 = x0 + cellW * (float) (inRow0 - 1);
+                const float busY = block.getY() - 5.0f, titleY = area.getY() + 1.0f;
+                const auto silk = ink2.withMultipliedAlpha (0.55f);
+                g.setColour (silk);
+                g.drawLine (block.getCentreX(), titleY, block.getCentreX(), busY, 1.0f);
+                g.drawLine (x0, busY, x1, busY, 1.0f);
+                for (int k = 0; k < inRow0; ++k)
+                    g.drawLine (x0 + cellW * (float) k, busY, x0 + cellW * (float) k, block.getY() + 0.5f, 1.0f);
+            }
             for (int k = 0; k < n; ++k)
             {
                 const int row = k / perRow, col_ = k % perRow;
@@ -512,6 +525,17 @@ void Encoder::paint (juce::Graphics& g)
             // the positions one under the other, a lamp by each, the chosen one lit
             const float rowH = juce::jmin (18.0f, area.getHeight() / (float) n);
             auto list = juce::Rectangle<float> (juce::jmin (area.getWidth() - 16.0f, 120.0f), rowH * (float) n).withCentre (area.getCentre());
+            // (0.4.16) the silkscreen: a line down the lamps' left, from the name, a tick to each
+            if (n > 1)
+            {
+                const auto silk = ink2.withMultipliedAlpha (0.55f);
+                const float bx = list.getX() - 4.0f, y0 = list.getY() + rowH * 0.5f, y1 = list.getBottom() - rowH * 0.5f;
+                g.setColour (silk);
+                g.drawLine (bx, area.getY() + 1.0f, bx, y1, 1.0f);
+                g.drawLine (bx, area.getY() + 1.0f, area.getCentreX() - 18.0f, area.getY() + 1.0f, 1.0f);
+                for (int k = 0; k < n; ++k)
+                    g.drawLine (bx, y0 + rowH * (float) k, list.getX() + 1.5f, y0 + rowH * (float) k, 1.0f);
+            }
             for (int k = 0; k < n; ++k)
             {
                 auto row = list.removeFromTop (rowH);

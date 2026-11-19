@@ -98,6 +98,8 @@ namespace snd
         // (0.4.13) STRETCH: its engine (GRAINS, SPECTRAL), FREEZE (the reading held, both engines), and the spectral
         // engine's SMEAR (the window), TONAL, HARMONICS, SHIMMER, WIDTH (see dsp/Smear.h)
         elEngine, elFreeze, elSmear, elTonal, elHarm, elShimmer, elWidth,
+        // (0.4.16) the mixer's mutes (on the screen): OSC A or the sample, OSC B, the sub, the noise, ORBITE
+        muteA, muteB, muteSub, muteNoise, muteOrb,
         count
     };
 

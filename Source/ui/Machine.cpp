@@ -155,6 +155,7 @@ public:
         screen (g, r);
         auto in = r.reduced (16.0f, 12.0f);
         zones.clear();
+        switches.clear();
         tabs.clear();
         auto titleRow = in.removeFromTop (22.0f);
         paintTitle (g, titleRow);
@@ -179,6 +180,7 @@ public:
         in.removeFromRight (14.0f);
         tunerShown = false;
         cubeShown = false;
+        radioShown = false;
         drumScreen.grid = {};
         const auto& shownPages = m.pagesShown();
         const auto vizNow = m.pageIndex() >= 0 && m.pageIndex() < (int) shownPages.size() ? shownPages[(size_t) m.pageIndex()].viz : juce::String();
@@ -189,7 +191,10 @@ public:
         else if (m.mode == Machine::radioMode && vizNow == "tune")
             {}                                  // (the tuner over it)
         else if (m.mode == Machine::radioMode && ! (vizNow == "fx" && (spectreBank() || echoBank())))
+        {
             radioScreen.paint (g, in, proc(), m.radioPad());
+            radioShown = true;
+        }
         else if (vizNow == "orbite")
             paintOrbite (g, in);
         else if (vizNow == "mix")
@@ -229,6 +234,15 @@ public:
                 repaint();
                 return;
             }
+        // (0.4.16) the radio's memory: a hand on it (the window held still): a click replays, a drag chooses a passage
+        if (radioShown && ! m.capture && radioScreen.heardArea.contains (e.position) && ! e.mods.isPopupMenu())
+        {
+            radioScreen.heldRight = radioScreen.shownRight;
+            radioScreen.selA = radioScreen.frameAt (e.position.x);
+            radioScreen.selB = -1;
+            heardPress = true;
+            return;
+        }
         if (m.mode == Machine::radioMode && radioScreen.cutArea.contains (e.position))
         {
             proc().radio.cutRoll.store (true);         // CUT: another pattern
@@ -284,11 +298,31 @@ public:
             editSteps (e);
             return;
         }
+        // (0.4.16) a switch on the screen (the mixer's mutes): flipped
+        for (auto& [area, id] : switches)
+            if (area.contains (e.position))
+            {
+                if (auto* q = proc().params.getParameter (snd::def (id).id))
+                {
+                    q->beginChangeGesture();
+                    q->setValueNotifyingHost (q->getValue() > 0.5f ? 0.0f : 1.0f);
+                    q->endChangeGesture();
+                }
+                repaint();
+                return;
+            }
         if ((zoneOn = zoneAt (e.position)) >= 0)
             zoneGesture (true);
     }
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (heardPress)
+        {
+            if (std::abs (e.getDistanceFromDragStartX()) > 4)
+                radioScreen.selB = radioScreen.frameAt (e.position.x);
+            repaint();
+            return;
+        }
         if (cubing)
         {
             // the point follows the cursor: in the plane of X and Y, or (shift) on the floor, X and Z
@@ -345,6 +379,28 @@ public:
     }
     void mouseUp (const juce::MouseEvent& e) override
     {
+        if (heardPress)
+        {
+            heardPress = false;
+            auto& rs = radioScreen;
+            if (rs.selB >= 0 && std::abs (rs.selB - rs.selA) > 0)
+            {
+                // a passage: the take (cut into pads, as a GRAB)
+                juce::String why;
+                if (proc().radioTakeRange (rs.selA, rs.selB, why))
+                    m.showMessage ("take : "_fr + juce::String ((double) std::abs (rs.selB - rs.selA) / rs.sr, 2) + " s du passage choisi, en pads"_fr);
+                else
+                    m.showMessage (why, true);
+            }
+            else if (e.position.x > rs.heardArea.getRight() - 14.0f && rs.viewBack < 0.05)
+                proc().radio.replayStop();                  // (the right end: live)
+            else
+                proc().radio.replayFrom (rs.selA);          // a click: heard again from there
+            rs.heldRight = -1;
+            rs.selA = rs.selB = -1;
+            repaint();
+            return;
+        }
         if (zoneOn >= 0 && zoneOn < (int) zones.size())
         {
             zoneGesture (false);
@@ -396,6 +452,14 @@ public:
 
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
+        if (radioShown && radioScreen.heardArea.contains (e.position))
+        {
+            // the memory's window back to its own, live
+            radioScreen.viewSecs = radioScreen.viewBack = 0.0;
+            proc().radio.replayStop();
+            repaint();
+            return;
+        }
         if (tunerShown && (tunerBand.contains (e.position) || tunerFine.contains (e.position)))
             setTune (0.0f);
         if (const int zi = zoneAt (e.position); zi >= 0)
@@ -410,6 +474,21 @@ public:
     }
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
     {
+        if (radioShown && radioScreen.heardArea.contains (e.position))
+        {
+            // the memory: up and down, nearer or further (2 s .. 2 min); sideways or Shift, back in time
+            auto& rs = radioScreen;
+            const float sign = w.isReversed ? -1.0f : 1.0f;
+            if (e.mods.isShiftDown() || std::abs (w.deltaX) > std::abs (w.deltaY))
+            {
+                const float d = (std::abs (w.deltaX) > std::abs (w.deltaY) ? -w.deltaX : w.deltaY) * sign;
+                rs.viewBack = juce::jlimit (0.0, radio::memorySeconds - rs.shownSecs, rs.viewBack + (double) d * rs.shownSecs * 0.6);
+            }
+            else
+                rs.viewSecs = juce::jlimit (2.0, radio::memorySeconds, rs.shownSecs * std::exp (-(double) (w.deltaY * sign) * 1.6));
+            repaint();
+            return;
+        }
         if (cubeShown && cubeArea.contains (e.position))
         {
             // the wheel: Z
@@ -442,8 +521,10 @@ public:
     static constexpr float kC30 = 0.8660254f, kS30 = 0.5f;
     static constexpr int cubeIds[3] = { snd::cutoff, snd::fY, snd::fZ };
     std::vector<juce::Rectangle<float>> tabs;
+    bool radioShown = false, heardPress = false;     // (0.4.16) the radio's screen painted; a hand on its memory
     struct Zone { juce::Rectangle<float> area; int xId = -1, yId = -1; float xSpan = 1.0f, ySpan = 1.0f; };
     std::vector<Zone> zones;
+    std::vector<std::pair<juce::Rectangle<float>, int>> switches;     // (0.4.16) on/off settings clicked on the screen
     int zoneOn = -1;
     float zoneFrom[2] {};
     bool cubeShown = false, cubing = false;
@@ -1102,6 +1183,13 @@ private:
         bool tab = false;
         for (auto& t : tabs)
             tab = tab || t.contains (e.position);
+        for (auto& s : switches)
+            tab = tab || s.first.contains (e.position);
+        if (radioShown && radioScreen.heardArea.contains (e.position))
+        {
+            setMouseCursor (juce::MouseCursor::IBeamCursor);       // (the memory: a click, a drag)
+            return;
+        }
         setMouseCursor (over ? juce::MouseCursor::DraggingHandCursor : (tab ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor));
     }
 
@@ -1419,15 +1507,16 @@ private:
         auto& p = proc();
         const bool sampler = m.mode == Machine::samplerMode;
         const bool orbOn = P (p, snd::orOn) > 0.5f;
-        struct Ch { const char* name; int id; juce::Colour c; bool live; };
+        // (0.4.16) each fader dragged here, its M a quick mute
+        struct Ch { const char* name; int id, mute; juce::Colour c; bool live; };
         std::vector<Ch> chs;
         if (sampler)
-            chs = { { "sample", snd::mxSample, col::sBlue, true }, { "orbite", snd::mxOrbite, col::sOrange, orbOn },
-                    { "sub", snd::mxSub, col::sGreen, P (p, snd::subOn) > 0.5f } };
+            chs = { { "sample", snd::mxSample, snd::muteA, col::sBlue, true }, { "orbite", snd::mxOrbite, snd::muteOrb, col::sOrange, orbOn },
+                    { "sub", snd::mxSub, snd::muteSub, col::sGreen, P (p, snd::subOn) > 0.5f } };
         else
-            chs = { { "osc a", snd::oaLevel, col::sBlue, true }, { "osc b", snd::obLevel, col::sGreen, true },
-                    { "sub", snd::subLevel, col::sYellow, true }, { "noise", snd::noiseLevel, col::screenText, true },
-                    { "orbite", snd::mxOrbite, col::sOrange, orbOn } };
+            chs = { { "osc a", snd::oaLevel, snd::muteA, col::sBlue, true }, { "osc b", snd::obLevel, snd::muteB, col::sGreen, true },
+                    { "sub", snd::subLevel, snd::muteSub, col::sYellow, true }, { "noise", snd::noiseLevel, snd::muteNoise, col::screenText, true },
+                    { "orbite", snd::mxOrbite, snd::muteOrb, col::sOrange, orbOn } };
         // the filter it all goes into, on the right
         auto into = r.removeFromRight (150.0f);
         {
@@ -1451,11 +1540,26 @@ private:
             const auto& ch = chs[i];
             auto strip = juce::Rectangle<float> (r.getX() + w * (float) i, r.getY(), w, r.getHeight()).reduced (10.0f, 0.0f);
             const float level = liveNorm (p, ch.id);
-            const auto c = ch.live ? ch.c : col::screenGhost;
-            text (g, ch.live ? juce::String (juce::roundToInt (level * 100.0f)) + " %" : juce::String ("off"), strip.removeFromTop (20.0f), mono (12.0f, 500),
-                  ch.live ? col::screenText : col::screenDim, juce::Justification::centred);
+            const bool muted = P (p, ch.mute) > 0.5f;
+            const auto c = ch.live && ! muted ? ch.c : col::screenGhost;
+            text (g, ! ch.live ? juce::String ("off") : (muted ? juce::String ("mute") : juce::String (juce::roundToInt (level * 100.0f)) + " %"),
+                  strip.removeFromTop (20.0f), mono (12.0f, 500), ch.live && ! muted ? col::screenText : (muted ? col::sYellow : col::screenDim),
+                  juce::Justification::centred);
+            // its M, under its name
+            auto mrow = strip.removeFromBottom (24.0f);
+            const auto mb = juce::Rectangle<float> (40.0f, 20.0f).withCentre (mrow.getCentre());
+            g.setColour (muted ? col::sYellow : col::screenLine);
+            g.fillRoundedRectangle (mb, 4.0f);
+            if (! muted)
+            {
+                g.setColour (col::screenDim.withAlpha (0.6f));
+                g.drawRoundedRectangle (mb.reduced (0.5f), 4.0f, 1.0f);
+            }
+            text (g, "m", mb, mono (11.0f, 700), muted ? col::screen : col::screenDim, juce::Justification::centred);
+            switches.push_back ({ mb.expanded (4.0f), ch.mute });
             text (g, juce::String::fromUTF8 (ch.name), strip.removeFromBottom (20.0f), mono (11.0f, 500), c, juce::Justification::centred);
             auto track = strip.reduced (0.0f, 8.0f);
+            zone (track.withSizeKeepingCentre (juce::jmin (60.0f, track.getWidth()), track.getHeight() + 12.0f), -1, ch.id);
             const auto rail = track.withSizeKeepingCentre (6.0f, track.getHeight());
             g.setColour (col::screenLine);
             g.fillRoundedRectangle (rail, 3.0f);
@@ -3849,14 +3953,14 @@ void Machine::buildPages()
         Page pg { "mixer", "mix", {} };
         if (sampler)
         {
-            pg.banks.push_back ({ "mixer", { S (snd::mxSample), sep (S (snd::mxOrbite)), S (snd::orOn, "On"), sep (S (snd::mxSub)), S (snd::subOn, "On") } });
+            pg.banks.push_back ({ "mixer", { S (snd::mxSample), sep (S (snd::orOn, "On")), S (snd::mxOrbite, "Level"), sep (S (snd::subOn, "On")), S (snd::mxSub, "Level") } });
             pg.banks.push_back ({ "sub", { S (snd::subOn, "On"), S (snd::subMode), S (snd::subOct), sep (S (snd::subXover)), S (snd::subReplace),
                                            sep (S (snd::subDrive)), S (snd::subFollow, nullptr, [this] { return (int) P (proc, snd::subMode) == 0; }),
                                            sep (S (snd::mxSub, "Level")) } });
         }
         else
             pg.banks.push_back ({ "mixer", { S (snd::oaLevel, "Osc A"), S (snd::obLevel, "Osc B"), S (snd::subLevel), S (snd::noiseLevel),
-                                              sep (S (snd::mxOrbite)), S (snd::orOn, "On") } });
+                                              sep (S (snd::orOn, "On")), S (snd::mxOrbite, "Level") } });
         return pg;
     };
     auto modsPage = [&]
@@ -4333,6 +4437,53 @@ void Machine::buildPages()
         tip (sv, snd::elShimmer, "L'octave au-dessus ajoutée, puis la douzième : la nappe s'éclaire."_fr);
         tip (sv, snd::elWidth, "Les deux côtés écartés : à 0, le son au milieu ; à fond, très large, même d'un son mono."_fr);
     }
+    // (0.4.16) the desk's silkscreen, bank by bank (in every mode that has it): liserets, arrows, where the sound goes
+    {
+        auto deco = [this] (const char* page, const char* bank, std::vector<Frame> frames, std::vector<int> arrows = {},
+                            juce::String exit = {}, Picto exitPicto = Picto::none, int onlyMode = -1)
+        {
+            for (int md = 0; md < numModes; ++md)
+                if (onlyMode < 0 || md == onlyMode)
+                    for (auto& pg : pages[md])
+                        if (pg.name == page)
+                            for (auto& b : pg.banks)
+                                if (b.name == bank)
+                                {
+                                    b.frames = frames;
+                                    b.arrows = arrows;
+                                    b.exit = exit;
+                                    b.exitPicto = exitPicto;
+                                }
+        };
+        // the mixers: the sources, then ORBITE (and the sampler's sub) with its switch; on to the filter
+        deco ("mixer", "mixer", { { 0, 3, "sources", Picto::cycles }, { 4, 5, "orbite", Picto::orbit } }, {}, "to filter", Picto::filterBox, synthMode);
+        deco ("mixer", "mixer", { { 1, 2, "orbite", Picto::orbit }, { 3, 4, "sub" } }, {}, "to filter", Picto::filterBox, samplerMode);
+        deco ("mixer", "sub", { { 0, 2, "sub" }, { 3, 4, "crossover" }, { 5, 6, "drive" } });
+        // ORBITE: the carrier's wave, its pitch, its motion; the satellites
+        deco ("orbite", "carrier", { { 0, 1, "orbite", Picto::orbit }, { 2, 3, "wave" }, { 4, 5, "pitch" }, { 6, 7, "motion" } });
+        deco ("orbite", "sat 1", { { 0, 2, "satellite 1" } });
+        deco ("orbite", "sat 2", { { 0, 2, "satellite 2" }, { 4, 5, "sync" } });
+        // the envelopes, the filter's tracking
+        deco ("filter", "filter env", { { 1, 4, "envelope", Picto::envelope }, { 5, 6, "tracking", Picto::keys } });
+        deco ("env", "amp env", { { 0, 3, "envelope", Picto::envelope }, { 4, 5, "output" }, { 6, 7, "voices", Picto::voices } });
+        deco ("filter", "drive", { { 1, 2, "drive" } });
+        deco ("fx", "drive", { { 1, 2, "drive" } });
+        // the end of the chain
+        deco ("settings", "comp", { { 1, 2, "input" }, { 3, 4, "time" }, { 5, 6, "output" } });
+        deco ("settings", "limit", { { 1, 2, "limiter" } });
+        // SAMPLER: the stretch, its spectral engine, the loop
+        deco ("play", "freeze", { { 0, 1, "stretch" }, { 2, 6, "spectral", Picto::spectrum } }, {}, {}, Picto::none, samplerMode);
+        deco ("loop", "loop", { { 1, 3, "loop", Picto::loop } }, {}, {}, Picto::none, samplerMode);
+        // RADIO: the receiver (its RX, tuned, demodulated), what comes out; the air
+        deco ("tune", "tune", { { 1, 3, "receiver", Picto::antenna }, { 4, 5, "output" } }, { 1, 2 }, {}, Picto::none, radioMode);
+        deco ("air", "air", { { 0, 1, "band" }, { 2, 3, "fading" } }, {}, {}, Picto::none, radioMode);
+        deco ("pads", "pads", { { 0, 1, "pads", Picto::pads } }, {}, {}, Picto::none, radioMode);
+        // DRUM: the hit's envelope, its layers; its sweep, its FM; its filter and the filter's envelope
+        deco ("amp", "amp", { { 0, 1, "envelope", Picto::envelope }, { 2, 4, "layers" }, { 5, 6, "output" } }, {}, {}, Picto::none, drumMode);
+        deco ("pitch", "pitch", { { 2, 3, "sweep" }, { 4, 5, "fm" } }, {}, {}, Picto::none, drumMode);
+        deco ("tone", "tone", { { 0, 2, "filter", Picto::filterBox }, { 3, 5, "filter env", Picto::envelope } }, {}, {}, Picto::none, drumMode);
+    }
+
     // SPECTRE's, on every mode's effects (and the filter's CUBE)
     for (auto* v : { &pages[synthMode], &pages[drumMode], &pages[samplerMode], &pages[radioMode] })
     {
@@ -4833,24 +4984,148 @@ void Machine::layoutEncoders()
     auto& pgs = pagesShown();
     const int pi = pageIndex();
     std::vector<const Ctl*> shown;
+    std::vector<int> places;
+    bankShown = nullptr;
     if (pi >= 0 && pi < (int) pgs.size())
     {
         auto& pg = pgs[(size_t) pi];
         auto& b = bankOf[pg.name + juce::String (capture ? 9 : mode)];
         b = juce::jlimit (0, (int) pg.banks.size() - 1, b);
+        bankShown = &pg.banks[(size_t) b];
+        int k = 0;
         for (auto& c : pg.banks[(size_t) b].ctls)
+        {
             if (c.isShown() && shown.size() < 8)
+            {
                 shown.push_back (&c);
+                places.push_back (k);
+            }
+            ++k;
+        }
     }
     for (int i = 0; i < 8; ++i)
     {
         encoders[i]->setCtl (i < (int) shown.size() ? shown[(size_t) i] : nullptr);
         encoders[i]->focused = encoders[i]->getCtl() != nullptr && encoders[i]->getCtl() == focus;
+        slotCtl[i] = i < (int) places.size() ? places[(size_t) i] : -1;
     }
+    placeEncoders();
     if (! shown.empty() && std::find (shown.begin(), shown.end(), focus) == shown.end())
         focus = shown[0];
     for (auto& e : encoders)
         e->focused = e->getCtl() != nullptr && e->getCtl() == focus;
+}
+
+// (0.4.16) the row of controls: a knob's width each, a switch narrower (so it sits by the setting it switches)
+void Machine::placeEncoders()
+{
+    if (encArea.isEmpty())
+        return;
+    const float ew = (float) encArea.getWidth() / 8.0f;
+    float x = (float) encArea.getX();
+    for (int i = 0; i < 8; ++i)
+    {
+        const auto* c = encoders[i]->getCtl();
+        const bool narrow = c != nullptr && (c->look == Ctl::Look::toggle || c->look == Ctl::Look::twoWay);
+        const float w = narrow ? std::round (ew * 0.64f) : std::round (ew);
+        encoders[i]->setBounds ((int) x, encArea.getY(), (int) w, encArea.getHeight());
+        x += w;
+    }
+}
+
+// (0.4.16) the silkscreen printed on the desk, over the row of controls: the liserets round what goes together, their
+// names in the line; the arrows of the sound's path; where it goes on to
+void Machine::paintSilkscreen (juce::Graphics& g)
+{
+    if (bankShown == nullptr || capture)
+        return;
+    const auto ink = col::deckInk2.withAlpha (0.7f);
+    const float top = (float) encArea.getY() + 1.0f, bottom = (float) encArea.getBottom() - 3.0f;
+    auto slotsOf = [this] (int from, int to)
+    {
+        juce::Rectangle<float> u;
+        for (int i = 0; i < 8; ++i)
+            if (slotCtl[i] >= from && slotCtl[i] <= to && encoders[i]->getCtl() != nullptr)
+                u = u.isEmpty() ? encoders[i]->getBounds().toFloat() : u.getUnion (encoders[i]->getBounds().toFloat());
+        return u;
+    };
+    for (const auto& f : bankShown->frames)
+    {
+        const auto u = slotsOf (f.from, f.to);
+        if (u.isEmpty())
+            continue;
+        auto box = juce::Rectangle<float>::leftTopRightBottom (u.getX() + 5.0f, top, u.getRight() - 5.0f, bottom);
+        // its name in the top line (the line broken round it), a picto before it
+        const auto font = mono (10.0f, 600);
+        const auto label = f.label.toUpperCase();
+        const float tw = f.label.isEmpty() ? 0.0f : juce::GlyphArrangement::getStringWidth (font, label) + (f.picto != Picto::none ? 16.0f : 0.0f) + 12.0f;
+        const float gx0 = box.getCentreX() - tw * 0.5f, gx1 = box.getCentreX() + tw * 0.5f;
+        const float rr = 9.0f;
+        juce::Path p;
+        if (tw > 0.0f)
+        {
+            p.startNewSubPath (gx1, box.getY());
+            p.lineTo (box.getRight() - rr, box.getY());
+        }
+        else
+            p.startNewSubPath (box.getRight() - rr, box.getY());
+        p.quadraticTo (box.getRight(), box.getY(), box.getRight(), box.getY() + rr);
+        p.lineTo (box.getRight(), box.getBottom() - rr);
+        p.quadraticTo (box.getRight(), box.getBottom(), box.getRight() - rr, box.getBottom());
+        p.lineTo (box.getX() + rr, box.getBottom());
+        p.quadraticTo (box.getX(), box.getBottom(), box.getX(), box.getBottom() - rr);
+        p.lineTo (box.getX(), box.getY() + rr);
+        p.quadraticTo (box.getX(), box.getY(), box.getX() + rr, box.getY());
+        p.lineTo (tw > 0.0f ? gx0 : box.getRight() - rr, box.getY());
+        g.setColour (juce::Colours::white.withAlpha (0.18f));
+        g.strokePath (p, juce::PathStrokeType (1.0f), juce::AffineTransform::translation (0.0f, 1.0f));     // (engraved: its lit edge)
+        g.setColour (ink);
+        g.strokePath (p, juce::PathStrokeType (1.1f));
+        if (tw > 0.0f)
+        {
+            auto lr = juce::Rectangle<float> (gx0 + 6.0f, box.getY() - 6.0f, tw - 12.0f, 12.0f);
+            if (f.picto != Picto::none)
+                picto (g, f.picto, lr.removeFromLeft (12.0f).withSizeKeepingCentre (12.0f, 12.0f), ink, 1.1f);
+            text (g, label, lr.withTrimmedLeft (f.picto != Picto::none ? 4.0f : 0.0f), font, ink, juce::Justification::centred);
+        }
+    }
+    // the sound's path: an arrow from a control to the next, at the knobs' height
+    const float midY = (float) encArea.getY() + 22.0f + ((float) encArea.getHeight() - 22.0f - 16.0f - 24.0f) * 0.5f;
+    auto arrow = [&g, ink] (float x0, float x1, float y)
+    {
+        g.setColour (ink);
+        g.drawLine (x0, y, x1 - 5.0f, y, 1.2f);
+        juce::Path h;
+        h.addTriangle (x1, y, x1 - 7.0f, y - 3.5f, x1 - 7.0f, y + 3.5f);
+        g.fillPath (h);
+    };
+    for (int a : bankShown->arrows)
+        for (int i = 0; i + 1 < 8; ++i)
+            if (slotCtl[i] == a && slotCtl[i + 1] == a + 1 && encoders[i + 1]->getCtl() != nullptr)
+            {
+                const float edge = (float) encoders[i]->getRight();
+                arrow (edge - 13.0f, edge + 13.0f, midY);
+            }
+    // where it goes on to: after the last control
+    if (bankShown->exit.isNotEmpty())
+    {
+        int last = -1;
+        for (int i = 0; i < 8; ++i)
+            if (encoders[i]->getCtl() != nullptr)
+                last = i;
+        if (last >= 0)
+        {
+            const float x0 = (float) encoders[last]->getRight() + 6.0f;
+            if (x0 + 90.0f < (float) encArea.getRight())
+            {
+                arrow (x0, x0 + 44.0f, midY);
+                auto lr = juce::Rectangle<float> (x0 + 50.0f, midY - 16.0f, 96.0f, 32.0f);
+                if (bankShown->exitPicto != Picto::none)
+                    picto (g, bankShown->exitPicto, lr.removeFromLeft (26.0f).withSizeKeepingCentre (24.0f, 24.0f), ink, 1.2f);
+                text (g, bankShown->exit.toUpperCase(), lr.withTrimmedLeft (5.0f), mono (10.0f, 600), ink, juce::Justification::centredLeft);
+            }
+        }
+    }
 }
 
 void Machine::setArmedMod (int mod)
@@ -4906,8 +5181,18 @@ void Machine::paint (juce::Graphics& g)
     ledMeter (g, inMeter.toFloat(), proc.isSampling() || proc.options.monitor > 0 ? proc.inputLevel() : 0.0f, "in");
     ledMeter (g, outMeter.toFloat(), proc.player.outLevel.load(), "out");
     // the lines between the groups of the row of controls, engraved in the desk
+    auto framedEdge = [this] (int i)
+    {
+        if (bankShown == nullptr || capture)
+            return false;
+        // (a liseret's edge draws that line already; inside one, the group is one)
+        for (const auto& f : bankShown->frames)
+            if ((slotCtl[i] >= f.from && slotCtl[i] <= f.to) || (i > 0 && slotCtl[i - 1] >= f.from && slotCtl[i - 1] <= f.to))
+                return true;
+        return false;
+    };
     for (int i = 1; i < 8; ++i)
-        if (encoders[i] != nullptr && encoders[i]->getCtl() != nullptr && encoders[i]->getCtl()->sepBefore)
+        if (encoders[i] != nullptr && encoders[i]->getCtl() != nullptr && encoders[i]->getCtl()->sepBefore && ! framedEdge (i))
         {
             const float x = (float) encoders[i]->getX(), y0 = (float) encArea.getY() + 16.0f, y1 = (float) encArea.getBottom() - 12.0f;
             g.setColour (juce::Colours::black.withAlpha (0.28f));
@@ -4950,6 +5235,7 @@ void Machine::paint (juce::Graphics& g)
 
 void Machine::paintOverChildren (juce::Graphics& g)
 {
+    paintSilkscreen (g);
     if (dropping)
     {
         g.setColour (col::accent.withAlpha (0.18f));
@@ -5021,9 +5307,7 @@ void Machine::resized()
     inMeter = encArea.removeFromLeft (26).reduced (0, 6);
     outMeter = encArea.removeFromRight (26).reduced (0, 6);
     encArea = encArea.reduced (8, 0);
-    const int ew = encArea.getWidth() / 8;
-    for (int i = 0; i < 8; ++i)
-        encoders[i]->setBounds (encArea.getX() + i * ew, encArea.getY(), ew, encArea.getHeight());
+    placeEncoders();
     body.removeFromTop (6);
     bottomArea = body;
     auto b = bottomArea;

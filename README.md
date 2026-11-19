@@ -4,6 +4,12 @@
 
 **Page de téléchargement** : https://distortedimages-code.github.io/REPLIKANT/
 
+## La version 0.4.16 : la mémoire de la radio, le mixer à l'écran, la sérigraphie
+
+- **Mémoire** (`radio::heardSeconds` 124, `memorySeconds` 120) : `heardL/R` en 16 bits (±2 pleine échelle, `toPcm` / `fromPcm`), 24 Mo à 48 kHz. `takeRange` (jusqu'à 120 s), `heardNow`, `heardOldest`. Relecture : `replayFrom (frame)` / `replayStop()`, consommés au bloc suivant (`replayCmd`) ; le son entendu remplacé par la mémoire, fondus de 10 ms, jusqu'à l'image du moment demandé (`replayEnd`), puis le direct ; hors antenne aussi. `RadioScreen` : fenêtre (`viewSecs`, `viewBack`, `heldRight` tenu pendant un geste), `frameAt` / `xOf`, sélection et tête de relecture ; `Screen` : clic, glissé (`radioTakeRange`), molette, double-clic. `RadioTests::testHeard` : 2 min gardées, un passage de 120 s, relecture puis direct, arrêt, sans clic.
+- **Mixer** : `snd::muteA` (OSC A ou le sample), `muteB`, `muteSub`, `muteNoise`, `muteOrb`, appliqués dans `Player` après les scènes (niveaux à zéro, rampés par voix) ; à l'écran, les faders sont des `zone` verticales et les M des `switches` de l'écran. `PlayerTests::testMutes`.
+- **Sérigraphie** (`Machine::Bank::frames`, `arrows`, `exit`, `paintSilkscreen`, au-dessus des enfants) : liserets gravés (un trait clair décalé d'un pixel), leur nom dans une coupure du trait ; pas de séparateur sur le bord ni à l'intérieur d'un liseret ; dans `Encoder::paint`, un bus des titres de `buttons` vers chaque voyant, et une accolade le long des `ledList`. `placeEncoders` : un `toggle` ou `twoWay` à 64 % de largeur. Le tableau `deco (page, bank, …)` en fin de construction des pages.
+
 ## La version 0.4.15 : les vu-mètres de la radio
 
 - **`Screen::paintRadioMeters`** (pages `tune`, `listen`, `air`, `take`, `pads` du mode RADIO, sous le rappel du réglage touché) : un cadran en arc (±48°, pivot sous la fenêtre). Ondes courtes avec S-mètre (`Rx::meterC`) : S0 à S9 (-127 à -73 dBm) sur 60 % de l'échelle, S9 à S9+60 (-13 dBm) sur le reste, montée 50 ms, descente 450 ms. Sinon : VU sur le RMS du son (`Engine::sigRms`, 0 VU = -18 dBFS), échelle en tension, 300 ms. Dessous : 36 segments de -48 à 0 dBFS (RMS 60/300 ms, crêtes `sigPeak` qui retombent en 0,5 s, la plus haute tenue 1,5 s).

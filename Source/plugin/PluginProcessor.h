@@ -188,6 +188,7 @@ public:
     std::shared_ptr<const radio::Take> radioTake() const    { return takeNow; }
     bool radioSlicing() const                        { return slicing.load() > 0; }
     bool radioGrab (juce::String& why);              // the last TAKE seconds of what was heard
+    bool radioTakeRange (int64_t from, int64_t to, juce::String& why);   // (0.4.16) a passage of the memory, chosen on the screen
     bool radioRec (juce::String& why);               // REC, then STOP: what was heard between them
     void radioReslice();                             // the take cut again (SENSITIVITY, PADS changed)
     bool radioToSampler (int pad, juce::String& why);      // the take (pad < 0) or one pad, played by the SAMPLER

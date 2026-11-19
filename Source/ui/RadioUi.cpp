@@ -61,24 +61,36 @@ void RadioScreen::paint (juce::Graphics& g, juce::Rectangle<float> r, ReplikantP
     if (hasTake)
         r.removeFromTop (8.0f);
 
-    // ---- what is heard, the last eight seconds going by (the newest on the right)
+    // ---- what is heard going by (the newest on the right); (0.4.16) a window on the last two minutes: the wheel zooms,
+    // sideways (or Shift) goes back; a click replays from there, a drag takes the passage
     {
         const double takeSecs = radio::takeSeconds ((int) P (p, snd::rdTake));
-        const double secs = juce::jlimit (6.0, radio::heardSeconds, std::round (takeSecs * 1.5)), sr = e.sampleRate();
+        sr = e.sampleRate();
+        const double autoSecs = juce::jlimit (6.0, radio::memorySeconds, std::round (takeSecs * 1.5));
+        const double secs = viewSecs > 0.0 ? juce::jlimit (2.0, radio::memorySeconds, viewSecs) : autoSecs;
+        viewBack = juce::jlimit (0.0, radio::memorySeconds - secs, viewBack);
+        shownRight = heldRight >= 0 ? heldRight : e.heardNow() - (int64_t) (viewBack * sr);
+        shownSecs = secs;
         auto head = live.removeFromTop (14.0f);
         const int mode = (int) P (p, snd::rdMode);
-        juce::String what = "heard · last "_fr + juce::String (juce::roundToInt (secs)) + " s";
+        const int64_t rp = e.replaying();
+        juce::String what = "heard · "_fr + juce::String (juce::roundToInt (secs)) + " s"
+                          + (viewBack > 0.05 ? " · " + juce::String (viewBack, 1) + " s back" : juce::String())
+                          + " · 2 min kept";
+        if (rp >= 0)
+            what << " · replay "_fr << juce::String ((double) (rp - e.heardNow()) / sr, 1) << " s · until the click · right end: live";
         if (mode == radio::modeCut)
             what << " · cut "_fr << e.cutCount.load() << " steps";
         else if (mode != radio::modeLive && e.loopSeconds.load() > 0.0f)
             what << " · "_fr << (mode == radio::modeLoop ? "loop " : "dig ") << juce::String (e.loopSeconds.load(), 2) << " s";
-        text (g, what, head, mono (10.0f), col::screenDim);
+        text (g, what, head, mono (10.0f), rp >= 0 ? col::sGreen : col::screenDim);
         auto w = live;
+        heardArea = w;
         const float mid = w.getCentreY(), half = w.getHeight() * 0.47f;
         g.setColour (col::screenLine);
         g.drawHorizontalLine ((int) mid, w.getX(), w.getRight());
-        // how far back GRAB reaches
-        const float gx = w.getRight() - w.getWidth() * (float) juce::jmin (1.0, takeSecs / secs);
+        // how far back GRAB reaches (from now)
+        const float gx = xOf (e.heardNow() - (int64_t) (takeSecs * sr));
         g.setColour (col::sOrange.withAlpha (0.07f));
         g.fillRect (juce::Rectangle<float>::leftTopRightBottom (gx, w.getY(), w.getRight(), w.getBottom()));
         g.setColour (col::sOrange.withAlpha (0.5f));
@@ -88,28 +100,54 @@ void RadioScreen::paint (juce::Graphics& g, juce::Rectangle<float> r, ReplikantP
         if (e.recording())
         {
             const double rs = e.recSeconds();
-            const float rx0 = w.getRight() - w.getWidth() * (float) juce::jmin (1.0, rs / secs);
+            const float rx0 = juce::jmax (w.getX(), xOf (e.heardNow() - (int64_t) (rs * sr)));
             g.setColour (col::sRed.withAlpha (0.16f));
             g.fillRect (juce::Rectangle<float>::leftTopRightBottom (rx0, w.getY(), w.getRight(), w.getBottom()));
             g.setColour (col::sRed);
             g.fillRect (rx0, w.getY(), 1.5f, w.getHeight());
             text (g, "rec " + juce::String (rs, 1) + " s", { rx0 + 4.0f, w.getBottom() - 13.0f, 90.0f, 12.0f }, mono (9.0f, 600), col::sRed);
         }
-        // the peaks
-        const int64_t written = e.peaksWritten();
+        // the peaks (the window's: its right end counted in peaks from the newest)
+        const int64_t written = juce::jmin (e.peaksWritten(), (shownRight + radio::peakFrames - 1) / radio::peakFrames);
         const int total = juce::jmax (1, (int) (secs * sr / radio::peakFrames));
         const int cols = juce::jmax (1, (int) w.getWidth());
         const int64_t from = written - total;
+        const int64_t oldestPeak = juce::jmax ((int64_t) 0, e.peaksWritten() - (int64_t) e.peakCount() + 2);
         g.setColour (col::screenText);
         for (int x = 0; x < cols; ++x)
         {
             const int64_t a = from + (int64_t) x * total / cols, b = juce::jmax (a + 1, from + (int64_t) (x + 1) * total / cols);
             float pk = 0.0f;
-            for (int64_t i = juce::jmax ((int64_t) 0, a); i < b && i < written; ++i)
+            for (int64_t i = juce::jmax (oldestPeak, a); i < b && i < written; ++i)
                 pk = juce::jmax (pk, e.peakAt (i));
             const float h = juce::jmin (1.0f, std::sqrt (pk)) * half;
             if (h > 0.4f)
                 g.fillRect (w.getX() + (float) x, mid - h, 1.0f, 2.0f * h);
+        }
+        // (0.4.16) the passage being chosen; where the replay reads
+        if (selA >= 0 && selB >= 0 && selA != selB)
+        {
+            const float x0 = juce::jlimit (w.getX(), w.getRight(), xOf (juce::jmin (selA, selB)));
+            const float x1 = juce::jlimit (w.getX(), w.getRight(), xOf (juce::jmax (selA, selB)));
+            g.setColour (col::sBlue.withAlpha (0.18f));
+            g.fillRect (juce::Rectangle<float>::leftTopRightBottom (x0, w.getY(), x1, w.getBottom()));
+            g.setColour (col::sBlue);
+            g.fillRect (x0, w.getY(), 1.5f, w.getHeight());
+            g.fillRect (x1 - 1.5f, w.getY(), 1.5f, w.getHeight());
+            text (g, "take " + juce::String ((double) std::abs (selB - selA) / sr, 2) + " s", { x0 + 4.0f, w.getBottom() - 13.0f, 120.0f, 12.0f },
+                  mono (9.0f, 600), col::sBlue);
+        }
+        if (rp >= 0)
+        {
+            const float x = xOf (rp);
+            if (x >= w.getX() && x <= w.getRight())
+            {
+                g.setColour (col::sGreen);
+                g.fillRect (x - 1.0f, w.getY(), 2.0f, w.getHeight());
+                juce::Path tri;
+                tri.addTriangle (x - 5.0f, w.getY(), x + 5.0f, w.getY(), x, w.getY() + 7.0f);
+                g.fillPath (tri);
+            }
         }
         // the squelch shut: a dim veil
         if (mode == radio::modeLive && P (p, snd::rdSquelch) > 0.005f && e.gateOpen.load() < 0.5f)

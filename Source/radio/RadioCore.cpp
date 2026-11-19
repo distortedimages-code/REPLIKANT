@@ -260,9 +260,13 @@ void Engine::allocate()
 void Engine::makeHeard()
 {
     const size_t frames = (size_t) std::ceil (heardSeconds * sr);
-    heardL.assign (frames, 0.0f);
-    heardR.assign (frames, 0.0f);
+    heardL.assign (frames, 0);
+    heardR.assign (frames, 0);
     heardW = 0;
+    replayCmd = -1;
+    replayShown = -1;
+    replayPos = replayNext = replayEnd = replayEndNext = -1;
+    replayMix = replayTo = 0.0f;
     recFrom = -1;
     peaks.assign (frames / (size_t) peakFrames + 1, 0.0f);
     peakW = 0;
@@ -950,6 +954,7 @@ void Engine::render (float* L, float* R, int n, const Settings& s, const Event* 
         sigPeak.store (0.0f, std::memory_order_relaxed);
         gateOpen.store (1.0f, std::memory_order_relaxed);
         loopPos.store (-1.0f, std::memory_order_relaxed);
+        replay (L, R, n);                       // (what was heard can still be replayed)
         int pos = 0;
         for (int e = 0; e < numEvents; ++e)
         {
@@ -973,8 +978,8 @@ void Engine::render (float* L, float* R, int n, const Settings& s, const Event* 
     for (int i = 0; i < n; ++i)
     {
         const size_t at = (size_t) ((w0 + i) % cap);
-        heardL[at] = L[i];
-        heardR[at] = R[i];
+        heardL[at] = toPcm (L[i]);
+        heardR[at] = toPcm (R[i]);
         peakAcc = std::max (peakAcc, std::max (std::abs (L[i]), std::abs (R[i])));
         if (++peakN >= peakFrames)
         {
@@ -986,6 +991,7 @@ void Engine::render (float* L, float* R, int n, const Settings& s, const Event* 
         }
     }
     heardW.store (w0 + n, std::memory_order_release);
+    replay (L, R, n);
 
     // the pads, struck at their events
     int pos = 0;
@@ -1005,14 +1011,80 @@ void Engine::render (float* L, float* R, int n, const Settings& s, const Event* 
 }
 
 //==============================================================================
-bool Engine::copyHeard (int64_t from, int64_t to, Take::Audio& out) const
+// (0.4.16) the replay: what's heard replaced by the memory from a moment, crossfaded in and out (10 ms), up to where
+// it was asked (then live again); a new moment asked while it plays: out, then in from there
+void Engine::replay (float* L, float* R, int n)
+{
+    const int64_t cmd = replayCmd.exchange (-1, std::memory_order_acq_rel);
+    const int64_t now = heardW.load (std::memory_order_relaxed), oldest = heardOldest();
+    if (cmd == -2)
+    {
+        replayTo = 0.0f;
+        replayNext = -1;
+    }
+    else if (cmd >= 0)
+    {
+        replayNext = std::max (oldest, std::min (now - (int64_t) (0.25 * sr), cmd));
+        replayEndNext = now;
+        replayTo = 0.0f;                        // (out first, if it plays: in from there once out)
+    }
+    if (replayPos < 0 && replayNext < 0 && replayMix <= 0.0f)
+    {
+        replayShown.store (-1, std::memory_order_relaxed);
+        return;
+    }
+    const int64_t cap = (int64_t) heardL.size();
+    const float step = 1.0f / (0.01f * (float) sr);
+    for (int i = 0; i < n; ++i)
+    {
+        if (replayNext >= 0 && replayMix <= 0.0f)
+        {
+            replayPos = replayNext;
+            replayEnd = replayEndNext;
+            replayNext = -1;
+            replayTo = 1.0f;
+        }
+        replayMix = replayMix < replayTo ? std::min (replayTo, replayMix + step) : std::max (replayTo, replayMix - step);
+        if (replayPos >= 0)
+        {
+            // (the live sound reached: back to it; too old: overwritten, from the oldest)
+            const int64_t live = now - n + i;
+            if (replayPos >= live - 64 || replayPos >= replayEnd - 64)
+                replayTo = 0.0f;
+            replayPos = std::max (replayPos, oldest);
+            const size_t at = (size_t) (replayPos % cap);
+            const float a = replayMix;
+            L[i] = L[i] * (1.0f - a) + fromPcm (heardL[at]) * a;
+            R[i] = R[i] * (1.0f - a) + fromPcm (heardR[at]) * a;
+            ++replayPos;
+            if (replayMix <= 0.0f && replayTo <= 0.0f && replayNext < 0)
+                replayPos = -1;
+        }
+    }
+    replayShown.store (replayPos, std::memory_order_relaxed);
+}
+
+int64_t Engine::heardOldest() const
+{
+    if (heardL.empty())
+        return 0;
+    const int64_t margin = (int64_t) (2.0 * sr);
+    return std::max ((int64_t) 0, heardW.load (std::memory_order_acquire) - ((int64_t) heardL.size() - margin));
+}
+
+bool Engine::takeRange (int64_t from, int64_t to, Take::Audio& out) const
+{
+    return copyHeard (from, std::min (to, heardW.load (std::memory_order_acquire)), out, memorySeconds);
+}
+
+bool Engine::copyHeard (int64_t from, int64_t to, Take::Audio& out, double longest) const
 {
     if (! allocated())
         return false;
     const int64_t cap = (int64_t) heardL.size();
     const int64_t margin = (int64_t) (2.0 * sr);
     from = std::max (from, std::max ((int64_t) 0, to - (cap - margin)));
-    from = std::max (from, to - (int64_t) (longestTake * sr));
+    from = std::max (from, to - (int64_t) (longest * sr));
     if (to - from < 64)
         return false;
     const size_t len = (size_t) (to - from);
@@ -1022,8 +1094,8 @@ bool Engine::copyHeard (int64_t from, int64_t to, Take::Audio& out) const
     for (size_t i = 0; i < len; ++i)
     {
         const size_t at = (size_t) ((from + (int64_t) i) % cap);
-        out.l[i] = heardL[at];
-        out.r[i] = heardR[at];
+        out.l[i] = fromPcm (heardL[at]);
+        out.r[i] = fromPcm (heardR[at]);
     }
     return true;
 }

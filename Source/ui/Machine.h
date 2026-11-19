@@ -76,7 +76,19 @@ namespace te
         void drumLift (std::vector<int> steps);    // (DRUM: steps lifted for p-locks)
         void drumShowPatterns (bool);              // (DRUM: the patterns on the strip)
 
-        struct Bank { juce::String name; std::vector<Ctl> ctls; };
+        // (0.4.16) the desk's silkscreen for a bank: liserets round controls that go together (their places in the
+        // bank, from .. to, and a name printed in the line), arrows where the sound goes from one to the next (after
+        // the place given), and where it all goes on to, printed after the last control
+        struct Frame { int from = 0, to = 0; juce::String label; Picto picto = Picto::none; };
+        struct Bank
+        {
+            juce::String name;
+            std::vector<Ctl> ctls;
+            std::vector<Frame> frames = {};
+            std::vector<int> arrows = {};
+            juce::String exit = {};
+            Picto exitPicto = Picto::none;
+        };
         struct Page { juce::String name; juce::String viz; std::vector<Bank> banks; };
 
     private:
@@ -147,6 +159,10 @@ namespace te
         static constexpr int numPageKeys = 10;
         Key pageKeys[numPageKeys];
         std::unique_ptr<Encoder> encoders[8];
+        int slotCtl[8] { -1, -1, -1, -1, -1, -1, -1, -1 };   // (0.4.16) each encoder's control: its place in the bank shown
+        const Bank* bankShown = nullptr;
+        void placeEncoders();                      // their widths: a switch narrower, next to what it switches
+        void paintSilkscreen (juce::Graphics&);
         std::unique_ptr<juce::Component> keyboard, modScenes, wtfPanel, captureStrip;
         std::unique_ptr<juce::Component> radioStrip, radioTuner;   // (RADIO: the pads in the keyboard's place, the tuner over the screen)
         std::unique_ptr<juce::Component> drumStrip;                // (DRUM: its tracks and steps in the keyboard's place)
