@@ -335,6 +335,21 @@ void Encoder::paintScale (juce::Graphics& g, juce::Point<float> c, float radius,
             const float a = angle ((float) i / (float) (ctl->ticks - 1));
             g.drawLine ({ at (a, radius * 1.1f), at (a, radius * 1.2f) }, 1.0f);
         }
+    // the positions as pictures, round it (the one chosen inked full)
+    if (ctl->drawOption && ctl->options.size() > 1)
+    {
+        const int n = ctl->options.size();
+        const int chosen = juce::jlimit (0, n - 1, juce::roundToInt (shownNorm() * (float) (n - 1)));
+        for (int i = 0; i < n; ++i)
+        {
+            const float a = angle ((float) i / (float) (n - 1));
+            g.setColour (ink);
+            g.drawLine ({ at (a, radius * 1.08f), at (a, radius * 1.24f) }, 1.4f);
+            const auto box = juce::Rectangle<float> (17.0f, 11.0f).withCentre (at (a, radius * 1.58f));
+            ctl->drawOption (g, i, box, i == chosen ? (on ? col::deckInk : ink) : ink.withMultipliedAlpha (0.55f));
+        }
+        return;
+    }
     for (auto& m : ctl->marks)
     {
         const float a = angle (m.at);

@@ -180,6 +180,27 @@ int main (int argc, char** argv)
     view->showBank (1);
     run (120);
     shoot ("49-mods-follow.png");
+    // (0.4.5) ECHO, four heads, alternate ways, scanning; then COMP in SETTINGS
+    set (snd::ecOn, 1.0f);
+    set (snd::ecHeads, 4.0f);
+    set (snd::ecDir, 2.0f);
+    set (snd::ecMotion, 2.0f);
+    set (snd::ecFeedback, 0.55f);
+    view->showPage (7);
+    view->showBank (8);
+    run (90);
+    shoot ("50-fx-echo.png");
+    view->showBank (3);
+    run (40);
+    shoot ("53-spectre-wave.png");
+    set (snd::ecOn, 0.0f);
+    set (snd::cpOn, 1.0f);
+    set (snd::cpAmount, 0.62f);
+    view->showPage (9);
+    view->showBank (1);
+    run (90);
+    shoot ("51-reglages-comp.png");
+    set (snd::cpOn, 0.0f);
     set (snd::wtf, 0.0f);
     set (snd::wtfMode, 0.0f);
     proc.player.setRoute (1, snd::cutoff, 0.0f);
@@ -342,6 +363,13 @@ int main (int argc, char** argv)
     view->setCaptureKind (te::Machine::cyclesKind);
     view->showPage (1);
     proc.cycleOptions.count = 0;
+    // (0.4.5) LISTEN's plan first
+    proc.cycleOptions.vary = 3;
+    view->showPage (1);
+    run (10);
+    shoot ("52-cycles-listen.png");
+    proc.cycleOptions.vary = 0;
+    view->showPage (1);
     run (10);
     shoot ("24-cycles-plan.png");
     {

@@ -47,6 +47,8 @@ namespace te
         struct Mark { float at; juce::String label; };   // a value printed round a knob, where it sits (0..1)
         std::vector<Mark> marks;
         int ticks = 0;                                   // the knob's graduations, evenly spread (0: none)
+        // a choice's positions printed round its knob as pictures (a wave's shape...) instead of their names
+        std::function<void (juce::Graphics&, int option, juce::Rectangle<float>, juce::Colour)> drawOption;
         bool sepBefore = false;                          // a line before it on the desk (a new group)
         float quantum = 0.0f;                            // > 0: kept on whole multiples of it (in its own units)
         float dragPixels = 240.0f;                       // the drag that sweeps its whole range

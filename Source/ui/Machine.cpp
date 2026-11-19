@@ -153,8 +153,11 @@ public:
         auto r = getLocalBounds().toFloat();
         screen (g, r);
         auto in = r.reduced (16.0f, 12.0f);
+        zones.clear();
+        tabs.clear();
         paintTitle (g, in.removeFromTop (22.0f));
         in.removeFromTop (8.0f);
+        paintTabs (g, in);
         auto panel = in.removeFromRight (392.0f);
         in.removeFromRight (14.0f);
         tunerShown = false;
@@ -201,6 +204,14 @@ public:
     {
         dragPos = -1;
         tuning = 0;
+        zoneOn = -1;
+        for (int b = 0; b < (int) tabs.size(); ++b)
+            if (tabs[(size_t) b].contains (e.position))
+            {
+                m.showBank (b);
+                repaint();
+                return;
+            }
         if (cubeShown && cubeArea.contains (e.position))
         {
             // the cube's point taken (X, Y, Z: the cutoff and the two settings, as automation gestures)
@@ -240,11 +251,19 @@ public:
             for (int i = 0; i < Player::numStages; ++i)
                 if (fxBoxes[i].contains (e.position))
                 {
-                    dragPos = i;
-                    dragX = e.position.x;
+                    pressPos = i;
+                    pressStart = juce::Time::getMillisecondCounterHiRes() * 0.001;
+                    pressX = dragX = e.position.x;
+                    lifted = false;
                     return;
                 }
-        editSteps (e);
+        if (stepsMod >= 0 && stepsArea.contains (e.position))
+        {
+            editSteps (e);
+            return;
+        }
+        if ((zoneOn = zoneAt (e.position)) >= 0)
+            zoneGesture (true);
     }
     void mouseDrag (const juce::MouseEvent& e) override
     {
@@ -278,9 +297,25 @@ public:
             setTune (v);
             return;
         }
-        if (dragPos >= 0)
+        if (pressPos >= 0)
         {
+            // (moved before it came out: not a hold)
+            if (! lifted && e.getDistanceFromDragStart() > 8)
+                pressPos = -1;
             dragX = e.position.x;
+            repaint();
+            return;
+        }
+        if (zoneOn >= 0 && zoneOn < (int) zones.size())
+        {
+            const auto& z = zones[(size_t) zoneOn];
+            const float fine = e.mods.isShiftDown() ? 0.2f : 1.0f;
+            const float d[2] = { (float) e.getDistanceFromDragStartX() / z.area.getWidth() * z.xSpan * fine,
+                                 -(float) e.getDistanceFromDragStartY() / z.area.getHeight() * z.ySpan * fine };
+            for (int k = 0; k < 2; ++k)
+                if (const int id = k == 0 ? z.xId : z.yId; id >= 0)
+                    if (auto* q = proc().params.getParameter (snd::def (id).id))
+                        q->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, zoneFrom[k] + d[k]));
             repaint();
             return;
         }
@@ -288,6 +323,12 @@ public:
     }
     void mouseUp (const juce::MouseEvent& e) override
     {
+        if (zoneOn >= 0 && zoneOn < (int) zones.size())
+        {
+            zoneGesture (false);
+            zoneOn = -1;
+            return;
+        }
         if (cubing)
         {
             cubing = false;
@@ -303,30 +344,29 @@ public:
                 t->endChangeGesture();
             return;
         }
-        if (dragPos < 0)
+        if (pressPos < 0)
             return;
-        const int from = dragPos;
-        dragPos = -1;
-        auto order = proc().player.fxOrder();
-        if (e.getDistanceFromDragStart() < 4)
+        const int from = pressPos;
+        if (! lifted)
         {
-            // a click: that effect's bank (the drive lives on the filter's page)
-            const int st = order[(size_t) from];
-            const int banks[Player::numStages] = { 0, 1, 4, 5, 6, 7, 8 };
-            m.bankOf[juce::String ("fx") + juce::String (m.mode)] = banks[st];
-            m.focus = nullptr;
-            m.layoutEncoders();
-            m.repaint();
+            pressPos = -1;
+            if (e.getDistanceFromDragStart() < 8)
+            {
+                // a click: that effect's bank (the drive's: on the filter's page too)
+                const int st = proc().player.fxOrder()[(size_t) from];
+                const int banks[Player::numStages] = { 0, 1, 4, 5, 6, 7, 8 };
+                m.showBank (banks[st]);
+            }
+            repaint();
             return;
         }
-        // a drag: the stage moved to where it was let go
-        const float w = (fxRow.getWidth() - (float) (Player::numStages - 1) * 8.0f) / (float) Player::numStages;
-        const int to = juce::jlimit (0, Player::numStages - 1, (int) std::floor ((dragX - fxRow.getX()) / (w + 8.0f)));
-        const int st = order[(size_t) from];
-        std::vector<int> v (order.begin(), order.end());
-        v.erase (v.begin() + from);
-        v.insert (v.begin() + to, st);
-        std::copy (v.begin(), v.end(), order.begin());
+        // let go: the new order, and the stage sinks into its slot
+        const auto order = liftedOrder();
+        lifted = false;
+        pressPos = -1;
+        dropStage = proc().player.fxOrder()[(size_t) from];
+        dropTime = juce::Time::getMillisecondCounterHiRes() * 0.001;
+        slotX[dropStage] = dragX - (fxBoxes[0].getWidth() * 0.5f);
         proc().player.setFxOrder (order);
         proc().settingsChanged();
         repaint();
@@ -336,6 +376,15 @@ public:
     {
         if (tunerShown && (tunerBand.contains (e.position) || tunerFine.contains (e.position)))
             setTune (0.0f);
+        if (const int zi = zoneAt (e.position); zi >= 0)
+            for (int id : { zones[(size_t) zi].xId, zones[(size_t) zi].yId })
+                if (id >= 0)
+                    if (auto* q = proc().params.getParameter (snd::def (id).id))
+                    {
+                        q->beginChangeGesture();
+                        q->setValueNotifyingHost (q->getDefaultValue());
+                        q->endChangeGesture();
+                    }
     }
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
     {
@@ -370,6 +419,11 @@ public:
     //------------------------------------------------------------------ the filter's CUBE: the point inside it, its corners lit
     static constexpr float kC30 = 0.8660254f, kS30 = 0.5f;
     static constexpr int cubeIds[3] = { snd::cutoff, snd::fY, snd::fZ };
+    std::vector<juce::Rectangle<float>> tabs;
+    struct Zone { juce::Rectangle<float> area; int xId = -1, yId = -1; float xSpan = 1.0f, ySpan = 1.0f; };
+    std::vector<Zone> zones;
+    int zoneOn = -1;
+    float zoneFrom[2] {};
     bool cubeShown = false, cubing = false;
     // FOLLOW's trace (what it sent, every 25 ms)
     std::array<float, 120> trace {};
@@ -575,6 +629,7 @@ public:
         histPos = (histPos + 1) % (int) histHz.size();
 
         // the readout
+        zone (r.withTrimmedTop (60.0f), snd::spCentre, snd::spWidth);   // (the band: sideways its centre, up and down its width)
         auto top = r.removeFromTop (60.0f);
         text (g, "spectre", top.removeFromTop (40.0f), grotesk (32.0f, 300), on ? col::screenText : col::screenDim, juce::Justification::centredLeft);
         const double centre = 40.0 * std::pow (250.0, (double) liveNorm (p, snd::spCentre)) ;
@@ -585,7 +640,7 @@ public:
         const bool blurFrozen = liveValue (p, snd::spBlur) >= 0.995f;
         juce::String sub;
         if (! on)
-            sub = "off · switch it on in the chain";
+            sub = "off · switch it on in the chain"_fr;
         else
         {
             const char* clocks[4] = { "free", "sync", "on notes", "on attacks" };
@@ -766,9 +821,30 @@ private:
     DrumScreen drumScreen;
     int lastDriveModel = 1;
     juce::Rectangle<float> fxBoxes[Player::numStages], fxSwitches[Player::numStages], fxRow;
-    bool fxShown = false;
+    bool fxShown = false, fxAnimating = false;
     int dragPos = -1;
     float dragX = 0.0f;
+    // a stage held (its position), since when, where; out of its slot; the one let go and when; where each is drawn
+    int pressPos = -1, dropStage = -1;
+    double pressStart = 0.0, dropTime = -10.0;
+    float pressX = 0.0f;
+    bool lifted = false;
+    float slotX[Player::numStages] { -1.0e6f, -1.0e6f, -1.0e6f, -1.0e6f, -1.0e6f, -1.0e6f, -1.0e6f };
+    // the order as it would be if the stage held were let go where it is now
+    std::array<int, Player::numStages> liftedOrder() const
+    {
+        auto order = m.proc.player.fxOrder();
+        if (! lifted || pressPos < 0)
+            return order;
+        const float w = (fxRow.getWidth() - (float) (Player::numStages - 1) * 8.0f) / (float) Player::numStages;
+        const int to = juce::jlimit (0, Player::numStages - 1, (int) std::floor ((dragX - fxRow.getX() + 4.0f) / (w + 8.0f)));
+        std::vector<int> v (order.begin(), order.end());
+        const int st = v[(size_t) pressPos];
+        v.erase (v.begin() + pressPos);
+        v.insert (v.begin() + to, st);
+        std::copy (v.begin(), v.end(), order.begin());
+        return order;
+    }
     // SPECTRE's last frames of partials (a trail of 24, a screen tick each)
     std::array<std::array<float, Player::maxPeaks>, 24> histHz {}, histLv {};
     std::array<float, 24> histLoud {};
@@ -815,7 +891,7 @@ private:
         const auto syncs = snd::choicesOf (snd::ecSync);
         const char* motions[] = { "still", "wobble", "scan", "jump" };
         const char* dirs[] = { "forward", "reverse", "alternate" };
-        juce::String sub = on ? juce::String (juce::roundToInt (seconds * 1000.0f)) + " ms" : juce::String ("off · switch it on in the chain");
+        juce::String sub = on ? juce::String (juce::roundToInt (seconds * 1000.0f)) + " ms" : juce::String ("off · switch it on in the chain"_fr);
         if (on)
         {
             if (sync > 0)
@@ -825,8 +901,9 @@ private:
         text (g, sub, top, mono (11.0f), col::screenDim, juce::Justification::topLeft);
         r.removeFromTop (6.0f);
 
-        // the tape
+        // the tape (dragged: sideways TIME, when free; up and down FEEDBACK)
         auto tapeRow = r.removeFromTop (r.getHeight() * 0.42f);
+        zone (tapeRow, sync == 0 ? (int) snd::ecTime : -1, snd::ecFeedback);
         const float x0 = tapeRow.getX() + 26.0f, x1 = tapeRow.getRight() - 8.0f;
         auto xAt = [x0, x1] (float t) { return x0 + (x1 - x0) * juce::jlimit (0.0f, 1.0f, t / 1.5f); };   // (to 1.5 TIME)
         const auto band = juce::Rectangle<float> (x0, tapeRow.getCentreY() - 9.0f, x1 - x0, 18.0f);
@@ -838,7 +915,7 @@ private:
             g.setColour (t == 4 ? col::screenDim : col::screenGrid);
             g.drawVerticalLine ((int) x, band.getY() - 6.0f, band.getBottom() + 6.0f);
         }
-        text (g, "time", { xAt (1.0f) - 30.0f, band.getBottom() + 6.0f, 60.0f, 14.0f }, mono (10.0f), col::screenDim, juce::Justification::centred);
+        text (g, "time", { xAt (1.0f) + 4.0f, band.getY() - 26.0f, 40.0f, 14.0f }, mono (10.0f), col::screenDim, juce::Justification::centredLeft);
         // the write head, at the left
         g.setColour (col::sRed);
         g.fillRoundedRectangle (x0 - 22.0f, band.getY() - 6.0f, 14.0f, band.getHeight() + 12.0f, 3.0f);
@@ -896,6 +973,114 @@ private:
             g.setColour (colours[tp.k].withAlpha (on ? 0.85f : 0.25f));
             g.fillRect (x - 1.0f, lane.getBottom() - h, 2.0f, h);
         }
+    }
+
+    //------------------------------------------------------------------ the page's banks: tabs along the screen's bottom
+    void paintTabs (juce::Graphics& g, juce::Rectangle<float>& in)
+    {
+        auto& pages = m.pagesShown();
+        const int pi = m.pageIndex();
+        if (pi < 0 || pi >= (int) pages.size() || pages[(size_t) pi].banks.size() < 2)
+            return;
+        const auto& pg = pages[(size_t) pi];
+        const int nb = (int) pg.banks.size();
+        const int bank = juce::jlimit (0, nb - 1, m.bankOf[pg.name + juce::String (m.capture ? 9 : m.mode)]);
+        auto strip = in.removeFromBottom (28.0f);
+        in.removeFromBottom (8.0f);
+        g.setColour (col::screenLine);
+        g.fillRect (strip.getX(), strip.getY(), strip.getWidth(), 1.0f);
+        // the effects' tabs: a light for the effect they belong to, on or off
+        const bool fxPage = pg.name == "fx" && ! m.capture;
+        const int bankStage[10] = { 0, 1, 1, 1, 2, 3, 4, 5, 6, 6 };
+        auto stageOn = [this] (int st)
+        {
+            auto& p = proc();
+            switch (st)
+            {
+                case 0: return (int) P (p, snd::dModel) > 0;
+                case 1: return P (p, snd::spOn) > 0.5f;
+                case 2: return P (p, snd::piOn) > 0.5f;
+                case 3: return P (p, snd::chOn) > 0.5f;
+                case 4: return P (p, snd::crOn) > 0.5f;
+                case 5: return P (p, snd::rvOn) > 0.5f;
+                default: return P (p, snd::ecOn) > 0.5f;
+            }
+        };
+        float total = 0.0f;
+        std::vector<float> widths;
+        for (int b = 0; b < nb; ++b)
+        {
+            widths.push_back ((float) juce::GlyphArrangement::getStringWidthInt (mono (11.5f, 500), themed (pg.banks[(size_t) b].name)) + (fxPage ? 34.0f : 24.0f));
+            total += widths.back();
+        }
+        const float squeeze = juce::jmin (1.0f, (strip.getWidth() - 4.0f * (float) (nb - 1)) / total);
+        float x = strip.getX();
+        for (int b = 0; b < nb; ++b)
+        {
+            const auto cell = juce::Rectangle<float> (x, strip.getY() + 3.0f, widths[(size_t) b] * squeeze, strip.getHeight() - 3.0f);
+            x += cell.getWidth() + 4.0f;
+            tabs.push_back (cell);
+            const bool on = b == bank;
+            juce::Path tab;
+            tab.addRoundedRectangle (cell.getX(), cell.getY(), cell.getWidth(), cell.getHeight(), 5.0f, 5.0f, false, false, true, true);
+            g.setColour (on ? col::screenLine : col::screen.brighter (0.06f));
+            g.fillPath (tab);
+            if (on)
+            {
+                g.setColour (col::sOrange);
+                g.fillRect (cell.getX() + 6.0f, cell.getBottom() - 2.5f, cell.getWidth() - 12.0f, 2.5f);
+            }
+            auto label = cell.reduced (8.0f, 0.0f);
+            if (fxPage && b < 10)
+            {
+                const bool lit = stageOn (bankStage[b]);
+                const auto led = label.removeFromLeft (8.0f).withSizeKeepingCentre (6.0f, 6.0f);
+                g.setColour (lit ? col::sYellow : col::screenGhost);
+                g.fillEllipse (led);
+                label.removeFromLeft (4.0f);
+            }
+            text (g, pg.banks[(size_t) b].name, label, mono (11.5f, on ? 600 : 500), on ? col::screenText : col::screenDim, juce::Justification::centred, true);
+        }
+    }
+
+    //------------------------------------------------------------------ what the mouse moves on the screen
+    // a zone dragged moves one setting sideways and one up and down (their whole range over `span` of the zone's
+    // size; shift: finer), double-click: back to their defaults
+    void zone (juce::Rectangle<float> a, int xId, int yId, float xSpan = 1.0f, float ySpan = 1.0f)
+    {
+        if (! m.capture && a.getWidth() > 4.0f && a.getHeight() > 4.0f)
+            zones.push_back ({ a, xId, yId, xSpan, ySpan });
+    }
+    int zoneAt (juce::Point<float> at) const
+    {
+        for (int i = (int) zones.size() - 1; i >= 0; --i)
+            if (zones[(size_t) i].area.contains (at))
+                return i;
+        return -1;
+    }
+    void zoneGesture (bool begin)
+    {
+        const auto& z = zones[(size_t) zoneOn];
+        for (int k = 0; k < 2; ++k)
+            if (const int id = k == 0 ? z.xId : z.yId; id >= 0)
+                if (auto* q = proc().params.getParameter (snd::def (id).id))
+                {
+                    if (begin)
+                    {
+                        zoneFrom[k] = q->getValue();
+                        q->beginChangeGesture();
+                    }
+                    else
+                        q->endChangeGesture();
+                }
+    }
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        const bool over = zoneAt (e.position) >= 0 || (cubeShown && cubeArea.contains (e.position));
+        bool tab = false;
+        for (auto& t : tabs)
+            tab = tab || t.contains (e.position);
+        setMouseCursor (over ? juce::MouseCursor::DraggingHandCursor : (tab ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor));
     }
 
     void paintTitle (juce::Graphics& g, juce::Rectangle<float> r)
@@ -984,26 +1169,14 @@ private:
         picto (g, icon, ti.removeFromLeft (15.0f).withSizeKeepingCentre (15.0f, 15.0f), col::screen, 1.4f);
         text (g, tag, ti.withTrimmedLeft (5.0f), f, col::screen, juce::Justification::centredLeft);
         r.removeFromLeft (10.0f);
-        // the page and its banks, on the right
+        // the page, on the right (its banks: the tabs along the bottom)
         auto& pages = m.pagesShown();
         const int pi = m.pageIndex();
         if (pi >= 0 && pi < (int) pages.size())
         {
-            const auto& pg = pages[(size_t) pi];
-            const int bank = m.bankOf[pg.name + juce::String (m.capture ? 9 : m.mode)];
-            for (int b = (int) pg.banks.size() - 1; b >= 0; --b)
-            {
-                const auto name = pg.banks.size() > 1 ? pg.banks[(size_t) b].name : pg.name;
-                const float w = (float) juce::GlyphArrangement::getStringWidthInt (mono (12.0f, 500), themed (name)) + 14.0f;
-                auto cell = r.removeFromRight (w);
-                if (b == bank)
-                {
-                    g.setColour (col::screenLine);
-                    g.fillRoundedRectangle (cell.reduced (0.0f, 1.0f), 4.0f);
-                }
-                text (g, name, cell, mono (12.0f, 500), b == bank ? col::sOrange : col::screenDim, juce::Justification::centred);
-                r.removeFromRight (2.0f);
-            }
+            const auto& name = pages[(size_t) pi].name;
+            const float w = (float) juce::GlyphArrangement::getStringWidthInt (mono (12.0f, 500), themed (name)) + 14.0f;
+            text (g, name, r.removeFromRight (w), mono (12.0f, 500), col::sOrange, juce::Justification::centredRight);
         }
         r.removeFromRight (12.0f);
         const float titleW = juce::jmin (r.getWidth(), (float) juce::GlyphArrangement::getStringWidthInt (mono (14.0f, 500), title) + 14.0f);
@@ -1016,6 +1189,7 @@ private:
     {
         const bool b = m.pageIndex() == 1;          // OSC B's page: its bank
         const int bankId = b ? snd::obBank : snd::oaBank, posId = b ? snd::obPos : snd::oaPos;
+        zone (r, posId, -1);                         // (dragged sideways: through the bank)
         const auto& bank = bankOf (proc(), (int) P (proc(), bankId));
         const float pos = liveNorm (proc(), posId);
         const int frames = 14;
@@ -1186,7 +1360,7 @@ private:
               on ? col::screenText : col::screenDim, juce::Justification::centredLeft);
         juce::String sub;
         if (! on)
-            sub = "off · switch it on: carrier or mixer";
+            sub = "off · switch it on: carrier or mixer"_fr;
         else
         {
             sub << "sat 1 x" << juce::String (r1, 2) << " · sat 2 x"_fr << juce::String (r2, 2) << " · rotation "_fr
@@ -1293,6 +1467,7 @@ private:
         const int len = s.length();
         if (len <= 0)
             return;
+        zone (w, snd::start, -1);                    // (dragged sideways: START)
         // the waveform (made once per sample and size)
         if (cachedSample != &s || std::abs (cachedW - w.getWidth()) > 0.5f || std::abs (cachedH - w.getHeight()) > 0.5f)
         {
@@ -1850,6 +2025,7 @@ private:
         if (viz == "osc")
         {
             const bool b = m.pageIndex() == 1;
+            zone (r, b ? snd::obPos : snd::oaPos, -1);
             const auto& bank = bankOf (p, (int) P (p, b ? snd::obBank : snd::oaBank));
             const float pos = liveNorm (p, b ? snd::obPos : snd::oaPos);
             juce::Path path;
@@ -1877,6 +2053,7 @@ private:
                 g.setColour (col::screenLine);
                 g.fillRect (r.getRight() + 4.0f, r.getY(), 1.0f, r.getHeight());
             }
+            zone (r, snd::cutoff, snd::reso);            // (the point: sideways the cutoff, up and down the resonance)
             dsp::FilterSettings fs;
             fs.model = (dsp::FilterModel) (int) P (p, snd::fModel);
             fs.type = (dsp::FilterType) (int) P (p, snd::fType);
@@ -1902,10 +2079,17 @@ private:
             g.setColour (fs.model == dsp::FilterModel::cube ? juce::Colours::transparentBlack : col::screenText);
             g.fillEllipse (cx - 5.0f, r.getY() + (24.0f - juce::jlimit (-48.0f, 24.0f, fs.model == dsp::FilterModel::off ? 0.0f : dsp::VAFilter::responseDb (fs, cutoff, cutoff))) / 72.0f * r.getHeight() - 5.0f, 10.0f, 10.0f);
         }
-        else if (viz == "adsr")
-            envelope (P (p, snd::attack), P (p, snd::decay), P (p, snd::sustain), P (p, snd::release), col::sGreen);
-        else if (viz == "fenv")
-            envelope (P (p, snd::fAttack), P (p, snd::fDecay), P (p, snd::fSustain), P (p, snd::fRelease), col::sOrange);
+        else if (viz == "adsr" || viz == "fenv")
+        {
+            // dragged: on the left the attack, in the middle the decay and the sustain, on the right the release
+            const bool amp = viz == "adsr";
+            const int ids[4] = { amp ? snd::attack : snd::fAttack, amp ? snd::decay : snd::fDecay, amp ? snd::sustain : snd::fSustain, amp ? snd::release : snd::fRelease };
+            const float w3 = r.getWidth() * 0.3f;
+            zone (r.withWidth (w3), ids[0], amp ? -1 : (int) snd::fEnv, 0.6f);
+            zone (r.withTrimmedLeft (w3).withWidth (r.getWidth() * 0.4f), ids[1], ids[2], 0.6f);
+            zone (r.withTrimmedLeft (r.getWidth() - w3), ids[3], -1, 0.6f);
+            envelope (P (p, ids[0]), P (p, ids[1]), P (p, ids[2]), P (p, ids[3]), amp ? col::sGreen : col::sOrange);
+        }
         else if (viz == "drive")
         {
             {
@@ -1916,6 +2100,7 @@ private:
                 g.setColour (col::screenLine);
                 g.fillRect (r.getRight() + 4.0f, r.getY(), 1.0f, r.getHeight());
             }
+            zone (r, snd::dTone, snd::dAmt);             // (sideways the tone, up and down how hard)
             const float k = 1.0f + 12.0f * P (p, snd::dAmt);
             juce::Path path;
             for (int i = 0; i <= 120; ++i)
@@ -1928,46 +2113,98 @@ private:
         }
         else if (viz == "fx")
         {
-            // the chain in its order: drag a stage to move it, click it for its settings
+            // the chain in its order. Held a second, a stage comes out of its slot: slid along, the others make room
+            // as it goes; let go, it sinks back in. A click: its settings; its switch: on or passed by
             constexpr int ns = Player::numStages;
             const int ons[ns] = { (int) P (p, snd::dModel) > 0, P (p, snd::spOn) > 0.5f, P (p, snd::piOn) > 0.5f, P (p, snd::chOn) > 0.5f,
                                   P (p, snd::crOn) > 0.5f, P (p, snd::rvOn) > 0.5f, P (p, snd::ecOn) > 0.5f };
             const char* names[ns] = { "drive", "spectre", "pitch", "chorus", "crush", "espace", "echo" };
             const int bankStage[10] = { 0, 1, 1, 1, 2, 3, 4, 5, 6, 6 };
             const int shownStage = bankStage[juce::jlimit (0, 9, m.bankOf[juce::String ("fx") + juce::String (m.mode)])];
-            const auto order = p.player.fxOrder();
+            const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
             fxShown = true;
-            fxRow = r.withSizeKeepingCentre (r.getWidth(), 80.0f).translated (0.0f, -8.0f);
+            fxRow = r.withSizeKeepingCentre (r.getWidth(), 80.0f).translated (0.0f, -4.0f);
             const float w = (fxRow.getWidth() - (float) (ns - 1) * 8.0f) / (float) ns;
-            text (g, "in → … → out · drag to reorder · the switch bypasses"_fr, r.removeFromBottom (18.0f), mono (10.0f), col::screenDim, juce::Justification::centred, true);
+            text (g, lifted ? "slide it, let go to drop it in" : "in → … → out · hold a stage to move it · the switch bypasses"_fr,
+                  r.removeFromBottom (18.0f), mono (10.0f), lifted ? col::sYellow : col::screenDim, juce::Justification::centred, true);
+            // held long enough: out of its slot
+            if (pressPos >= 0 && ! lifted && now - pressStart >= 1.0)
+            {
+                lifted = true;
+                dragX = pressX;
+            }
+            const auto order = liftedOrder();
             for (int pos = 0; pos < ns; ++pos)
             {
-                const int st = order[(size_t) pos];
-                auto box = juce::Rectangle<float> (fxRow.getX() + (float) pos * (w + 8.0f), fxRow.getY(), w, fxRow.getHeight());
-                fxBoxes[pos] = box;
-                if (pos == dragPos)
-                    box = box.withX (juce::jlimit (fxRow.getX(), fxRow.getRight() - w, dragX - w * 0.5f)).translated (0.0f, -6.0f);
+                fxBoxes[pos] = juce::Rectangle<float> (fxRow.getX() + (float) pos * (w + 8.0f), fxRow.getY(), w, fxRow.getHeight());
                 if (pos < ns - 1)
                 {
                     g.setColour (col::screenGhost);
                     g.fillRect (fxBoxes[pos].getRight() + 1.0f, fxRow.getCentreY() - 1.0f, 6.0f, 2.0f);
                 }
+            }
+            const int liftedStage = lifted && pressPos >= 0 ? p.player.fxOrder()[(size_t) pressPos] : -1;
+            auto drawBox = [&] (int st, juce::Rectangle<float> box, bool raised, float scale)
+            {
+                if (raised)
+                {
+                    g.setColour (juce::Colours::black.withAlpha (0.45f));
+                    g.fillRoundedRectangle (box.translated (0.0f, 9.0f).expanded (2.0f), 8.0f);
+                }
+                box = box.withSizeKeepingCentre (box.getWidth() * scale, box.getHeight() * scale);
                 g.setColour (ons[st] ? col::sYellow : col::screen);
                 g.fillRoundedRectangle (box, 6.0f);
-                g.setColour (st == shownStage ? col::screenText : (ons[st] ? col::sYellow : col::screenLine));
-                g.drawRoundedRectangle (box, 6.0f, st == shownStage ? 2.0f : 1.5f);
+                g.setColour (raised ? col::screenText : (st == shownStage ? col::screenText : (ons[st] ? col::sYellow : col::screenLine)));
+                g.drawRoundedRectangle (box, 6.0f, raised || st == shownStage ? 2.0f : 1.5f);
                 auto inBox = box.reduced (4.0f, 6.0f);
                 const auto ink = ons[st] ? col::screen : col::screenDim;
-                // its switch: on, or passed by
                 auto sw = inBox.removeFromTop (14.0f).withSizeKeepingCentre (26.0f, 14.0f);
-                fxSwitches[pos] = sw.expanded (6.0f, 4.0f);
                 g.setColour (ons[st] ? col::screen : col::screenLine);
                 g.fillRoundedRectangle (sw, 7.0f);
                 g.setColour (ons[st] ? col::sYellow : col::screenDim);
                 g.fillEllipse (juce::Rectangle<float> (10.0f, 10.0f).withCentre ({ ons[st] ? sw.getRight() - 7.0f : sw.getX() + 7.0f, sw.getCentreY() }));
                 picto (g, stagePicto (st, (int) P (p, snd::dModel)), inBox.removeFromTop (inBox.getHeight() - 16.0f).withSizeKeepingCentre (26.0f, 26.0f), ink, 1.5f);
                 text (g, names[st], inBox, mono (9.5f, 500), ink, juce::Justification::centred);
+                return box;
+            };
+            for (int pos = 0; pos < ns; ++pos)
+            {
+                const int st = order[(size_t) pos];
+                // each slides to its slot (a third of the way each frame)
+                const float aim = fxBoxes[pos].getX();
+                if (slotX[st] < -1.0e5f || ! fxAnimating)
+                    slotX[st] = aim;
+                slotX[st] += (aim - slotX[st]) * 0.38f;
+                const auto box = fxBoxes[pos].withX (slotX[st]);
+                fxSwitches[pos] = juce::Rectangle<float> (26.0f, 14.0f).withCentre ({ box.getCentreX(), box.getY() + 13.0f }).expanded (6.0f, 4.0f);
+                if (st == liftedStage)
+                {
+                    // its slot, empty for now
+                    g.setColour (col::screenLine);
+                    g.drawRoundedRectangle (fxBoxes[pos].reduced (2.0f), 6.0f, 1.0f);
+                    continue;
+                }
+                // let go: it sinks in a little and comes back up (180 ms)
+                float scale = 1.0f;
+                if (st == dropStage && now - dropTime < 0.18)
+                    scale = 1.0f - 0.07f * (float) std::sin (3.14159265 * (now - dropTime) / 0.18);
+                drawBox (st, box, false, scale);
+                // held, not yet out: how long is left, round it
+                if (pressPos == pos && ! lifted && pressPos >= 0)
+                {
+                    const float t = (float) juce::jlimit (0.0, 1.0, (now - pressStart) / 1.0);
+                    juce::Path ring;
+                    ring.addCentredArc (box.getCentreX(), box.getCentreY() + 6.0f, 15.0f, 15.0f, 0.0f, 0.0f, t * juce::MathConstants<float>::twoPi, true);
+                    g.setColour (col::screenText.withAlpha (0.85f));
+                    g.strokePath (ring, juce::PathStrokeType (2.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                }
             }
+            if (liftedStage >= 0)
+            {
+                auto box = fxBoxes[0].withX (juce::jlimit (fxRow.getX() - 6.0f, fxRow.getRight() - w + 6.0f, dragX - w * 0.5f)).translated (0.0f, -10.0f);
+                drawBox (liftedStage, box, true, 1.08f);
+            }
+            fxAnimating = true;
         }
         else if (viz == "cycleplan")
         {
@@ -2184,6 +2421,7 @@ private:
             auto meter = r.removeFromRight (16.0f);
             r.removeFromRight (10.0f);
             auto plot = r.withSizeKeepingCentre (juce::jmin (r.getWidth(), r.getHeight() * 1.6f), r.getHeight());
+            zone (plot, snd::cpIn, snd::cpAmount);       // (sideways IN, up and down AMOUNT)
             auto xOf = [plot] (float db) { return plot.getX() + plot.getWidth() * juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 60.0f); };
             auto yOf = [plot] (float db) { return plot.getBottom() - plot.getHeight() * juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 72.0f); };
             g.setColour (col::screenGrid);
@@ -2215,9 +2453,9 @@ private:
             g.fillRoundedRectangle (meter, 4.0f);
             g.setColour (col::sOrange);
             g.fillRoundedRectangle (meter.withHeight (meter.getHeight() * gr / 30.0f), 4.0f);
-            text (g, "-" + juce::String (gr, 1), meter.withY (meter.getBottom() - 14.0f).withHeight (14.0f).expanded (8.0f, 0.0f), mono (9.0f), col::screenDim,
+            text (g, "-" + juce::String (gr, 1), meter.withY (meter.getY() - 16.0f).withHeight (14.0f).expanded (10.0f, 0.0f), mono (9.0f), col::screenDim,
                   juce::Justification::centred);
-            text (g, on ? juce::String ("in → out") : juce::String ("off"), plot.removeFromTop (14.0f), mono (10.0f), col::screenDim, juce::Justification::topLeft);
+            text (g, on ? "in → out"_fr : juce::String ("off"), plot.removeFromTop (14.0f), mono (10.0f), col::screenDim, juce::Justification::topLeft);
         }
         else if (viz == "scenes")
         {
@@ -3096,7 +3334,41 @@ void Machine::buildPages()
                                            sep (S (snd::spMix)) } });
         pg.banks.push_back ({ "spectre +", { S (snd::spCentre), S (snd::spWidth), S (snd::spNotch), sep (S (snd::spTrans)), sep (S (snd::spAssign)),
                                              sep (S (snd::spFeedback)) } });
-        pg.banks.push_back ({ "spectre ++", { S (snd::spOct), S (snd::spFine), S (snd::spWarp), sep (S (snd::spGlide)), sep (S (snd::spWave)) } });
+        // (its waves printed round their knob)
+        auto waveKnob = as (S (snd::spWave), Ctl::Look::knob);
+        waveKnob.marks.clear();
+        waveKnob.ticks = 0;
+        waveKnob.drawOption = [] (juce::Graphics& g, int w, juce::Rectangle<float> b, juce::Colour c)
+        {
+            // SINE, TRI, SAW, SQR, PULSE, SINE XF, SAW XF: one cycle each (the XF ones, the new over the old)
+            auto shape = [w] (float t, bool second)
+            {
+                const float ph = t - std::floor (t);
+                switch (w)
+                {
+                    case 0: return std::sin (ph * juce::MathConstants<float>::twoPi);
+                    case 1: return ph < 0.5f ? 4.0f * ph - 1.0f : 3.0f - 4.0f * ph;
+                    case 2: return 1.0f - 2.0f * ph;
+                    case 3: return ph < 0.5f ? 0.85f : -0.85f;
+                    case 4: return ph < 0.2f ? 0.85f : -0.85f;
+                    case 5: return std::sin ((ph + (second ? 0.18f : 0.0f)) * juce::MathConstants<float>::twoPi) * (second ? 0.55f : 1.0f);
+                    default: return (1.0f - 2.0f * (ph + (second ? 0.25f : 0.0f) - std::floor (ph + (second ? 0.25f : 0.0f)))) * (second ? 0.55f : 1.0f);
+                }
+            };
+            for (int layer = (w >= 5 ? 1 : 0); layer >= 0; --layer)
+            {
+                juce::Path path;
+                for (int i = 0; i <= 24; ++i)
+                {
+                    const float t = (float) i / 24.0f;
+                    const float x = b.getX() + b.getWidth() * t, y = b.getCentreY() - shape (t, layer == 1) * b.getHeight() * 0.45f;
+                    if (i == 0) path.startNewSubPath (x, y); else path.lineTo (x, y);
+                }
+                g.setColour (layer == 1 ? c.withMultipliedAlpha (0.45f) : c);
+                g.strokePath (path, juce::PathStrokeType (1.3f, juce::PathStrokeType::mitered));
+            }
+        };
+        pg.banks.push_back ({ "spectre ++", { S (snd::spOct), S (snd::spFine), S (snd::spWarp), sep (S (snd::spGlide)), sep (waveKnob) } });
         pg.banks.push_back ({ "pitch", { S (snd::piA), S (snd::piB), S (snd::piDetune), sep (S (snd::piDelay)), S (snd::piLevelB), S (snd::piFeedback), sep (S (snd::piMix)) } });
         pg.banks.push_back ({ "chorus", { S (snd::chMode), sep (S (snd::chRate)), S (snd::chDepth), S (snd::chFeedback), S (snd::chTone), sep (S (snd::chMix)), sep (S (snd::piCrystals)) } });
         pg.banks.push_back ({ "crush", { S (snd::crBits), S (snd::crRate), S (snd::crJitter), sep (S (snd::crTone)), sep (S (snd::crMix)) } });
@@ -4002,7 +4274,7 @@ void Machine::layoutEncoders()
         encoders[i]->setCtl (i < (int) shown.size() ? shown[(size_t) i] : nullptr);
         encoders[i]->focused = encoders[i]->getCtl() != nullptr && encoders[i]->getCtl() == focus;
     }
-    if (focus == nullptr && ! shown.empty())
+    if (! shown.empty() && std::find (shown.begin(), shown.end(), focus) == shown.end())
         focus = shown[0];
     for (auto& e : encoders)
         e->focused = e->getCtl() != nullptr && e->getCtl() == focus;
