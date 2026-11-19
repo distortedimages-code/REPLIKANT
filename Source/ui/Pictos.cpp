@@ -407,6 +407,17 @@ void picto (juce::Graphics& g, Picto kind, juce::Rectangle<float> area, juce::Co
             d.line (0.78f, 0.92f, 0.82f, 0.92f);
             break;
 
+        case Picto::cube:
+        {
+            // a cube seen from above, a point inside it
+            const float m = 0.5f, w = 0.4f, h = 0.23f, t = 0.46f;
+            d.lines ({ { m - w, m - h + 0.06f }, { m, m - 2.0f * h + 0.06f }, { m + w, m - h + 0.06f }, { m, m + 0.06f }, { m - w, m - h + 0.06f } });
+            d.lines ({ { m - w, m - h + 0.06f }, { m - w, m - h + t + 0.06f }, { m, m + t + 0.06f }, { m + w, m - h + t + 0.06f }, { m + w, m - h + 0.06f } });
+            d.line (m, m + 0.06f, m, m + t + 0.06f);
+            d.circle (m + 0.08f, m - 0.02f, 0.06f, true);
+            break;
+        }
+
         case Picto::polivoks:
             // the Polivoks's: an op amp driven to its rails
             d.line (0.0f, 0.36f, 0.14f, 0.36f);
@@ -624,8 +635,8 @@ void picto (juce::Graphics& g, Picto kind, juce::Rectangle<float> area, juce::Co
 
 Picto filterModelPicto (int model)
 {
-    const Picto p[] = { Picto::off, Picto::ladder, Picto::ms20, Picto::sem, Picto::oscar, Picto::wasp, Picto::polivoks };
-    return p[juce::jlimit (0, 6, model)];
+    const Picto p[] = { Picto::off, Picto::ladder, Picto::ms20, Picto::sem, Picto::oscar, Picto::wasp, Picto::polivoks, Picto::cube };
+    return p[juce::jlimit (0, 7, model)];
 }
 
 Picto filterTypePicto (int type)

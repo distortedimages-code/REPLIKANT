@@ -161,6 +161,11 @@ void VAFilter::reset()
         k35a[i] = k35b[i] = 0.0f;
     du1 = dcx = dcy = y1 = 0.0f;
     dstale = true;
+    for (auto& c : cs)
+        c.s1 = c.s2 = 0.0f;
+    madeCube = -1;
+    cubeWait = 0;
+    cx = -1.0f;
 }
 
 void VAFilter::set (const FilterSettings& s)
@@ -169,6 +174,8 @@ void VAFilter::set (const FilterSettings& s)
     {
         reset();
         res = s.res, drive = s.drive, sep = s.sep, fmK = s.fm;
+        cy = s.y, cz = s.z, cx = -1.0f;
+        trim = std::pow (10.0f, std::clamp (s.trimDb, -24.0f, 12.0f) / 20.0f);
     }
     target = s;
 }
@@ -183,6 +190,25 @@ float VAFilter::tick (float x, float oct)
     drive += (target.drive - drive) * k;
     sep += (target.sep - sep) * k;
     fmK += (target.fm - fmK) * k;
+    if (target.model == FilterModel::cube)
+    {
+        // (X, Y, Z glide by SMOOTH; X from the cutoff's octaves, as they come)
+        const float ks = target.smoothMs < 0.3f ? 1.0f : 1.0f - std::exp (-1000.0f / (target.smoothMs * (float) sr));
+        const float xNow = std::clamp (oct * (1.0f / 9.965784f), 0.0f, 1.0f);
+        cx = cx < 0.0f ? xNow : cx + (xNow - cx) * ks;
+        cy += (target.y - cy) * std::max (ks, 0.0f);
+        cz += (target.z - cz) * std::max (ks, 0.0f);
+        trim += (std::pow (10.0f, std::clamp (target.trimDb, -24.0f, 12.0f) / 20.0f) - trim) * k;
+        float y = cubeTick (x, cx) * trim;
+        if (! (y == y) || std::abs (y) > 1.0e6f)
+        {
+            reset();
+            y = 0.0f;
+        }
+        y = soft (y);
+        y1 = y;
+        return y;
+    }
     if (fmK > 1.0e-4f)
         oct += fmDepth (fmK) * 5.0f * y1;
     oct = std::clamp (oct, -0.5f, 10.3f);
@@ -196,7 +222,8 @@ float VAFilter::tick (float x, float oct)
         case FilterModel::oscar:    y = oscar (x, hz); break;
         case FilterModel::wasp:     y = wasp (x, hz); break;
         case FilterModel::polivoks: y = polivoks (x, hz); break;
-        case FilterModel::off:      y = x; break;
+        case FilterModel::off:
+        case FilterModel::cube:     y = x; break;
     }
     if (! (y == y) || std::abs (y) > 1.0e6f)
     {
@@ -386,8 +413,61 @@ float VAFilter::polivoks (float in, float hz)
     return lp;
 }
 
+// CUBE: the sections made again (twice every 48 kHz sample's time ... at most, when X, Y, Z, RESO or the cube moved) from the point in the cube,
+// each a state variable filter (Zavalishin's, its frequency prewarped) whose three outputs are mixed into its zeros;
+// DRIVE before them, a soft clip after the third and the sixth
+float VAFilter::cubeTick (float in, float px)
+{
+    if (--cubeWait <= 0)
+    {
+        cubeWait = std::clamp ((int) (sr / 24000.0), 2, 16);     // (every 2 samples at 48 kHz, 8 at 192)
+        if (target.cube != madeCube || std::abs (px - madeX) > 1.0e-5f || std::abs (cy - madeY) > 1.0e-5f || std::abs (cz - madeZ) > 1.0e-5f
+            || std::abs (res - madeRes) > 1.0e-5f)
+        {
+            madeCube = target.cube;
+            madeX = px;
+            madeY = cy;
+            madeZ = cz;
+            madeRes = res;
+            cube::Point p;
+            cube::at (madeCube, px, cy, cz, res, p);
+            const float top = std::min (20000.0f, 0.45f * (float) sr);
+            for (int s = 0; s < cube::sections; ++s)
+            {
+                auto& c = cs[s];
+                const float g = std::tan (kPi * std::min (p.hz[s], top) * (float) invSr);
+                c.k = 1.0f / p.q[s];
+                c.a1 = 1.0f / (1.0f + g * (g + c.k));
+                c.a2 = g * c.a1;
+                c.a3 = g * c.a2;
+                c.mh = p.mh[s];
+                c.mb = p.mb[s];
+                c.ml = p.ml[s];
+            }
+            cubeGain = p.gain;
+        }
+    }
+    const float d = 1.0f + 6.0f * drive * drive;
+    float x = in * d * cubeGain;
+    for (int s = 0; s < cube::sections; ++s)
+    {
+        auto& c = cs[s];
+        const float v3 = x - c.s2;
+        const float v1 = c.a1 * c.s1 + c.a2 * v3;
+        const float v2 = c.s2 + c.a2 * c.s1 + c.a3 * v3;
+        c.s1 = 2.0f * v1 - c.s1;
+        c.s2 = 2.0f * v2 - c.s2;
+        x = c.mh * (x - c.k * v1 - v2) + c.mb * v1 + c.ml * v2;
+        if (s == 2 || s == 5)
+            x = 3.0f * fastTanh (x * (1.0f / 3.0f));        // (bending only past +-1.5: the resonances held)
+    }
+    return x / std::sqrt (d);
+}
+
 float VAFilter::responseDb (const FilterSettings& s, float fc, float f)
 {
+    if (s.model == FilterModel::cube)
+        return (float) cube::responseDb (s.cube, std::log2 (std::max (20.0f, fc) / 20.0f) / 9.965784f, s.y, s.z, s.res, f);
     using C = std::complex<double>;
     auto sec = [] (double fcut, double hz, double q, FilterType t)
     {

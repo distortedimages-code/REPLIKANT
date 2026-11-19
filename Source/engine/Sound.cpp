@@ -1,4 +1,5 @@
 #include "Sound.h"
+#include "../dsp/Cube.h"
 
 #include <algorithm>
 #include <cmath>
@@ -44,7 +45,7 @@ namespace
         { "sustain",   "Sustain",                     K::linear,  0, 1, 1, 1, nullptr, true, "%" },
         { "release",   "Release",                     K::log,     5, 10000, 300, 1, nullptr, true, "ms" },
 
-        { "fModel",    "Model",                       K::choice,  0, 6, 0, 1, "OFF|MOOG|MS-20|SEM|OSCAR|WASP|POLIVOKS", false, "" },
+        { "fModel",    "Model",                       K::choice,  0, 7, 0, 1, "OFF|MOOG|MS-20|SEM|OSCAR|WASP|POLIVOKS|CUBE", false, "" },
         { "fType",     "Type",                        K::choice,  0, 3, 0, 1, "LP|BP|HP|NOTCH", false, "" },
         { "cutoff",    "Cutoff",                      K::log,     20, 20000, 2500, 1, nullptr, true, "Hz" },
         { "reso",      "Resonance",                   K::linear,  0, 1, 0.2f, 1, nullptr, true, "%" },
@@ -226,6 +227,11 @@ namespace
         { "spFine",    "Fine",                        K::linear,  -7, 7, 0, 1, nullptr, true, "fst" },
         { "spWarp",    "Warp",                        K::linear,  -1, 1, 0, 1, nullptr, true, "sym" },
         { "spAssign",  "Follow",                      K::choice,  0, 1, 0, 1, "RANK|TRACK", false, "" },
+        { "fCube",     "Cube",                        K::choice,  0, 9, 0, 1, dsp::cube::kNames, false, "" },
+        { "fY",        "Y",                           K::linear,  0, 1, 0, 1, nullptr, true, "%" },
+        { "fZ",        "Z",                           K::linear,  0, 1, 0, 1, nullptr, true, "%" },
+        { "fSmooth",   "Smooth",                      K::linear,  0, 200, 10, 1, nullptr, false, "ms" },
+        { "fTrim",     "Trim",                        K::linear,  -24, 12, 0, 1, nullptr, true, "dB" },
     };
 
     std::string fmt (const char* f, double v)
@@ -419,6 +425,7 @@ std::string longName (int id)
     if (in (rdRx, rdDrive) || id == rdOn) return "Radio " + name;
     if (id == drSwing)             return "Drum Swing";
     if (in (spClock, spAssign))    return "Spectre " + name;
+    if (in (fCube, fTrim))         return "Filter " + name;
     if (in (rdTake, rdPads))       return "Radio " + name;
     if (in (rdPadTune, rdPadLevel)) return "Radio Pads " + name;
     return name;

@@ -1618,6 +1618,11 @@ void Player::modulate (int offset, int n, const Transport& t, Chunk& c, bool atR
     c.amp = rates (c.v[snd::attack], c.v[snd::decay], c.v[snd::sustain], c.v[snd::release]);
     c.flt = rates (c.v[snd::fAttack], c.v[snd::fDecay], c.v[snd::fSustain], c.v[snd::fRelease]);
     c.fs.model = (dsp::FilterModel) (int) c.v[snd::fModel];
+    c.fs.cube = (int) c.v[snd::fCube];
+    c.fs.y = c.v[snd::fY];
+    c.fs.z = c.v[snd::fZ];
+    c.fs.smoothMs = c.v[snd::fSmooth];
+    c.fs.trimDb = c.v[snd::fTrim];
     c.fs.type = (dsp::FilterType) (int) c.v[snd::fType];
     c.fs.res = c.v[snd::reso];
     c.fs.drive = c.v[snd::fDrive];

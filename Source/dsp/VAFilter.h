@@ -12,16 +12,20 @@
 //             and the damping (the grit, the hollow resonance)
 //   POLIVOKS  the Polivoks' integrators clipping on their op-amps' rails: the resonance past self-oscillation,
 //             held by the clipping (its rasp)
+//   CUBE      (0.4.4) seven sections of poles and zeros defined at the corners of a cube (Cube.h), CUTOFF its X
+//             (so the envelope, the keys and the mods move through it), Y and Z its own; RESO sharpens what
+//             resonates, DRIVE pushes it into soft saturation between its sections
 //
 // Models and their character are "after" the circuits: no measurements of the hardware were made.
 
 #pragma once
 
+#include "Cube.h"
 #include <cstdint>
 
 namespace dsp
 {
-    enum class FilterModel { off, moog, ms20, sem, oscar, wasp, polivoks };
+    enum class FilterModel { off, moog, ms20, sem, oscar, wasp, polivoks, cube };
     enum class FilterType { lp, bp, hp, notch };
 
     struct FilterSettings
@@ -32,6 +36,10 @@ namespace dsp
         float drive = 0.0f;    // 0..1
         float sep = 0.0f;      // 0..1 (MS-20: where the other filter is; OSCAR: the separation)
         float fm = 0.0f;       // 0..1, the knob (its depth on an exponential curve)
+        int cube = 0;          // CUBE: which (Cube.h), and its Y and Z (0..1; X is the cutoff)
+        float y = 0.0f, z = 0.0f;
+        float smoothMs = 10.0f;   // CUBE: X, Y and Z glide (0 .. 200 ms)
+        float trimDb = 0.0f;      // CUBE: its output (-24 .. +12 dB)
     };
 
     class VAFilter
@@ -55,6 +63,7 @@ namespace dsp
         float oscar (float x, float hz);
         float wasp (float x, float hz);
         float polivoks (float x, float hz);
+        float cubeTick (float in, float x);
 
         double sr = 96000.0, invSr = 1.0 / 96000.0;
         FilterSettings target;
@@ -66,6 +75,12 @@ namespace dsp
         float sv[4] {}, nl[4] {};                       // state variable filters (two of them), their last inputs
         float du1 = 0.0f, dcx = 0.0f, dcy = 0.0f;       // SEM's input stage
         bool dstale = true;
+        // CUBE: its seven sections (their coefficients, their states), what they were made for, Y and Z gliding
+        struct CubeSection { float a1 = 1.0f, a2 = 0.0f, a3 = 0.0f, k = 1.4f, mh = 1.0f, mb = 1.4f, ml = 1.0f, s1 = 0.0f, s2 = 0.0f; };
+        CubeSection cs[cube::sections];
+        float cubeGain = 1.0f, cx = -1.0f, cy = 0.0f, cz = 0.0f, trim = 1.0f;
+        float madeX = -1.0f, madeY = -1.0f, madeZ = -1.0f, madeRes = -1.0f;
+        int madeCube = -1, cubeWait = 0;
         uint32_t rng = 0x12345678u;
     };
 }

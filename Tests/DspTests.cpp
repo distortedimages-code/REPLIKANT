@@ -629,6 +629,136 @@ static void testSpectre()
     }
 }
 
+
+// CUBE (0.4.4): its corners at their level, its filter as its drawing says (sines through it, oversampled), no jump
+// between two points, never running away (X swept at audio rate, full resonance, full drive), its cost
+static void testCube()
+{
+    CHECK (cube::count() == 10, "ten cubes: %d", cube::count());
+    for (int c = 0; c < cube::count(); ++c)
+        for (int i = 0; i < 8; ++i)
+        {
+            const float x = (float) ((i >> 2) & 1), y = (float) ((i >> 1) & 1), z = (float) (i & 1);
+            double power = 0.0, top = -200.0;
+            for (int k = 0; k < 96; ++k)
+            {
+                const double db = cube::responseDb (c, x, y, z, 0.0f, 40.0 * std::pow (300.0, (k + 0.5) / 96.0));
+                power += std::pow (10.0, db / 10.0);
+                top = std::max (top, db);
+            }
+            const double mean = 10.0 * std::log10 (power / 96.0);
+            CHECK (mean < 0.6 && mean > -20.0 && top < 15.6, "cube %s corner %d: mean %.1f dB, top %.1f dB", cube::def (c).name, i, mean, top);
+        }
+    // no jumps: along each axis, a thousandth of the way never moves the response much more than the thousandths either
+    // side of it (steep near a narrow peak, but never a step)
+    double worstJump = 0.0;
+    for (int c = 0; c < cube::count(); ++c)
+        for (int axis = 0; axis < 3; ++axis)
+            for (float t = 0.002f; t < 0.99f; t += 0.0473f)
+                for (double hz : { 100.0, 700.0, 2500.0, 9000.0 })
+                {
+                    auto r = [&] (float v)
+                    {
+                        float p[3] = { 0.4f, 0.3f, 0.6f };
+                        p[axis] = v;
+                        return cube::responseDb (c, p[0], p[1], p[2], 0.5f, hz);
+                    };
+                    const double h = 0.001;
+                    const double before = std::abs (r (t) - r ((float) (t - h))), now1 = std::abs (r ((float) (t + h)) - r (t)),
+                                 after = std::abs (r ((float) (t + 2 * h)) - r ((float) (t + h)));
+                    worstJump = std::max (worstJump, now1 - 3.0 * std::max (before, after));
+                }
+    CHECK (worstJump < 0.05, "cube continuous: a step of %.2f dB", worstJump);
+    // sines through the filter (4x 48 kHz), against its drawing
+    struct Spot { int cube; float x, y, z; };
+    const double rate = 192000.0;
+    double worstErr = 0.0;
+    for (const Spot sp : { Spot { 0, 0.3f, 0.6f, 0.2f }, Spot { 1, 0.5f, 0.2f, 0.8f }, Spot { 5, 0.7f, 0.4f, 0.0f }, Spot { 2, 0.4f, 0.5f, 0.5f }, Spot { 7, 0.6f, 0.4f, 1.0f } })
+        for (double hz : { 220.0, 1000.0, 3300.0 })
+        {
+            VAFilter f;
+            f.prepare (rate);
+            FilterSettings s;
+            s.model = FilterModel::cube;
+            s.cube = sp.cube;
+            s.y = sp.y;
+            s.z = sp.z;
+            f.set (s);
+            const float oct = sp.x * 9.965784f;
+            double e = 0.0;
+            const int n = (int) (rate * 0.6), from = (int) (rate * 0.4);
+            for (int i = 0; i < n; ++i)
+            {
+                const float y = f.tick (0.02f * (float) std::sin (2.0 * M_PI * hz * i / rate), oct);
+                if (i >= from)
+                    e += (double) y * y;
+            }
+            const double got = 20.0 * std::log10 (std::sqrt (e / (n - from)) / (0.02 / std::sqrt (2.0)));
+            const double want = cube::responseDb (sp.cube, sp.x, sp.y, sp.z, 0.0f, hz);
+            if (want > -40.0)
+                worstErr = std::max (worstErr, std::abs (got - want));
+        }
+    CHECK (worstErr < 1.5, "cube as drawn: %.2f dB off at worst", worstErr);
+    // never running away, at 48 kHz and at 192: noise, X swept at 30 Hz over the whole cube, Y and Z moving, full
+    // resonance and drive
+    for (double rate2 : { 48000.0, 192000.0 })
+        for (int c = 0; c < cube::count(); ++c)
+        {
+            VAFilter f;
+            f.prepare (rate2);
+            FilterSettings s;
+            s.model = FilterModel::cube;
+            s.cube = c;
+            s.res = 1.0f;
+            s.drive = 1.0f;
+            std::mt19937 rng (7 + c);
+            std::uniform_real_distribution<float> u (-1.0f, 1.0f);
+            float peak = 0.0f;
+            bool finite = true;
+            const int n = (int) (rate2 * 1.0);
+            for (int i = 0; i < n; ++i)
+            {
+                if (i % 64 == 0)
+                {
+                    s.y = 0.5f + 0.5f * (float) std::sin (2.0 * M_PI * 3.0 * i / rate2);
+                    s.z = 0.5f + 0.5f * (float) std::sin (2.0 * M_PI * 1.7 * i / rate2);
+                    f.set (s);
+                }
+                const float oct = 5.0f + 5.2f * (float) std::sin (2.0 * M_PI * 30.0 * i / rate2);
+                const float y = f.tick (0.7f * u (rng), oct);
+                finite = finite && std::isfinite (y);
+                peak = std::max (peak, std::abs (y));
+            }
+            CHECK (finite && peak <= 2.0f, "cube %s at %.0f Hz swept: peak %.2f", cube::def (c).name, rate2, peak);
+        }
+    // its cost: a voice's filter at 4x, X sliding
+    {
+        VAFilter f;
+        f.prepare (192000.0);
+        FilterSettings s;
+        s.model = FilterModel::cube;
+        s.cube = 0;
+        f.set (s);
+        const double t0 = now();
+        float acc = 0.0f;
+        for (int i = 0; i < 192000; ++i)
+            acc += f.tick ((float) ((i * 7919) % 200) / 100.0f - 1.0f, 2.0f + 6.0f * (float) i / 192000.0f);
+        const double cpu = now() - t0;
+        VAFilter m;
+        m.prepare (192000.0);
+        FilterSettings ms;
+        ms.model = FilterModel::moog;
+        ms.res = 0.5f;
+        m.set (ms);
+        const double t1 = now();
+        for (int i = 0; i < 192000; ++i)
+            acc += m.tick ((float) ((i * 7919) % 200) / 100.0f - 1.0f, 2.0f + 6.0f * (float) i / 192000.0f);
+        const double moog = now() - t1;
+        std::printf ("  cube: a voice's filter at 4x, X sliding: %.2f %% of real time (the ladder: %.2f %%)%s\n", cpu * 100.0, moog * 100.0, acc > 1e30f ? "!" : "");
+        CHECK (cpu < 0.05, "cube cpu %.3f", cpu);
+    }
+}
+
 int main()
 {
     testOversampler();
@@ -636,6 +766,7 @@ int main()
     testDrive();
     testEffects();
     testSpectre();
+    testCube();
     testModulators();
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;

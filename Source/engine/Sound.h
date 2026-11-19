@@ -81,6 +81,8 @@ namespace snd
         // (0.4.2) SPECTRE: its slices (free and their multiplier, on the grid, on the notes, on the attacks), its band
         // or notch, TRANSIENTS, FINE and WARP on its pitches, how its oscillators follow the peaks
         spClock, spMult, spDiv, spNotch, spTrans, spFine, spWarp, spAssign,
+        // (0.4.4) the filter's CUBE: which one, its Y and Z (its X is the cutoff)
+        fCube, fY, fZ, fSmooth, fTrim,
         count
     };
 

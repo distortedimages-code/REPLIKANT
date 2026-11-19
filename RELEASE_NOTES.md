@@ -1,3 +1,11 @@
+**REPLIK8 0.4.4** : CUBE, un filtre qu'on parcourt en trois dimensions.
+
+- **CUBE**, un nouveau modèle dans FILTER : sept sections de résonances et de creux posées aux huit coins d'un cube. Déplace le point dedans et le filtre passe d'un coin à l'autre sans une couture : des voyelles qui se changent l'une en l'autre, des formants qui glissent, des peignes qui s'accordent, des cloches qui deviennent des barres de métal
+- **Dix cubes** : VOWELS, SWEEP, PHASER, COMB, BELLS, TILT, DUO, HOLLOW, BODY, SPREAD
+- **X, c'est le CUTOFF** : l'enveloppe du filtre, le clavier, la vélocité, les mods et WTF?! le promènent dans le cube. Y et Z ont leurs réglages (et se modulent), RESO affûte ce qui résonne, DRIVE le pousse dans une saturation douce. Dans la banque CUBE : SMOOTH (le point glisse jusqu'à 200 ms quand il saute) et TRIM (le niveau de sortie)
+- **À l'écran**, le cube en 3D : attrape le point et glisse-le (X et Y ; avec Maj, X et Z ; la molette pour Z). Les coins s'allument selon leur part dans le son, une traînée suit le point quand il bouge, et les sept sections s'affichent sur les fréquences
+- Il marche partout : synthé, sampler, DRUM, RADIO et l'entrée en multi-effet
+
 **REPLIK8 0.4.3** : WTF?! marche sur le DRUM.
 
 - **WTF?! sur le DRUM** : il ne tirait que des réglages du sampler, que le DRUM ne joue pas (et le filtre principal, éteint le plus souvent) : rien ne bougeait. Maintenant chaque coup est tiré à sa façon : TUNE, DECAY, SWEEP, PMOD, la coupure et la résonance du filtre de la piste, NOISE, START (ou POSITION sur une voix synth), DRIVE et F.ENV, chaque piste avec sa propre part du tirage. LIVE et LOOP marchent comme ailleurs, sur le tempo du DAW ou de l'appli

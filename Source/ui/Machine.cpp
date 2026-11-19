@@ -158,11 +158,14 @@ public:
         auto panel = in.removeFromRight (392.0f);
         in.removeFromRight (14.0f);
         tunerShown = false;
+        cubeShown = false;
         drumScreen.grid = {};
         const auto& shownPages = m.pagesShown();
         const auto vizNow = m.pageIndex() >= 0 && m.pageIndex() < (int) shownPages.size() ? shownPages[(size_t) m.pageIndex()].viz : juce::String();
         if (m.capture)
             paintCapture (g, in);
+        else if (cubePage())
+            paintCube (g, in);
         else if (m.mode == Machine::radioMode && vizNow == "tune")
             {}                                  // (the tuner over it)
         else if (m.mode == Machine::radioMode && ! (vizNow == "fx" && spectreBank()))
@@ -196,6 +199,18 @@ public:
     {
         dragPos = -1;
         tuning = 0;
+        if (cubeShown && cubeArea.contains (e.position))
+        {
+            // the cube's point taken (X, Y, Z: the cutoff and the two settings, as automation gestures)
+            cubing = true;
+            for (int k = 0; k < 3; ++k)
+                if (auto* q = proc().params.getParameter (snd::def (cubeIds[k]).id))
+                {
+                    cubeFrom[k] = q->getValue();
+                    q->beginChangeGesture();
+                }
+            return;
+        }
         if (m.mode == Machine::drumMode && ! m.capture && drumScreen.click (e.position, proc(), *m.drumEdit))
         {
             m.drumStrip->repaint();
@@ -231,6 +246,27 @@ public:
     }
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (cubing)
+        {
+            // the point follows the cursor: in the plane of X and Y, or (shift) on the floor, X and Z
+            const float s = juce::jmax (10.0f, cubeSize), dx = (float) e.getDistanceFromDragStartX(), dy = (float) e.getDistanceFromDragStartY();
+            float d[3] = { 0.0f, 0.0f, 0.0f };
+            if (e.mods.isShiftDown())
+            {
+                d[0] = (dx / kC30 + dy / kS30) / (2.0f * s);
+                d[2] = (dy / kS30 - dx / kC30) / (2.0f * s);
+            }
+            else
+            {
+                d[0] = dx / (kC30 * s);
+                d[1] = (d[0] * kS30 * s - dy) / s;
+            }
+            for (int k = 0; k < 3; ++k)
+                if (auto* q = proc().params.getParameter (snd::def (cubeIds[k]).id))
+                    q->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, cubeFrom[k] + d[k]));
+            repaint();
+            return;
+        }
         if (tuning > 0)
         {
             const float perPixel = e.mods.isShiftDown() || tuning == 2 ? 0.01f : 0.12f;
@@ -250,6 +286,14 @@ public:
     }
     void mouseUp (const juce::MouseEvent& e) override
     {
+        if (cubing)
+        {
+            cubing = false;
+            for (int k = 0; k < 3; ++k)
+                if (auto* q = proc().params.getParameter (snd::def (cubeIds[k]).id))
+                    q->endChangeGesture();
+            return;
+        }
         if (tuning > 0)
         {
             tuning = 0;
@@ -293,6 +337,19 @@ public:
     }
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
     {
+        if (cubeShown && cubeArea.contains (e.position))
+        {
+            // the wheel: Z
+            const float d = (std::abs (w.deltaY) > 0.0f ? w.deltaY : -w.deltaX) * (w.isReversed ? -1.0f : 1.0f);
+            if (auto* q = proc().params.getParameter (snd::def (snd::fZ).id))
+            {
+                q->beginChangeGesture();
+                q->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, q->getValue() + d * 0.25f));
+                q->endChangeGesture();
+            }
+            repaint();
+            return;
+        }
         if (! (tunerShown && (tunerBand.contains (e.position) || tunerFine.contains (e.position))))
             return;
         // a notch: a semitone (the fine band, or shift: a cent)
@@ -306,6 +363,189 @@ public:
         if (auto* t = dynamic_cast<juce::RangedAudioParameter*> (proc().params.getParameter (snd::def (snd::tune).id)))
             t->setValueNotifyingHost (t->convertTo0to1 (juce::jlimit (-96.0f, 96.0f, v)));
         repaint();
+    }
+
+    //------------------------------------------------------------------ the filter's CUBE: the point inside it, its corners lit
+    static constexpr float kC30 = 0.8660254f, kS30 = 0.5f;
+    static constexpr int cubeIds[3] = { snd::cutoff, snd::fY, snd::fZ };
+    bool cubeShown = false, cubing = false;
+    juce::Rectangle<float> cubeArea;
+    float cubeSize = 100.0f, cubeFrom[3] {};
+    std::array<std::array<float, 3>, 28> cubeTrail {};
+    int cubeTrailPos = 0;
+
+    bool cubePage() const
+    {
+        if (m.capture || (int) P (proc(), snd::fModel) != (int) dsp::FilterModel::cube)
+            return false;
+        const auto& pgs = m.pagesShown();
+        const int pi = m.pageIndex();
+        if (pi < 0 || pi >= (int) pgs.size() || pgs[(size_t) pi].viz != "filter")
+            return false;
+        const auto& pg = pgs[(size_t) pi];
+        const auto it = m.bankOf.find (pg.name + juce::String (m.mode));
+        const int bank = it == m.bankOf.end() ? 0 : juce::jlimit (0, (int) pg.banks.size() - 1, it->second);
+        return pg.banks[(size_t) bank].name == "filter" || pg.banks[(size_t) bank].name == "cube";
+    }
+
+    void paintCube (juce::Graphics& g, juce::Rectangle<float> r)
+    {
+        auto& p = proc();
+        cubeShown = true;
+        const int ci = (int) P (p, snd::fCube);
+        const auto& def = dsp::cube::def (ci);
+        // where it is: as set (the knobs) and as heard (the mods, the scenes, the newest voice's envelope on X)
+        const float set[3] = { snd::toNorm (snd::cutoff, P (p, snd::cutoff)), P (p, snd::fY), P (p, snd::fZ) };
+        float live[3] = { liveNorm (p, snd::cutoff), liveNorm (p, snd::fY), liveNorm (p, snd::fZ) };
+        live[0] = juce::jlimit (0.0f, 1.0f, live[0] + P (p, snd::fEnv) * 6.0f * p.player.filterEnv.load() / 9.965784f);
+        cubeTrail[(size_t) cubeTrailPos] = { live[0], live[1], live[2] };
+        cubeTrailPos = (cubeTrailPos + 1) % (int) cubeTrail.size();
+
+        // the cube on the left (seen from above, isometric), what it is on the right
+        auto area = r.removeFromLeft (juce::jmin (r.getWidth() * 0.55f, r.getHeight() * 1.3f));
+        cubeArea = area;
+        r.removeFromLeft (16.0f);
+        const float s = juce::jmin (area.getWidth() / (2.0f * kC30 + 0.4f), area.getHeight() / 2.3f);
+        cubeSize = s;
+        const auto c0 = area.getCentre().translated (0.0f, -4.0f);
+        auto at = [&] (float x, float y, float z) { return juce::Point<float> (c0.x + (x - z) * kC30 * s, c0.y + ((x + z) * kS30 - y) * s); };
+        auto corner = [&] (int i) { return at ((float) ((i >> 2) & 1), (float) ((i >> 1) & 1), (float) (i & 1)); };
+        // its three faces in view, faintly
+        auto face = [&] (std::initializer_list<int> cs, float alpha)
+        {
+            juce::Path f;
+            bool first = true;
+            for (int i : cs)
+            {
+                if (first) f.startNewSubPath (corner (i)); else f.lineTo (corner (i));
+                first = false;
+            }
+            f.closeSubPath();
+            g.setColour (col::sBlue.withAlpha (alpha));
+            g.fillPath (f);
+        };
+        face ({ 2, 6, 7, 3 }, 0.07f);      // the top (y = 1)
+        face ({ 4, 6, 7, 5 }, 0.04f);      // x = 1
+        face ({ 1, 5, 7, 3 }, 0.025f);     // z = 1
+        // its edges: the three behind dashed, the nine in front drawn
+        const int edges[12][2] = { { 0, 4 }, { 0, 2 }, { 0, 1 }, { 4, 6 }, { 4, 5 }, { 2, 6 }, { 2, 3 }, { 1, 5 }, { 1, 3 }, { 6, 7 }, { 5, 7 }, { 3, 7 } };
+        for (int e = 0; e < 12; ++e)
+        {
+            juce::Path l;
+            l.startNewSubPath (corner (edges[e][0]));
+            l.lineTo (corner (edges[e][1]));
+            if (e < 3)
+            {
+                const float dash[] = { 3.0f, 4.0f };
+                juce::Path dashed;
+                juce::PathStrokeType (1.0f).createDashedStroke (dashed, l, dash, 2);
+                g.setColour (col::screenDim.withAlpha (0.5f));
+                g.fillPath (dashed);
+            }
+            else
+            {
+                g.setColour (col::screenText.withAlpha (0.55f));
+                g.strokePath (l, juce::PathStrokeType (1.3f));
+            }
+        }
+        // the corners, lit by their share of the sound
+        for (int i = 0; i < 8; ++i)
+        {
+            const float w = ((i & 4) ? live[0] : 1.0f - live[0]) * ((i & 2) ? live[1] : 1.0f - live[1]) * ((i & 1) ? live[2] : 1.0f - live[2]);
+            const auto pt = corner (i);
+            const float rad = 2.5f + 7.0f * std::sqrt (w);
+            g.setColour (col::sOrange.withAlpha (0.25f + 0.75f * w));
+            g.fillEllipse (pt.x - rad, pt.y - rad, 2.0f * rad, 2.0f * rad);
+        }
+        // the axes' names, on the edges in front
+        auto label = [&] (juce::Point<float> a, juce::Point<float> b, juce::Point<float> off, const juce::String& t, juce::Justification j)
+        {
+            const auto mid = (a + b) * 0.5f + off;
+            const auto box = juce::Rectangle<float> (150.0f, 14.0f).withCentre (mid).constrainedWithin (getLocalBounds().toFloat().reduced (16.0f, 12.0f));
+            text (g, t, box, mono (10.0f, 500), col::sOrange, j, true);
+        };
+        label (corner (1), corner (5), { -44.0f, 14.0f }, "X · "_fr + def.x, juce::Justification::centred);
+        label (corner (5), corner (4), { 44.0f, 14.0f }, "Z · "_fr + def.z, juce::Justification::centred);
+        label (corner (1), corner (3), { -48.0f, 0.0f }, "Y · "_fr + def.y, juce::Justification::centredLeft);
+        // the point: its trail, its shadow on the floor and the lines to the front edges, where it was set, where it is
+        for (int k = 1; k < (int) cubeTrail.size(); ++k)
+        {
+            const auto& t = cubeTrail[(size_t) ((cubeTrailPos + k) % (int) cubeTrail.size())];
+            const float age = (float) k / (float) cubeTrail.size();
+            const auto pt = at (t[0], t[1], t[2]);
+            g.setColour (col::sYellow.withAlpha (0.25f * age * age));
+            g.fillEllipse (pt.x - 2.0f, pt.y - 2.0f, 4.0f, 4.0f);
+        }
+        const auto pt = at (live[0], live[1], live[2]), floor = at (live[0], 0.0f, live[2]);
+        {
+            const float dash[] = { 2.0f, 3.0f };
+            auto dashed = [&] (juce::Point<float> a, juce::Point<float> b, float alpha)
+            {
+                juce::Path l, d;
+                l.startNewSubPath (a);
+                l.lineTo (b);
+                juce::PathStrokeType (1.0f).createDashedStroke (d, l, dash, 2);
+                g.setColour (col::sYellow.withAlpha (alpha));
+                g.fillPath (d);
+            };
+            dashed (pt, floor, 0.7f);
+            dashed (floor, at (live[0], 0.0f, 1.0f), 0.45f);
+            dashed (floor, at (1.0f, 0.0f, live[2]), 0.45f);
+            g.setColour (col::sYellow.withAlpha (0.6f));
+            g.fillEllipse (floor.x - 2.5f, floor.y - 2.5f, 5.0f, 5.0f);
+        }
+        const auto was = at (set[0], set[1], set[2]);
+        if (was.getDistanceFrom (pt) > 3.0f)
+        {
+            g.setColour (col::screenText.withAlpha (0.6f));
+            g.drawEllipse (was.x - 6.0f, was.y - 6.0f, 12.0f, 12.0f, 1.2f);
+        }
+        g.setGradientFill (juce::ColourGradient (col::sYellow.withAlpha (0.55f), pt.x, pt.y, col::sYellow.withAlpha (0.0f), pt.x + 22.0f, pt.y, true));
+        g.fillEllipse (pt.x - 22.0f, pt.y - 22.0f, 44.0f, 44.0f);
+        g.setColour (col::sYellow);
+        g.fillEllipse (pt.x - 6.0f, pt.y - 6.0f, 12.0f, 12.0f);
+        g.setColour (col::screen);
+        g.fillEllipse (pt.x - 2.0f, pt.y - 2.0f, 4.0f, 4.0f);
+
+        // on the right: its name, its three axes, its seven sections on the frequencies
+        text (g, def.name, r.removeFromTop (40.0f), grotesk (32.0f, 300), col::screenText, juce::Justification::centredLeft, true);
+        text (g, "cube " + juce::String (ci + 1) + "/" + juce::String (dsp::cube::count()), r.removeFromTop (16.0f), mono (10.0f), col::screenDim);
+        r.removeFromTop (8.0f);
+        const char* names[3] = { def.x, def.y, def.z };
+        for (int k = 0; k < 3; ++k)
+        {
+            auto row = r.removeFromTop (24.0f);
+            text (g, juce::String::charToString ((juce::juce_wchar) ('X' + k)), row.removeFromLeft (16.0f), mono (11.0f, 700), col::sOrange);
+            auto val = row.removeFromRight (44.0f);
+            text (g, juce::String (juce::roundToInt (live[k] * 100.0f)) + " %", val, mono (11.0f), col::screenText, juce::Justification::centredRight, true);
+            auto name = row.removeFromTop (12.0f);
+            text (g, names[k], name, mono (10.0f), col::screenDim, juce::Justification::centredLeft, true);
+            auto bar = row.reduced (0.0f, 3.0f).withTrimmedRight (8.0f);
+            g.setColour (col::screenLine);
+            g.fillRoundedRectangle (bar, 2.0f);
+            g.setColour (col::sOrange);
+            g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * live[k]), 2.0f);
+        }
+        r.removeFromTop (6.0f);
+        text (g, "drag: x y · shift: x z · wheel: z"_fr, r.removeFromBottom (14.0f), mono (9.5f), col::screenGhost, juce::Justification::centredLeft, true);
+        auto map = r.reduced (0.0f, 4.0f);
+        if (map.getHeight() > 30.0f)
+        {
+            dsp::cube::Point pp;
+            dsp::cube::at (ci, live[0], live[1], live[2], liveValue (p, snd::reso), pp);
+            g.setColour (col::screenLine);
+            g.fillRect (map.getX(), map.getBottom() - 1.0f, map.getWidth(), 1.0f);
+            for (int sct = 0; sct < dsp::cube::sections; ++sct)
+            {
+                const float x = map.getX() + map.getWidth() * juce::jlimit (0.0f, 1.0f, std::log (pp.hz[sct] / 20.0f) / std::log (1000.0f));
+                const float h = map.getHeight() * juce::jlimit (0.08f, 1.0f, std::log (1.0f + pp.q[sct]) / std::log (91.0f));
+                const bool cuts = pp.mb[sct] * pp.q[sct] < 0.7f && pp.mh[sct] > 0.5f && pp.ml[sct] > 0.5f;
+                g.setColour (cuts ? col::sRed : col::sBlue);
+                g.fillRect (x - 1.0f, map.getBottom() - h, 2.0f, h);
+                g.fillEllipse (x - 3.0f, map.getBottom() - h - 3.0f, 6.0f, 6.0f);
+            }
+            text (g, "sections · 20 hz – 20 khz"_fr, map.withHeight (12.0f), mono (9.5f), col::screenGhost, juce::Justification::centredLeft, true);
+        }
     }
 
     //------------------------------------------------------------------ SPECTRE: its partials, as they glide (a phosphor trail)
@@ -1273,8 +1513,9 @@ private:
         if (viz == "filter" && ! m.capture)
         {
             // the filter's page: its envelope's bank, the drive's, have their own pictures
-            const int bank = m.bankOf[pg.name + juce::String (m.mode)];
-            viz = bank == 1 ? (m.mode == Machine::drumMode ? "drive" : "fenv") : (bank == 2 ? "drive" : "filter");
+            const int bank = juce::jlimit (0, (int) pg.banks.size() - 1, m.bankOf[pg.name + juce::String (m.mode)]);
+            const auto& bankName = pg.banks[(size_t) bank].name;
+            viz = bankName == "filter env" ? "fenv" : (bankName == "drive" ? "drive" : "filter");
         }
         if (viz == "dtrig" || viz == "dsrc" || viz == "dpitch" || viz == "damp" || viz == "dtone" || viz == "dseq")
             paintDrumViz (g, viz, in);
@@ -1477,7 +1718,10 @@ private:
                 r.removeFromRight (10.0f);
                 const int model = (int) P (p, snd::fModel);
                 picto (g, filterModelPicto (model), side.removeFromTop (side.getHeight() * 0.6f).withSizeKeepingCentre (70.0f, 70.0f), model > 0 ? col::sBlue : col::screenDim, 1.7f);
-                picto (g, filterTypePicto ((int) P (p, snd::fType)), side.withSizeKeepingCentre (38.0f, 38.0f), model > 0 ? col::screenText : col::screenGhost, 1.5f);
+                if (model == (int) dsp::FilterModel::cube)
+                    text (g, dsp::cube::def ((int) P (p, snd::fCube)).name, side.withSizeKeepingCentre (74.0f, 18.0f), mono (10.0f, 600), col::screenText, juce::Justification::centred);
+                else
+                    picto (g, filterTypePicto ((int) P (p, snd::fType)), side.withSizeKeepingCentre (38.0f, 38.0f), model > 0 ? col::screenText : col::screenGhost, 1.5f);
                 g.setColour (col::screenLine);
                 g.fillRect (r.getRight() + 4.0f, r.getY(), 1.0f, r.getHeight());
             }
@@ -1487,6 +1731,9 @@ private:
             fs.res = liveValue (p, snd::reso);
             fs.drive = P (p, snd::fDrive);
             fs.sep = P (p, snd::sep);
+            fs.cube = (int) P (p, snd::fCube);
+            fs.y = liveValue (p, snd::fY);
+            fs.z = liveValue (p, snd::fZ);
             const float cutoff = liveValue (p, snd::cutoff);
             juce::Path path;
             for (int i = 0; i <= 160; ++i)
@@ -1500,7 +1747,7 @@ private:
             fill (path, col::sBlue.withAlpha (0.18f));
             stroke (path, col::sBlue);
             const float cx = r.getX() + r.getWidth() * std::log (cutoff / 20.0f) / std::log (1000.0f);
-            g.setColour (col::screenText);
+            g.setColour (fs.model == dsp::FilterModel::cube ? juce::Colours::transparentBlack : col::screenText);
             g.fillEllipse (cx - 5.0f, r.getY() + (24.0f - juce::jlimit (-48.0f, 24.0f, fs.model == dsp::FilterModel::off ? 0.0f : dsp::VAFilter::responseDb (fs, cutoff, cutoff))) / 72.0f * r.getHeight() - 5.0f, 10.0f, 10.0f);
         }
         else if (viz == "adsr")
@@ -2521,13 +2768,24 @@ void Machine::buildPages()
     auto filterPage = [&]
     {
         Page pg { "filter", "filter", {} };
-        pg.banks.push_back ({ "filter", { as (S (snd::fModel), Ctl::Look::display), disabledUnless (S (snd::fType), fOn), sep (disabledUnless (S (snd::cutoff), fOn)),
+        // (CUBE: its choice instead of the type, CUTOFF as its X, its Y and Z, no FM)
+        auto isCube = [this] { return (int) P (proc, snd::fModel) == (int) dsp::FilterModel::cube; };
+        auto notCube = [isCube] { return ! isCube(); };
+        auto xCtl = S (snd::cutoff, "X", isCube);
+        xCtl.text = [this] { return juce::String (juce::roundToInt (liveNorm (proc, snd::cutoff) * 100.0f)) + " %"; };
+        xCtl.marks = { { 0.0f, "0" }, { 0.5f, "5" }, { 1.0f, "10" } };
+        xCtl.ticks = 11;
+        pg.banks.push_back ({ "filter", { as (S (snd::fModel), Ctl::Look::display), disabledUnless (S (snd::fType, nullptr, notCube), fOn),
+                                          as (S (snd::fCube, nullptr, isCube), Ctl::Look::display),
+                                          sep (disabledUnless (S (snd::cutoff, nullptr, notCube), fOn)), sep (xCtl), S (snd::fY, nullptr, isCube), S (snd::fZ, nullptr, isCube),
                                           disabledUnless (S (snd::reso), fOn), disabledUnless (S (snd::fDrive), fOn),
                                           sep (S (snd::sep, nullptr, [this] { const int md = (int) P (proc, snd::fModel); return md == 2 || md == 4; })),
-                                          disabledUnless (S (snd::fm), fOn), sep (disabledUnless (S (snd::quality), fOn)) } });
+                                          disabledUnless (S (snd::fm, nullptr, notCube), fOn), sep (disabledUnless (S (snd::quality), fOn)) } });
         pg.banks.push_back ({ "filter env", { S (snd::fEnv), sep (S (snd::fAttack)), S (snd::fDecay), S (snd::fSustain), S (snd::fRelease),
                                                sep (S (snd::keyTrack)), S (snd::velCutoff) } });
         pg.banks.push_back ({ "drive", { S (snd::dModel), sep (S (snd::dAmt)), S (snd::dTone), sep (S (snd::dMix)) } });
+        pg.banks.push_back ({ "cube", { disabledUnless (as (S (snd::fCube), Ctl::Look::display), isCube), sep (disabledUnless (S (snd::fSmooth), isCube)),
+                                        disabledUnless (S (snd::fTrim), isCube) } });
         return pg;
     };
     auto fxPage = [&]
@@ -2952,9 +3210,20 @@ void Machine::buildPages()
                     if (c.param == id)
                         c.tip = t;
     };
-    // SPECTRE's, on every mode's effects
+    // SPECTRE's, on every mode's effects (and the filter's CUBE)
     for (auto* v : { &pages[synthMode], &pages[drumMode], &pages[samplerMode], &pages[radioMode] })
     {
+        tip (*v, snd::fModel, "Le modèle du filtre. CUBE : sept sections de pôles et de zéros posées aux coins d'un cube, X, Y et Z se promènent dedans (déplace le point sur l'écran)."_fr);
+        tip (*v, snd::fCube, "Le cube : VOWELS (les voyelles), SWEEP, PHASER, COMB, BELLS, TILT, DUO, HOLLOW, BODY, SPREAD. Leurs axes sont écrits à l'écran."_fr);
+        tip (*v, snd::fY, "Le deuxième axe du cube (son nom est à l'écran), à moduler."_fr);
+        tip (*v, snd::fZ, "Le troisième axe du cube (son nom est à l'écran), à moduler."_fr);
+        tip (*v, snd::fSmooth, "Le temps que met le point pour rejoindre X, Y et Z quand ils sautent (0 à 200 ms) : des transitions lisses, ou nerveuses."_fr);
+        tip (*v, snd::fTrim, "Le niveau à la sortie du cube (-24 à +12 dB)."_fr);
+        for (auto& pg : *v)
+            for (auto& b : pg.banks)
+                for (auto& c : b.ctls)
+                    if (c.param == snd::cutoff && c.name == "X")
+                        c.tip = "Le premier axe du cube : c'est le CUTOFF, donc l'enveloppe du filtre, le clavier, la vélocité et les mods l'y promènent."_fr;
         tip (*v, snd::spVoices, "Combien de partiels sont rejoués : les plus forts, de 1 à 33 oscillateurs."_fr);
         tip (*v, snd::spClock, "Quand le son est analysé. FREE : toutes les SLICE. SYNC : sur la grille du DAW (ou au tempo). NOTES : à chaque note jouée, puis le spectre tenu jusqu'à la suivante. ATTACKS : à chaque attaque du son qui entre."_fr);
         tip (*v, snd::spSlice, "Le temps entre deux analyses, de 6 à 506 ms (multiplié par MULTIPLY)."_fr);

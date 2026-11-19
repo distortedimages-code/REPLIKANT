@@ -5,7 +5,7 @@ if(APPLE)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Universal binary")
 endif()
 
-project(REPLIKANT VERSION 0.4.3 LANGUAGES C CXX)
+project(REPLIKANT VERSION 0.4.4 LANGUAGES C CXX)
 
 # GitHub repository whose releases the plug-in checks for updates (public releases).
 set(RK_UPDATE_REPO "distortedimages-code/REPLIKANT" CACHE STRING "owner/repo checked for updates (empty = no update check)")
@@ -45,6 +45,7 @@ add_library(rk_core STATIC
     # the player's DSP: oversampling, analog filters, drives, modulators, effects
     Source/dsp/Oversampler.cpp
     Source/dsp/VAFilter.cpp
+    Source/dsp/Cube.cpp
     Source/dsp/Drive.cpp
     Source/dsp/Modulators.cpp
     Source/dsp/Space.cpp

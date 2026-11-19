@@ -151,6 +151,24 @@ int main (int argc, char** argv)
     view->showBank (0);
     run (40);
     shoot ("17-synthe-filtre-ms20.png");
+    // the CUBE: its point in the vowels, then in the bells, ringing
+    set (snd::fModel, 7.0f);
+    set (snd::fCube, 0.0f);
+    set (snd::cutoff, 20.0f * std::pow (1000.0f, 0.62f));
+    set (snd::fY, 0.35f);
+    set (snd::fZ, 0.7f);
+    set (snd::reso, 0.3f);
+    view->showBank (0);
+    run (60);
+    shoot ("47-filtre-cube.png");
+    set (snd::fCube, 4.0f);
+    set (snd::cutoff, 20.0f * std::pow (1000.0f, 0.3f));
+    set (snd::fY, 0.8f);
+    set (snd::fZ, 0.25f);
+    run (60);
+    shoot ("48-filtre-cube-bells.png");
+    set (snd::reso, 0.45f);
+    set (snd::cutoff, 1800.0f);
     set (snd::fModel, 1.0f);
     set (snd::fType, 0.0f);
     set (snd::dModel, 0.0f);
