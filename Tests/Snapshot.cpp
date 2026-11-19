@@ -7,6 +7,7 @@
 #include "../Source/plugin/PluginEditor.h"
 #include "../Source/ui/Machine.h"
 #include "../Source/ui/Assistant.h"
+#include "../Source/dsp/VAFilter.h"
 #include "../Source/radio/RadioNet.h"
 
 static void pump (int ms)
@@ -153,6 +154,18 @@ int main (int argc, char** argv)
     view->showBank (0);
     run (40);
     shoot ("17-synthe-filtre-ms20.png");
+    // (0.4.9) the WASP's notch and its mix
+    set (snd::fModel, (float) (int) dsp::FilterModel::wasp);
+    set (snd::fType, (float) (int) dsp::FilterType::notch);
+    set (snd::sep, 0.35f);
+    set (snd::reso, 0.7f);
+    run (40);
+    shoot ("72-filtre-wasp-notch.png");
+    set (snd::reso, 0.2f);
+    set (snd::sep, 0.0f);
+    set (snd::fModel, 2.0f);
+    set (snd::fType, 2.0f);
+    run (10);
     // the CUBE: its point in the vowels, then in the bells, ringing
     set (snd::fModel, 7.0f);
     set (snd::fCube, 0.0f);

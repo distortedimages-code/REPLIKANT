@@ -1,3 +1,8 @@
+**REPLIK8 0.4.10** : le filtre WASP refait.
+
+- **WASP** : son caractère vient d'amplis de fortune, des inverseurs logiques détournés, et il est maintenant modélisé à partir d'eux. Ces inverseurs ont peu de gain : les intégrateurs du filtre fuient, d'autant plus qu'ils approchent de leurs limites. Résultat : il ne part jamais en auto-oscillation, sa résonance est nasale et marquée à bas niveau (jusqu'à +16 dB à la coupure) et s'effondre en grain quand le son est fort ou que DRIVE monte. Leur courbe est bancale : des harmoniques paires, de plus en plus quand on le pousse. Le courant qui règle la coupure sature aussi, et l'entrée passe elle-même par un inverseur
+- **WASP en NOTCH** : c'est un mélange passe-bas / passe-haut. MIX (page FILTER) à 0 : une encoche symétrique et profonde ; en tournant MIX, l'encoche penche vers le passe-haut
+
 **REPLIK8 0.4.9** : quand le test de l'assistant trouve un problème, il le corrige, ou il dit quoi faire.
 
 - **Ce que REPLIK8 peut corriger, il le corrige** et refait le test (marqué CORRIGÉ) : sa propre sortie qui revient dans son entrée (MONITOR coupé), un plugin qui dépasse 0 dB (fichiers en 32 bits flottants, rien d'écrêté), le son arrivé par l'autre entrée (SOURCE changée), un CC qui ne change rien au son (il essaie les CC courants l'un après l'autre et garde celui qui marche)

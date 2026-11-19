@@ -3534,6 +3534,7 @@ void Machine::buildPages()
                                           sep (disabledUnless (S (snd::cutoff, nullptr, notCube), fOn)), sep (xCtl), S (snd::fY, nullptr, isCube), S (snd::fZ, nullptr, isCube),
                                           disabledUnless (S (snd::reso), fOn), disabledUnless (S (snd::fDrive), fOn),
                                           sep (S (snd::sep, nullptr, [this] { const int md = (int) P (proc, snd::fModel); return md == 2 || md == 4; })),
+                                          sep (S (snd::sep, "Mix", [this] { return (int) P (proc, snd::fModel) == (int) dsp::FilterModel::wasp && (int) P (proc, snd::fType) == (int) dsp::FilterType::notch; })),
                                           disabledUnless (S (snd::fm, nullptr, notCube), fOn), sep (disabledUnless (S (snd::quality), fOn)) } });
         pg.banks.push_back ({ "filter env", { S (snd::fEnv), sep (S (snd::fAttack)), S (snd::fDecay), S (snd::fSustain), S (snd::fRelease),
                                                sep (S (snd::keyTrack)), S (snd::velCutoff) } });

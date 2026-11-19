@@ -8,8 +8,9 @@
 //   SEM       Oberheim SEM 12 dB state variable: LP, BP, HP, notch; its OTAs pushed by DRIVE (as in MIFM1)
 //   OSCAR     the OSCar's two 12 dB filters in series, SEP pulling their cutoffs apart (up to two octaves each way):
 //             LP and HP at 24 dB with two knees, BP as wide as the separation, notch from the two in parallel
-//   WASP      the EDP Wasp's state variable filter built of CMOS inverters: their lopsided curve in the integrators
-//             and the damping (the grit, the hollow resonance)
+//   WASP      the EDP Wasp's state variable filter built of CMOS inverters (0.4.9): their little gain makes the
+//             integrators leak (it never sings by itself, its resonance collapses into grit when loud), their lopsided
+//             outputs, the cutoff currents saturating, an inverter at the input; NOTCH is the LP/HP mix (SEP)
 //   POLIVOKS  the Polivoks' integrators clipping on their op-amps' rails: the resonance past self-oscillation,
 //             held by the clipping (its rasp)
 //   CUBE      (0.4.4) seven sections of poles and zeros defined at the corners of a cube (Cube.h), CUTOFF its X
@@ -34,7 +35,7 @@ namespace dsp
         FilterType type = FilterType::lp;
         float res = 0.0f;      // 0..1
         float drive = 0.0f;    // 0..1
-        float sep = 0.0f;      // 0..1 (MS-20: where the other filter is; OSCAR: the separation)
+        float sep = 0.0f;      // 0..1 (MS-20: where the other filter is; OSCAR: the separation; WASP: its notch's mix)
         float fm = 0.0f;       // 0..1, the knob (its depth on an exponential curve)
         int cube = 0;          // CUBE: which (Cube.h), and its Y and Z (0..1; X is the cutoff)
         float y = 0.0f, z = 0.0f;

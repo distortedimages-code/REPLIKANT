@@ -46,14 +46,6 @@ namespace
         const float v2 = v * v;
         return v2 <= 2.25f ? 1.0f - (4.0f / 27.0f) * v2 : 1.0f / std::sqrt (v2);
     }
-    // a CMOS inverter's gain (the Wasp): lopsided (biased off its centre), its slope 1 at 0
-    inline float cmosGain (float v)
-    {
-        constexpr float b = 0.3f, t0 = 0.29131261f, norm = 1.0f / (1.6f * (1.0f - t0 * t0));
-        if (std::abs (v) < 1.0e-4f) return 1.0f;
-        return (fastTanh (1.6f * v + b) - t0) * norm / v;
-    }
-
     // Zavalishin's zero-delay feedback state variable filter: band pass returned, low and high pass out
     inline float svf (float* s, float x, float g, float a0, float rho, float& lp, float& hp)
     {
@@ -402,29 +394,85 @@ float VAFilter::oscar (float in, float hz)
     return y / (1.0f + 1.2f * drive);
 }
 
+// (0.4.9) the Wasp, after its circuit as it is generally described: a 12 dB state variable filter whose op-amps are
+// CMOS inverters "abused" as amplifiers. Three things come of it, each modelled here:
+//   - an inverter has little gain of its own: its integrator leaks, the more so as it swings towards its rails. The
+//     damping that leak adds is why it never sings by itself, and why its resonance collapses into grit when the
+//     sound gets loud
+//   - its output bends on a lopsided curve (its two transistors aren't alike): even harmonics, more as it's pushed
+//   - the current that sets the cutoff saturates too (a transconductance stage before each integrator)
+// The input goes through an inverter as well. NOTCH is the LP/HP mix, symmetric with SEP at 0, towards HP as SEP
+// turns (an asymmetric notch). Each nonlinearity is taken at what it got the sample before (as svfNl does).
+namespace
+{
+    constexpr float kWaspA = 1.7f, kWaspB = 0.45f;             // the inverter's curve: steepness, bias (lopsidedness)
+    // (fastTanh's own value and slope at the bias: the curve must pass through 0 exactly, or a quiet signal sees a
+    // gain far from 1 and the filter hums on by itself)
+    inline float fastTanhSlope (float x)
+    {
+        if (x > 3.0f || x < -3.0f) return 0.0f;
+        const float x2 = x * x, d = 27.0f + 9.0f * x2;
+        return ((27.0f + 3.0f * x2) * d - x * (27.0f + x2) * 18.0f * x) / (d * d);
+    }
+    const float kWaspT0 = fastTanh (kWaspB), kWaspD0 = fastTanhSlope (kWaspB);
+    inline float waspCurve (float v)                           // slope 1 at 0, lopsided, bounded
+    {
+        return (fastTanh (kWaspA * v + kWaspB) - kWaspT0) / (kWaspA * kWaspD0);
+    }
+    inline float waspGain (float v)                            // the curve over its input (1 while small)
+    {
+        return std::abs (v) < 1.0e-4f ? 1.0f : waspCurve (v) / v;
+    }
+    inline float waspSlope (float v)                           // its slope there (the gain it has left)
+    {
+        return std::max (0.04f, fastTanhSlope (kWaspA * v + kWaspB) / kWaspD0);
+    }
+}
+
 float VAFilter::wasp (float in, float hz)
 {
     const float g = tanPade (kPi * hz * (float) invSr);
-    const float q = 0.7f + 22.0f * res * res;
-    const float rho = 1.0f / q + g;
-    // the inverters: pushed a little even at rest (their character), much more with DRIVE
-    const float kk = 1.4f + 6.0f * drive;
-    const float pre = 1.0f + 3.0f * drive;
-    // the input through an inverter too (its lopsided curve: even harmonics), its DC out
-    const float u = pre * in;
-    float y0 = u * cmosGain (u);
+    // the resonance knob: the damping it leaves (the leak adds to it, and keeps it from ever reaching zero)
+    const float q = 0.6f + 9.4f * res * res;
+    const float damp = 1.0f / q;
+    // how hard the inverters are worked: they're gritty at rest, and DRIVE (with the level) pushes them
+    const float kk = 0.5f + 4.5f * drive;
+    const float pre = 1.25f + 4.0f * drive;
+    // the input inverter (its lopsided curve: even harmonics), the DC it makes taken out
+    const float y0 = waspCurve (pre * in) / pre * (1.0f + 0.6f * drive);
     const float z = y0 - dcx + 0.9995f * dcy;
     dcx = y0;
     dcy = z;
-    float lp, hp;
-    const float bp = svfNl (sv, nl, z, g, rho, kk, cmosGain, lp, hp);
-    const float lvl = 1.0f / (1.0f + 0.5f * drive);
+    // this sample's gains, from where each stage was the sample before
+    const float g1 = g * otaGain (1.3f * kk * nl[0]);                  // the cutoff currents saturating
+    const float g2 = g * otaGain (1.3f * kk * nl[1]);
+    const float gb = waspGain (kk * sv[2]), gl = waspGain (kk * sv[3]); // the inverters' outputs bending
+    const float leak = 1.0f / 34.0f;                                   // an inverter's own gain, ~30 dB
+    const float k1 = leak / waspSlope (kk * sv[2]), k2 = leak / waspSlope (kk * sv[3]);
+    const float c1 = 1.0f / (1.0f + g1 * k1), c2 = 1.0f / (1.0f + g2 * k2);
+    // the loop, solved with those: h = x - damp * Gb b - Gl l;  b = c1 (g1 h + s0);  l = c2 (g2 Gb b + s1)
+    const float m = gb * (damp + gl * c2 * g2);
+    const float h = (z - gl * c2 * sv[1] - m * c1 * sv[0]) / (1.0f + m * c1 * g1);
+    const float b = c1 * (g1 * h + sv[0]);
+    const float l = c2 * (g2 * gb * b + sv[1]);
+    sv[0] = b + g1 * (h - k1 * b);
+    sv[1] = l + g2 * (gb * b - k2 * l);
+    sv[2] = b;
+    sv[3] = l;
+    nl[0] = h;
+    nl[1] = gb * b;
+    const float bp = gb * b, lp = gl * l, hp = h;
+    const float lvl = 1.0f / (1.0f + 0.7f * drive);
     switch (target.type)
     {
         case FilterType::lp:    return lp * lvl;
         case FilterType::hp:    return hp * lvl;
-        case FilterType::bp:    return bp * lvl * (1.0f / q) * 2.0f;
-        case FilterType::notch: return (lp + hp) * lvl;
+        case FilterType::bp:    return bp * lvl * std::min (2.0f, 1.6f * damp + 0.5f);
+        case FilterType::notch:
+        {
+            const float mix = 0.5f + 0.5f * sep;
+            return ((1.0f - mix) * lp + mix * hp) * 2.0f * lvl;
+        }
     }
     return lp;
 }
@@ -574,8 +622,18 @@ float VAFilter::responseDb (const FilterSettings& s, float fc, float f)
             h = sec (fc, f, 1.0 / (2.0 * 0.5 / (0.5 + 12.0 * s.res * s.res * s.res)), s.type);
             break;
         case FilterModel::wasp:
-            h = sec (fc, f, 0.7 + 22.0 * s.res * s.res, s.type);
+        {
+            // its knob's damping and the inverters' leak (two integrators, ~1/34 each)
+            const double q = 1.0 / (1.0 / (0.6 + 9.4 * s.res * s.res) + 2.0 / 34.0);
+            if (s.type == FilterType::notch)
+            {
+                const double mix = 0.5 + 0.5 * s.sep;
+                h = 2.0 * ((1.0 - mix) * sec (fc, f, q, FilterType::lp) + mix * sec (fc, f, q, FilterType::hp));
+            }
+            else
+                h = sec (fc, f, q, s.type);
             break;
+        }
         case FilterModel::polivoks:
             h = sec (fc, f, 0.5 / std::max (0.02, 1.0 - 1.08 * std::pow ((double) s.res, 1.3)), s.type);
             break;

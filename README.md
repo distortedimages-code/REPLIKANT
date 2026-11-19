@@ -4,6 +4,10 @@
 
 **Page de téléchargement** : https://distortedimages-code.github.io/REPLIKANT/
 
+## La version 0.4.10 : WASP
+
+- **WASP** (`VAFilter::wasp`) : un filtre à variables d'état 12 dB résolu sans délai, ses deux intégrateurs à fuite (le gain propre d'un inverseur, ~30 dB, divisé par la pente qui lui reste à son niveau : plus il est poussé, plus il fuit, donc plus il est amorti) ; la sortie de chaque intégrateur sur une courbe en tanh décalée (pente 1 en 0, asymétrique : harmoniques paires), prise au gain qu'elle avait l'échantillon d'avant ; la transconductance de chaque intégrateur qui sature (`otaGain`) ; l'entrée par la même courbe, son continu retiré. Q de 0,6 à 10 au bouton, la fuite ajoutée : il n'oscille jamais. NOTCH = (1 − m)·LP + m·HP, m = ½ + ½·SEP (MIX). `testFilters` : il sonne puis s'éteint à pleine résonance, +16 dB à la coupure au calme et moins de 4 dB de moins fort, la deuxième harmonique entre −40 et −6 dB, l'encoche à −50 dB.
+
 ## La version 0.4.9 : l'assistant corrige
 
 - **Après le test** (`CaptureAssistant::finishTest`) : une boucle entendue avec MONITOR allumé le coupe et refait le test (deux fois au plus) ; un plugin au-dessus de 0 dB passe les fichiers en 32 bits flottants (`Worker` ne signale plus la saturation dans ce cas) ; un CC sans effet lance la recherche (`nextCc` : 74, 71, 1, 73, 70, 76, 72, 75, 77, 16), le premier qui bouge le son est gardé. Le reste : `paintTodo`, une procédure par logiciel et des touches (`sendTestNote`, `sendCcSweep`, SWEEP). `judge` : PRÊT seulement sans ligne rouge, la boucle comptée pendant le test seulement.
@@ -90,7 +94,7 @@
 - **Pitch extrême** : sinc de Kaiser à coupure qui suit la transposition ; copies de chaque enregistrement une, deux, trois octaves plus bas (demi-bande de 255 points, ~120 dB) lues dès que la voix monte d'une quinte et demie ; TRANSITOIRES GARDÉS (l'attaque, mesurée jusqu'à ce que l'enveloppe retombe de 9 dB, jouée à sa vitesse, le corps transposé ensuite) ; passe-haut de sécurité à 5 Hz sur les voix.
 - **ALIASING** : sinc qui suit la hauteur → sinc qui ne la suit plus → noyau court et doux → linéaire → drop-sample → au-delà, l'interpolation passe-haut (les images plus fortes que le son) ; BITS de 32 à 1, fractionnaires.
 - **Modulation de phase** : l'adresse de lecture poussée de ±INDICE échantillons (0 à 256) par un sinus sur la note × RAPPORT, par le sample (une deuxième tête à RAPPORT fois sa vitesse) ou par l'entrée.
-- **Filtres** (`Source/dsp/VAFilter`) : MOOG (échelle D'Angelo–Välimäki), MS-20 (Korg 35 en série, SÉPARATION), SEM (OTA), OSCAR (deux 12 dB écartés), WASP (CMOS), POLIVOKS (rails) ; ZDF, suréchantillonnés 1X / 2X / 4X (demi-bandes), réinjection FM, enveloppe, suivi du clavier, vélocité.
+- **Filtres** (`Source/dsp/VAFilter`) : MOOG (échelle D'Angelo–Välimäki), MS-20 (Korg 35 en série, SÉPARATION), SEM (OTA), OSCAR (deux 12 dB écartés), WASP (inverseurs : intégrateurs à fuite, courbe asymétrique), POLIVOKS (rails) ; ZDF, suréchantillonnés 1X / 2X / 4X (demi-bandes), réinjection FM, enveloppe, suivi du clavier, vélocité.
 - **Drive** : PRÉAMPLI, CONSOLE, BANDE (pré/désaccentuation exactes, bosse de tête, pleurage), suréchantillonné 4X.
 - **Effets**, dans cet ordre : SPECTRE (pics d'une FFT d'environ 85 ms rendus par 1 à 33 oscillateurs ; refait en 0.4.2, voir plus haut), PITCH (deux voix Signalsmith, retards, réinjection, CRISTAUX : grains à l'envers), CHORUS / FLANGER / VIBRATO, CRUSH, ESPACE (FDN de 8 lignes de MIFM1, shimmer, gel).
 - **Mods** : 4, ONDE / PAS / HASARD / ENV / SUIVEUR, au tempo de l'hôte (sur sa grille) ou au leur, 8 routes chacun ; assignation en tournant le potard.

@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdio>
 #include <random>
+#include <functional>
 #include <vector>
 
 static int failures = 0, checks = 0;
@@ -152,6 +153,77 @@ static void testFilters()
     {
         const double r = ringHz (FilterModel::polivoks, 500.0f, sr, 2);
         CHECK (r > 300.0 && r < 800.0, "polivoks sings at %.1f", r);
+    }
+    // (0.4.9) the Wasp: never sings by itself; its resonance gives way when the sound is loud; its lopsided inverters
+    // add even harmonics; NOTCH, with SEP at 0, digs a hole at the cutoff
+    {
+        auto run = [&] (float res, float drive, FilterType type, float sep, std::function<float (int)> in, int n)
+        {
+            VAFilter f;
+            f.prepare (sr * 2);
+            FilterSettings s;
+            s.model = FilterModel::wasp;
+            s.type = type;
+            s.res = res;
+            s.drive = drive;
+            s.sep = sep;
+            f.set (s);
+            std::vector<float> out;
+            for (int i = 0; i < n; ++i)
+                out.push_back (f.tick (in (i), std::log2 (500.0f / 20.0f)));
+            return out;
+        };
+        // a click at full resonance, then silence: it rings, then dies away
+        auto ring = run (1.0f, 0.0f, FilterType::lp, 0.0f, [] (int i) { return i < 4 ? 0.5f : 0.0f; }, (int) (sr * 2 * 1.0));
+        float early = 0.0f, late = 0.0f;
+        for (size_t i = 0; i < ring.size(); ++i)
+        {
+            if (i < ring.size() / 10)
+                early = std::max (early, std::abs (ring[i]));
+            else if (i > ring.size() * 4 / 5)
+                late = std::max (late, std::abs (ring[i]));
+        }
+        CHECK (early > 1.0e-3f && late < 1.0e-5f, "wasp at full resonance rings and dies (no self-oscillation): %.2g then %.2g", early, late);
+        // the peak at the cutoff, quiet then loud (relative): it gives way
+        auto gainAt = [&] (float amp)
+        {
+            auto out = run (1.0f, 0.0f, FilterType::lp, 0.0f, [&] (int i) { return amp * (float) std::sin (2 * M_PI * 500.0 * i / (sr * 2)); }, (int) (sr * 2 * 0.5));
+            return rmsDb (out, (int) (sr * 2 * 0.25)) - 20.0 * std::log10 (amp / std::sqrt (2.0));
+        };
+        const double quiet = gainAt (0.02f), loud = gainAt (0.8f);
+        CHECK (quiet > 9.0 && loud < quiet - 4.0, "wasp's resonance: +%.1f dB quiet, +%.1f dB loud", quiet, loud);
+        std::printf ("  wasp at full resonance: +%.1f dB at the cutoff quiet, +%.1f dB loud; rings %.2g, then %.2g\n", quiet, loud, early, late);
+        std::printf ("  wasp's peak by level:");
+        for (float a : { 0.05f, 0.1f, 0.2f, 0.3f, 0.5f })
+            std::printf (" %.2f: %+.1f dB", a, gainAt (a));
+        std::printf ("\n");
+        // even harmonics: a 100 Hz sine through the low pass at 500 Hz, its second harmonic
+        {
+            auto out = run (0.0f, 0.5f, FilterType::lp, 0.0f, [&] (int i) { return 0.5f * (float) std::sin (2 * M_PI * 100.0 * i / (sr * 2)); }, (int) (sr * 2 * 0.5));
+            auto amp = [&] (double hz)
+            {
+                double re = 0.0, im = 0.0;
+                const int from = (int) out.size() / 2;
+                for (int i = from; i < (int) out.size(); ++i)
+                {
+                    re += out[(size_t) i] * std::cos (2 * M_PI * hz * i / (sr * 2));
+                    im += out[(size_t) i] * std::sin (2 * M_PI * hz * i / (sr * 2));
+                }
+                return std::sqrt (re * re + im * im);
+            };
+            const double h2 = 20.0 * std::log10 (amp (200.0) / amp (100.0));
+            CHECK (h2 > -40.0 && h2 < -6.0, "wasp's even harmonics: the 2nd at %.1f dB", h2);
+            std::printf ("  wasp's second harmonic (DRIVE 50 %%): %.1f dB\n", h2);
+        }
+        // NOTCH at SEP 0: a hole at the cutoff, the lows and highs through
+        auto level = [&] (double hz)
+        {
+            auto out = run (0.3f, 0.0f, FilterType::notch, 0.0f, [&] (int i) { return 0.05f * (float) std::sin (2 * M_PI * hz * i / (sr * 2)); }, (int) (sr * 2 * 0.5));
+            return rmsDb (out, (int) (sr * 2 * 0.25));
+        };
+        const double atCut = level (500.0), low = level (60.0), high = level (5000.0);
+        CHECK (atCut < low - 18.0 && atCut < high - 18.0, "wasp's notch: %.1f dB at the cutoff, %.1f below, %.1f above", atCut, low, high);
+        std::printf ("  wasp's notch: %.1f dB at the cutoff, %.1f below, %.1f above\n", atCut, low, high);
     }
     // CPU: a voice's stereo filter at 2x
     {
