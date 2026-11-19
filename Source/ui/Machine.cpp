@@ -2536,6 +2536,42 @@ private:
             text (g, "a " + juce::String (a), r.removeFromTop (20.0f), mono (13.0f, 500), col::sViolet);
             text (g, "b " + juce::String (b), r.removeFromBottom (20.0f), mono (13.0f, 500), col::sViolet, juce::Justification::centredRight);
         }
+        else if (viz == "lecture" && P (p, snd::playMode) > 0.5f && (int) P (p, snd::elEngine) == 1)
+        {
+            // (0.4.13) SPECTRAL: long frames overlapping by half (SMEAR their length), the note's harmonics as they
+            // are kept (HARMONICS), a line across when it's frozen
+            const float smear = juce::jlimit (0.0f, 1.0f, (float) (std::log (P (p, snd::elSmear) / 40.0) / std::log (25.0)));
+            const float w = r.getWidth() * (0.18f + 0.32f * smear);
+            const bool frozen = P (p, snd::elFreeze) > 0.5f;
+            juce::Graphics::ScopedSaveState keep (g);
+            g.reduceClipRegion (r.toNearestInt());
+            for (int k = 0; k * w * 0.5f < r.getWidth() + w; ++k)
+            {
+                juce::Path hump;
+                const float x0 = r.getX() + (float) k * w * 0.5f - w * 0.5f;
+                for (int s = 0; s <= 32; ++s)
+                {
+                    const float t = (float) s / 32.0f;
+                    const float y = r.getBottom() - r.getHeight() * 0.55f * std::sin (t * juce::MathConstants<float>::pi);
+                    if (s == 0) hump.startNewSubPath (x0 + t * w, y); else hump.lineTo (x0 + t * w, y);
+                }
+                stroke (hump, col::screenText.withAlpha (k % 2 == 0 ? 0.9f : 0.45f), 2.0f);
+            }
+            const float harm = (float) P (p, snd::elHarm);
+            if (harm > 0.01f)
+                for (int h = 1; h <= 16; ++h)
+                {
+                    const float x = r.getX() + r.getWidth() * (float) h / 17.0f;
+                    g.setColour (col::sViolet.withAlpha (0.35f + 0.6f * harm));
+                    g.fillRect (x - 1.5f, r.getY() + r.getHeight() * (1.0f - 0.9f / std::sqrt ((float) h)), 3.0f, r.getHeight() * 0.9f / std::sqrt ((float) h));
+                }
+            if (frozen)
+            {
+                g.setColour (col::screenText);
+                g.fillRect (r.getX(), r.getY() + r.getHeight() * 0.18f, r.getWidth(), 2.0f);
+                text (g, "FREEZE", r.withHeight (r.getHeight() * 0.16f), mono (13.0f, 600), col::screenText, juce::Justification::centredLeft);
+            }
+        }
         else if (viz == "lecture")
         {
             const bool elastic = P (p, snd::playMode) > 0.5f;
@@ -3921,9 +3957,16 @@ void Machine::buildPages()
     {
         auto& v = pages[samplerMode];
         v.clear();
-        v.push_back ({ "play", "lecture", { { "play", { S (snd::playMode), S (snd::start), S (snd::speed, nullptr, elastic), S (snd::grain, nullptr, elastic),
+        // (0.4.13) STRETCH's second bank: its engine, FREEZE, and the spectral engine's settings
+        auto spectral = [this] { return P (proc, snd::playMode) > 0.5f && (int) P (proc, snd::elEngine) == 1; };
+        auto grains = [this] { return P (proc, snd::playMode) > 0.5f && (int) P (proc, snd::elEngine) != 1; };
+        v.push_back ({ "play", "lecture", { { "play", { S (snd::playMode), S (snd::start), S (snd::speed, nullptr, elastic), S (snd::grain, nullptr, grains),
                                                               S (snd::spray, nullptr, elastic), S (snd::transients, nullptr, [elastic] { return ! elastic(); }),
-                                                              sep (S (snd::reverse)), sep (S (snd::alias)) } } } });
+                                                              sep (S (snd::reverse)), sep (S (snd::alias)) } },
+                                            { "freeze", { disabledUnless (S (snd::elEngine), elastic), disabledUnless (S (snd::elFreeze), elastic),
+                                                          sep (S (snd::elSmear, nullptr, spectral)), S (snd::elTonal, nullptr, spectral),
+                                                          S (snd::elHarm, nullptr, spectral), S (snd::elShimmer, nullptr, spectral),
+                                                          S (snd::elWidth, nullptr, spectral) } } } });
         v.push_back ({ "loop", "loop", { { "loop", { S (snd::loops), sep (S (snd::loopStart)), S (snd::loopSize), S (snd::loopXfade), sep (S (snd::bits)) } } } });
         v.push_back ({ "pitch", "pitch", { { "pitch", { S (snd::tune), S (snd::transpose), S (snd::fine), S (snd::glide), S (snd::bend), sep (S (snd::pmSource)),
                                                             S (snd::pmRatio, nullptr, [this] { const int s = (int) P (proc, snd::pmSource); return s == 1 || s == 2; }),
@@ -4058,6 +4101,17 @@ void Machine::buildPages()
                     if (c.param == id)
                         c.tip = t;
     };
+    // (0.4.13) STRETCH, its second bank
+    {
+        auto& sv = pages[samplerMode];
+        tip (sv, snd::elEngine, "GRAINS : le son relu en grains (GRAIN, SPRAY). SPECTRAL : un instant du son tenu et rejoué sans fin, lisse, comme une nappe ; SPEED le fait avancer, très lentement si tu veux, et FREEZE l'arrête."_fr);
+        tip (sv, snd::elFreeze, "La lecture arrêtée là où elle est : le son tenu tant que la note dure. À moduler, ou à jouer sur une scène."_fr);
+        tip (sv, snd::elSmear, "La longueur de l'instant tenu : court, le son garde son grain ; long, il se fond en nappe."_fr);
+        tip (sv, snd::elTonal, "Les partiels gardés, ce qui est dessous enfoncé : un bruit, une radio deviennent des notes qui brillent."_fr);
+        tip (sv, snd::elHarm, "Le son passé à travers les harmoniques de la note jouée : à fond, il ne reste qu'elles. Un bruit, une voix, une station deviennent des accords."_fr);
+        tip (sv, snd::elShimmer, "L'octave au-dessus ajoutée, puis la douzième : la nappe s'éclaire."_fr);
+        tip (sv, snd::elWidth, "Les deux côtés écartés : à 0, le son au milieu ; à fond, très large, même d'un son mono."_fr);
+    }
     // SPECTRE's, on every mode's effects (and the filter's CUBE)
     for (auto* v : { &pages[synthMode], &pages[drumMode], &pages[samplerMode], &pages[radioMode] })
     {

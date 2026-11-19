@@ -364,6 +364,57 @@ static void testReverseElasticLoops()
     }
 }
 
+// (0.4.13) STRETCH › SPECTRAL: 80 ms of a tone frozen and held for seconds, on its pitch and on the key played; FREEZE
+// holds the grains too
+static void testSpectralStretch()
+{
+    auto bit = instrumentOf (sine (440.0, 0.08));
+    auto setUp = [&] (Player& p)
+    {
+        p.set (snd::engine, (float) snd::sampler);
+        plain (p);
+        p.setInstrument (bit.get());
+        p.set (snd::playMode, 1.0f);
+        p.set (snd::elEngine, 1.0f);
+        p.set (snd::elFreeze, 1.0f);
+        p.set (snd::elSmear, 300.0f);
+        p.set (snd::start, 0.5f);
+    };
+    {
+        Player p;
+        setUp (p);
+        auto out = play (p, 4.0, { { 0.0, 60, 127 } });
+        const double early = rms (out, 48000, 72000), late = rms (out, 168000, 192000);
+        const double at440 = toneLevel (out, 144000, 16384, 440.0), at660 = toneLevel (out, 144000, 16384, 660.0);
+        std::printf ("  spectral: 80 ms held, %.3f at 1 s, %.3f at 3.5 s; 440 Hz %.3f, 660 Hz %.4f\n", early, late, at440, at660);
+        CHECK (early > 0.08 && late > 0.5 * early, "held: %.3f %.3f", early, late);
+        CHECK (at440 > 10.0 * at660, "on its pitch: %.3f vs %.4f", at440, at660);
+        bool finite = true;
+        for (auto x : out) finite = finite && std::isfinite (x);
+        CHECK (finite, "finite");
+    }
+    {
+        Player p;
+        setUp (p);
+        auto out = play (p, 3.0, { { 0.0, 72, 127 } });
+        const double at880 = toneLevel (out, 96000, 16384, 880.0), at440 = toneLevel (out, 96000, 16384, 440.0);
+        CHECK (at880 > 10.0 * at440, "C4 played, an octave up: 880 Hz %.3f, 440 Hz %.4f", at880, at440);
+    }
+    {
+        // HARMONICS on A2 (110 Hz): 440 Hz is its fourth, kept; through GRAINS, FREEZE holds the reading too
+        Player p;
+        setUp (p);
+        p.set (snd::elHarm, 1.0f);
+        auto out = play (p, 3.0, { { 0.0, 60, 127 } });
+        CHECK (rms (out, 96000, 144000) > 0.05, "through the harmonics, still there: %.3f", rms (out, 96000, 144000));
+        Player q;
+        setUp (q);
+        q.set (snd::elEngine, 0.0f);
+        play (q, 1.0, { { 0.0, 60, 127 } });
+        CHECK (std::abs ((double) q.shownPosition.load() - 0.04 * sr) < 200.0, "grains frozen at the start: %.0f", (double) q.shownPosition.load());
+    }
+}
+
 static void testFarPitch()
 {
     // far up, three octaves: a tone that lands in the band comes out whole, one that lands over Nyquist leaves no
@@ -1734,6 +1785,7 @@ int main()
     testOrbite();
     testSub();
     testReverseElasticLoops();
+    testSpectralStretch();
     testFarPitch();
     testScenes();
     testVoices();

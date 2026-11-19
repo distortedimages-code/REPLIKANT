@@ -421,6 +421,7 @@ int main (int argc, char** argv)
         proc.cycleOptions.cc = 74;
         view->setCaptureKind (te::Machine::notesKind);
         as->close();
+        view->showCapture (false);           // (back to the sampler, for its pages)
     }
 
     // the sampler, its pages
@@ -447,6 +448,21 @@ int main (int argc, char** argv)
     shoot ("33-sampler-sub.png");
     set (snd::subOn, 0.0f);
     view->showBank (0);
+    // (0.4.13) STRETCH › SPECTRAL, frozen, through the harmonics
+    set (snd::playMode, 1.0f);
+    set (snd::elEngine, 1.0f);
+    set (snd::elFreeze, 1.0f);
+    set (snd::elSmear, 600.0f);
+    set (snd::elHarm, 0.7f);
+    set (snd::elShimmer, 0.3f);
+    view->showPage (0);
+    view->showBank (1);
+    run (120);
+    shoot ("73-sampler-freeze.png");
+    view->showBank (0);
+    for (int id : { (int) snd::playMode, (int) snd::elEngine, (int) snd::elFreeze, (int) snd::elHarm, (int) snd::elShimmer })
+        set (id, 0.0f);
+    set (snd::elSmear, 250.0f);
     // a mod armed: the encoders show its routes
     proc.player.setRoute (1, snd::cutoff, -0.3f);
     proc.player.setSceneLock (0, snd::cutoff, 300.0f);

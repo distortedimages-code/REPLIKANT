@@ -265,6 +265,13 @@ namespace
         { "lmRelease", "Release",                     K::log,     10, 1000, 120, 1, nullptr, false, "ms" },
         { "lmDrive",   "Drive",                       K::linear,  0, 12, 0, 1, nullptr, false, "dB" },
         { "rdMorph",   "Morph",                       K::linear,  0, 1, 0.5f, 1, nullptr, true, "%" },
+        { "elEngine",  "Engine",                      K::choice,  0, 1, 0, 1, "GRAINS|SPECTRAL", true, "" },
+        { "elFreeze",  "Freeze",                      K::toggle,  0, 1, 0, 1, nullptr, true, "" },
+        { "elSmear",   "Smear",                       K::log,     40, 1000, 250, 1, nullptr, true, "ms" },
+        { "elTonal",   "Tonal",                       K::linear,  0, 1, 0, 1, nullptr, true, "%" },
+        { "elHarm",    "Harmonics",                   K::linear,  0, 1, 0, 1, nullptr, true, "%" },
+        { "elShimmer", "Shimmer",                     K::linear,  0, 1, 0, 1, nullptr, true, "%" },
+        { "elWidth",   "Width",                       K::linear,  0, 1, 0.6f, 1, nullptr, true, "%" },
     };
 
     std::string fmt (const char* f, double v)
@@ -482,6 +489,7 @@ std::string longName (int id)
     if (in (ecTime, ecMix))        return "Echo " + name;
     if (in (cpIn, cpLevel))        return "Comp " + name;
     if (id == rdDensity || id == rdVary || id == rdMorph) return "Radio " + name;
+    if (in (elEngine, elWidth))    return "Stretch " + name;
     if (in (lmOn, lmDrive))        return id == lmOn ? std::string ("Output Limit") : "Limit " + name;
     if (in (rdTake, rdPads))       return "Radio " + name;
     if (in (rdPadTune, rdPadLevel)) return "Radio Pads " + name;

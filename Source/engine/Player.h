@@ -22,6 +22,7 @@
 #include "../dsp/Modulators.h"
 #include "../dsp/Cycles.h"
 #include "../dsp/Orbite.h"
+#include "../dsp/Smear.h"
 
 namespace dsp { class Polyphase; }
 
@@ -250,6 +251,9 @@ private:
         float sinceGrain = 1.0e9f;
         std::array<Grain, maxGrains> grains;
         uint32_t rng = 1;
+        // (0.4.13) the spectral engine: its ring (started at its first frame after the note)
+        dsp::Smear::Voice sm;
+        bool smFresh = true;
         // filter
         dsp::VAFilter filter[2];
         dsp::Oversampler os[2];
@@ -291,6 +295,7 @@ private:
 
     static constexpr int maxVoices = 12;   // 8 playing, and room for those fading out
     std::array<Voice, maxVoices> voices;
+    dsp::Smear smear;                     // (0.4.13) STRETCH › SPECTRAL: the FFTs and tables the voices share
     const Instrument* ins = nullptr;
     std::shared_ptr<const dsp::CycleBank> basics = dsp::CycleBank::basics();
     double sr = 48000.0;

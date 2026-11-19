@@ -5,7 +5,7 @@ if(APPLE)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Universal binary")
 endif()
 
-project(REPLIKANT VERSION 0.4.12 LANGUAGES C CXX)
+project(REPLIKANT VERSION 0.4.13 LANGUAGES C CXX)
 
 # GitHub repository whose releases the plug-in checks for updates (public releases).
 set(RK_UPDATE_REPO "distortedimages-code/REPLIKANT" CACHE STRING "owner/repo checked for updates (empty = no update check)")
@@ -56,6 +56,7 @@ add_library(rk_core STATIC
     Source/dsp/Cycles.cpp
     Source/dsp/Polyphase.cpp
     Source/dsp/Orbite.cpp
+    Source/dsp/Smear.cpp
     # RADIO: the receivers' feed and history, the listening, the takes and their pads; the decoder (minimp3, CC0)
     Source/radio/RadioCore.cpp
     Source/radio/RadioDec.cpp

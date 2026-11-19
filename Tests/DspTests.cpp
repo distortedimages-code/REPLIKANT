@@ -7,6 +7,7 @@
 #include "../Source/dsp/Effects.h"
 #include "../Source/dsp/Modulators.h"
 #include "../Source/dsp/Cycles.h"
+#include "../Source/dsp/Smear.h"
 #include "../Source/engine/Listener.h"
 #include "../Source/core/Analysis.h"
 
@@ -1387,6 +1388,186 @@ static void testLimiter()
     CHECK (diff < 1.0e-6f, "under CEILING: untouched, %d frames late (%.2e)", lat, diff);
 }
 
+//==============================================================================
+// (0.4.13) STRETCH › SPECTRAL: a moment held at a steady level, on the note played, through its harmonics; a sound
+// shorter than the window held as long as wanted; the sides drawn apart
+static void testSmear()
+{
+    const double sr = 48000.0;
+    Smear sm;
+    sm.prepare (sr);
+    auto goertzel = [sr] (const float* x, int n, double hz)
+    {
+        const double w = 2.0 * std::cos (6.283185307179586 * hz / sr);
+        double s1 = 0, s2 = 0;
+        for (int i = 0; i < n; ++i)
+        {
+            const double s0 = (double) x[i] + w * s1 - s2;
+            s2 = s1;
+            s1 = s0;
+        }
+        return std::sqrt (std::max (0.0, s1 * s1 + s2 * s2 - w * s1 * s2)) * 2.0 / n;
+    };
+    auto run = [&] (const std::vector<float>& l, const std::vector<float>* r, Smear::Shape sh, double seconds, double centre,
+                    std::vector<float>& outL, std::vector<float>& outR, bool loop = false)
+    {
+        Smear::Voice v;
+        sm.allocate (v);
+        v.start (12345u);
+        Smear::Source src;
+        src.l = l.data();
+        src.r = r != nullptr ? r->data() : nullptr;
+        src.len = (int) l.size();
+        src.loop = loop;
+        src.ls = 0;
+        src.le = (int) l.size();
+        src.centre = centre;
+        const int n = (int) (seconds * sr);
+        outL.assign ((size_t) n, 0.0f);
+        outR.assign ((size_t) n, 0.0f);
+        for (int i = 0; i < n; ++i)
+        {
+            if (v.hopLeft <= 0)
+                sm.frame (v, src, sh);
+            v.read (outL[(size_t) i], outR[(size_t) i]);
+        }
+    };
+    auto rmsOf = [] (const std::vector<float>& x, size_t a, size_t b)
+    {
+        double s = 0;
+        for (size_t i = a; i < b; ++i) s += (double) x[i] * x[i];
+        return std::sqrt (s / (double) (b - a));
+    };
+    // a 440 Hz tone (0.5), held: its level kept (±1.5 dB over every 50 ms once going), still 440 Hz; a note an octave
+    // up: 880 Hz
+    std::vector<float> tone ((size_t) sr * 2);
+    for (size_t i = 0; i < tone.size(); ++i) tone[i] = 0.5f * (float) std::sin (6.283185307179586 * 440.0 * (double) i / sr);
+    std::vector<float> L, R;
+    Smear::Shape sh;
+    sh.seconds = 0.25f;
+    sh.width = 0.0f;
+    run (tone, nullptr, sh, 4.0, sr, L, R);
+    double lo = 1e9, hi = 0;
+    bool finite = true;
+    // (a tone held beats a little: its few bins, their phases drawn; over half a second, its level)
+    for (size_t a = (size_t) (0.5 * sr); a + 24000 <= L.size(); a += 24000)
+    {
+        const double v = rmsOf (L, a, a + 24000);
+        lo = std::min (lo, v);
+        hi = std::max (hi, v);
+    }
+    for (auto x : L) finite = finite && std::isfinite (x);
+    const double toneRms = 0.5 / std::sqrt (2.0);
+    std::printf ("  smear: a tone held, rms %.3f .. %.3f over half seconds (it was %.3f)\n", lo, hi, toneRms);
+    CHECK (finite && lo > toneRms * 0.5 && hi < toneRms * 1.6, "a tone held: %.3f .. %.3f", lo, hi);
+    const int an = 16384;
+    const float* seg = L.data() + (size_t) (2.0 * sr);
+    const double at440 = goertzel (seg, an, 440.0), at880 = goertzel (seg, an, 880.0), at500 = goertzel (seg, an, 500.0);
+    CHECK (at440 > 10.0 * at880 && at440 > 10.0 * at500, "still 440 Hz: %.3f (880: %.3f, 500: %.3f)", at440, at880, at500);
+    sh.step = 2.0;
+    run (tone, nullptr, sh, 3.0, sr, L, R);
+    seg = L.data() + (size_t) (2.0 * sr);
+    const double up880 = goertzel (seg, an, 880.0), up440 = goertzel (seg, an, 440.0);
+    CHECK (up880 > 10.0 * up440, "an octave up: 880 Hz %.3f (440: %.3f)", up880, up440);
+    sh.step = 1.0;
+
+    // white noise through the harmonics of A3: most of what comes out on them
+    std::vector<float> noise ((size_t) sr * 2);
+    std::mt19937 rng (7);
+    std::uniform_real_distribution<float> u (-0.5f, 0.5f);
+    for (auto& x : noise) x = u (rng);
+    sh.noteHz = 220.0f;
+    sh.harmonics = 1.0f;
+    run (noise, nullptr, sh, 3.0, sr, L, R);
+    seg = L.data() + (size_t) (1.5 * sr);
+    double on = 0, off = 0;
+    for (int h = 1; h <= 8; ++h)
+    {
+        on += goertzel (seg, an, 220.0 * h);
+        off += goertzel (seg, an, 220.0 * (h + 0.5));
+    }
+    std::printf ("  smear: noise through A3's harmonics, on them %.4f, between %.4f\n", on, off);
+    {
+        // (and plain noise held: steady, every 50 ms within 1.5 dB)
+        Smear::Shape plain;
+        plain.seconds = 0.25f;
+        std::vector<float> nl, nr;
+        run (noise, nullptr, plain, 4.0, sr, nl, nr);
+        double nlo = 1e9, nhi = 0;
+        for (size_t a = (size_t) (0.5 * sr); a + 2400 <= nl.size(); a += 2400)
+        {
+            const double v = rmsOf (nl, a, a + 2400);
+            nlo = std::min (nlo, v);
+            nhi = std::max (nhi, v);
+        }
+        std::printf ("  smear: noise held, rms %.3f .. %.3f every 50 ms (it was %.3f)\n", nlo, nhi, 0.5 / std::sqrt (3.0));
+        CHECK (20.0 * std::log10 (nhi / nlo) < 3.0 && nlo > 0.6 * 0.5 / std::sqrt (3.0) && nhi < 1.5 * 0.5 / std::sqrt (3.0), "steady: %.3f .. %.3f", nlo, nhi);
+    }
+    CHECK (on > 8.0 * off, "harmonics: %.4f vs %.4f", on, off);
+    const double noiseRms = rmsOf (L, (size_t) sr, L.size());
+    CHECK (noiseRms > 0.5 * 0.5 / std::sqrt (3.0) && noiseRms < 1.6 * 0.5 / std::sqrt (3.0), "its loudness kept: %.3f", noiseRms);
+    sh.harmonics = 0.0f;
+
+    // 60 ms of sound, no loop, a 500 ms window: held for seconds at a steady level
+    std::vector<float> bit ((size_t) (0.06 * sr));
+    for (size_t i = 0; i < bit.size(); ++i) bit[i] = 0.5f * (float) std::sin (6.283185307179586 * 330.0 * (double) i / sr);
+    sh.seconds = 0.5f;
+    run (bit, nullptr, sh, 6.0, 0.03 * sr, L, R);
+    const double early = rmsOf (L, (size_t) (0.8 * sr), (size_t) (1.2 * sr)), late = rmsOf (L, (size_t) (5.4 * sr), (size_t) (5.9 * sr));
+    std::printf ("  smear: 60 ms held, %.3f at 1 s, %.3f at 5.5 s\n", early, late);
+    CHECK (early > 0.05 && late > 0.7 * early && late < 1.4 * early, "a bit held: %.3f %.3f", early, late);
+
+    // WIDTH: a mono sound, the sides alike at 0, drawn apart at full
+    auto corr = [] (const std::vector<float>& a, const std::vector<float>& b, size_t from)
+    {
+        double ab = 0, aa = 0, bb = 0;
+        for (size_t i = from; i < a.size(); ++i) { ab += (double) a[i] * b[i]; aa += (double) a[i] * a[i]; bb += (double) b[i] * b[i]; }
+        return ab / std::sqrt (aa * bb + 1e-30);
+    };
+    sh.seconds = 0.25f;
+    sh.width = 0.0f;
+    run (noise, nullptr, sh, 2.0, sr, L, R);
+    const double c0 = corr (L, R, (size_t) (0.5 * sr));
+    sh.width = 1.0f;
+    run (noise, nullptr, sh, 2.0, sr, L, R);
+    const double c1 = corr (L, R, (size_t) (0.5 * sr));
+    std::printf ("  smear: width 0 correlation %.3f, width 1 %.3f\n", c0, c1);
+    CHECK (c0 > 0.99 && std::abs (c1) < 0.3, "width: %.3f %.3f", c0, c1);
+
+    // TONAL and SHIMMER at full, every setting at its end, a loud sound: bounded
+    sh.tonal = 1.0f;
+    sh.shimmer = 1.0f;
+    sh.harmonics = 1.0f;
+    sh.noteHz = 55.0f;
+    sh.seconds = 1.0f;
+    run (noise, &tone, sh, 4.0, 0.5 * sr, L, R, true);
+    float top = 0;
+    finite = true;
+    for (size_t i = 0; i < L.size(); ++i) { top = std::max (top, std::max (std::abs (L[i]), std::abs (R[i]))); finite = finite && std::isfinite (L[i]) && std::isfinite (R[i]); }
+    CHECK (finite && top < 4.0f, "all at the end: peak %.2f", top);
+    // the cost: a voice at its longest window, its share of real time
+    {
+        Smear::Voice v;
+        sm.allocate (v);
+        v.start (3u);
+        Smear::Source src;
+        src.l = noise.data();
+        src.r = tone.data();
+        src.len = (int) noise.size();
+        src.centre = sr;
+        const double t0 = now();
+        float a, b;
+        const int n = (int) (20.0 * sr);
+        for (int i = 0; i < n; ++i)
+        {
+            if (v.hopLeft <= 0)
+                sm.frame (v, src, sh);
+            v.read (a, b);
+        }
+        std::printf ("  smear: one voice, 1 s window, all on: %.2f %% of real time\n", (now() - t0) / 20.0 * 100.0);
+    }
+}
+
 int main()
 {
     testOversampler();
@@ -1402,6 +1583,7 @@ int main()
     testListen();
     testLimiter();
     testModulators();
+    testSmear();
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

@@ -95,6 +95,9 @@ namespace snd
         lmOn, lmCeiling, lmRelease, lmDrive,
         // (0.4.12) RADIO: a station left for another, held and crossfaded (in place of the tuning noise)
         rdMorph,
+        // (0.4.13) STRETCH: its engine (GRAINS, SPECTRAL), FREEZE (the reading held, both engines), and the spectral
+        // engine's SMEAR (the window), TONAL, HARMONICS, SHIMMER, WIDTH (see dsp/Smear.h)
+        elEngine, elFreeze, elSmear, elTonal, elHarm, elShimmer, elWidth,
         count
     };
 

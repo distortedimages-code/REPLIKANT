@@ -988,6 +988,7 @@ void ReplikantProcessor::injectResample (rk::Channels audio)
             setSoundParam (id, 0.0f);
     setSoundParam (snd::engine, (float) snd::sampler);
     setSoundParam (snd::playMode, 0.0f);
+    setSoundParam (snd::elFreeze, 0.0f);
     setSoundParam (snd::loops, 1.0f);
     setSoundParam (snd::start, 0.0f);
     setSoundParam (snd::speed, 1.0f);
@@ -2201,6 +2202,7 @@ bool ReplikantProcessor::radioToSampler (int pad, juce::String& why)
     auto ins = instrumentio::soundInstrument (std::move (audio), A.sampleRate, name, 60, 0.0f, false, loop);
     setSoundParam (snd::engine, (float) snd::sampler);
     setSoundParam (snd::playMode, 0.0f);
+    setSoundParam (snd::elFreeze, 0.0f);
     setSoundParam (snd::loops, pad < 0 ? 1.0f : 0.0f);
     setSoundParam (snd::start, 0.0f);
     setSoundParam (snd::speed, 1.0f);

@@ -1,3 +1,12 @@
+**REPLIK8 0.4.13** : un instant du son tenu sans fin, en nappe, et joué sur le clavier.
+
+- **STRETCH › SPECTRAL** : dans le SAMPLER, page PLAY, deuxième banque (appuie à nouveau sur PLAY). ENGINE passe de GRAINS à SPECTRAL : le son n'est plus relu en grains. Un instant du son est analysé, ses phases sont tirées à nouveau au hasard, et il est rejoué sans fin, lisse, sans boucle audible. SPEED le fait avancer (à 0,05, vingt fois plus lent), SPRAY le brouille
+- **FREEZE** : la lecture s'arrête là où elle est, le son tenu tant que la note dure. Ça marche aussi en GRAINS. À moduler, ou à mettre sur une scène pour le déclencher en jouant
+- **Des réglages musicaux** : SMEAR, la longueur de l'instant tenu (de 40 ms, qui garde le grain, à 1 s, qui fond tout en nappe). TONAL fait ressortir les partiels et enfonce ce qui est dessous. HARMONICS fait passer le son par les harmoniques de la note jouée : à fond, il ne reste qu'elles, et un bruit, une voix ou une station deviennent des accords. SHIMMER ajoute l'octave au-dessus puis la douzième. WIDTH écarte les deux côtés, même d'un son mono. Le niveau reste le même quoi que tu tournes
+- **Sur le clavier** : chaque note transpose l'instant tenu sans changer sa durée. Les accords marchent
+- **Une nappe dans un bout de radio** : prends un pad de la radio, envoie-le au SAMPLER, passe en STRETCH, ENGINE sur SPECTRAL, FREEZE. Même 50 ms suffisent : ce qui manque à la fenêtre est compensé
+- L'écran de la page PLAY montre les fenêtres qui se chevauchent, les harmoniques gardées et FREEZE
+
 **REPLIK8 0.4.12** : changer de station sans siffler, un gros potard d'accord, le DRUM en stéréo.
 
 - **Plus de sifflements ni de souffle à l'accord** : quand un récepteur change de fréquence, de station ou que tu passes à un autre récepteur, la station quittée est figée (sa dernière demi-seconde, en grains qui se chevauchent), elle s'assombrit et s'efface pendant que la suivante arrive par-dessus. **MORPH** (page LISTEN, à la place de STATIC) règle ce passage : à 0, un simple fondu de 30 ms ; à 50 %, la station tenue environ une seconde ; à fond, une longue traîne de plusieurs secondes. Les réglages STATIC et WHISTLE de l'air sont retirés (CRACKLE reste)

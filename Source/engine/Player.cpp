@@ -131,6 +131,9 @@ void Player::prepare (double sampleRate, int maxBlock)
     space.prepare (sr);
     echo.prepare (sr);
     comp.prepare (sr);
+    smear.prepare (sr);
+    for (auto& v : voices)
+        smear.allocate (v.sm);
     for (auto& w : wet)
         w = 0.0f;
     volumeGain = juce::Decibels::decibelsToGain (get (snd::volume));
@@ -482,6 +485,7 @@ void Player::startVoice (int note, int velocity, float fromPitch, const Chunk& c
     }
     v.sinceGrain = 1.0e9f;
     v.fresh = true;
+    v.smFresh = true;
     for (auto& g : v.grains)
         g.on = false;
     v.rng = 0x9E3779B9u ^ (uint32_t) (v.age * 2654435761u);
@@ -915,7 +919,9 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
     // (Hann windows overlapping by 1/k sum to k / 2)
     const int overlap = c.v[snd::spray] < 0.3f ? 2 : 4;
     const double hop = grainLen / (double) overlap;
-    const double speed = (double) c.v[snd::speed] * v.rateScale * (back ? -1.0 : 1.0);
+    // (0.4.13) FREEZE: the reading held where it is
+    const double speed = c.v[snd::elFreeze] > 0.5f ? 0.0 : (double) c.v[snd::speed] * v.rateScale * (back ? -1.0 : 1.0);
+    const bool spectral = c.elastic && (int) c.v[snd::elEngine] == 1;
     const double startDelta = (double) (c.v[snd::start] - v.startAtOn) * (double) len * (back ? -1.0 : 1.0);
     const double sprayFrames = (double) c.v[snd::spray] * 0.25 * r.s->sampleRate;
     auto place = [&] (double p)
@@ -962,6 +968,24 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
     const double playedNow = (double) v.pitch + (double) (int) c.v[snd::transpose] + (double) c.v[snd::fine] * 0.01 + (double) c.bendSemis
                            + (double) c.v[snd::tune];
     const OrbitePlan op = orbNeeded ? orbitePlan (c.v, playedNow, sr) : OrbitePlan {};
+    // (0.4.13) STRETCH › SPECTRAL: what its frames are taken from, and what is done to them
+    dsp::Smear::Source smSrc;
+    dsp::Smear::Shape smShape;
+    if (spectral)
+    {
+        smSrc.l = r.s->audio[0].data();
+        smSrc.r = r.stereo && r.s->audio.size() > 1 ? r.s->audio[1].data() : nullptr;
+        smSrc.len = len;
+        smSrc.loop = r.loop;
+        smSrc.ls = r.ls;
+        smSrc.le = r.le;
+        smShape.seconds = c.v[snd::elSmear] * 0.001f;
+        smShape.noteHz = (float) rk::noteHz (playedNow);
+        smShape.tonal = c.v[snd::elTonal];
+        smShape.harmonics = c.v[snd::elHarm];
+        smShape.shimmer = c.v[snd::elShimmer];
+        smShape.width = c.v[snd::elWidth];
+    }
     float orbNow = 0.0f;
     // the SUB: its frequency (the note one or two octaves down, back up an octave while under 25 Hz), the crossover
     const bool subOn = c.v[snd::subOn] > 0.5f || subGate > 0.0f;
@@ -1065,7 +1089,30 @@ void Player::renderVoice (Voice& v, float* L, float* R, int n, const Chunk& c)
         }
 
         float xl = 0.0f, xr = 0.0f;
-        if (c.elastic)
+        if (spectral)
+        {
+            // a frame of the moment the reading is at, each half window; between them, the ring read
+            if (v.smFresh)
+            {
+                v.sm.start (v.rng);
+                v.smFresh = false;
+            }
+            if (v.sm.hopLeft <= 0)
+            {
+                double p = v.scan + startDelta;
+                if (sprayFrames > 0.0)
+                    p += (double) (uniform (v.rng) * 2.0f - 1.0f) * sprayFrames;
+                smSrc.centre = place (p);
+                smShape.step = stepNow;
+                smear.frame (v.sm, smSrc, smShape);
+            }
+            v.sm.read (xl, xr);
+            v.scan = place (v.scan + speed);
+            if (c.oneShot && ! r.loop && ((speed > 0.0 && v.scan >= (double) (len - 1)) || (speed < 0.0 && v.scan <= 0.0))
+                && v.amp.stage != Env::release)
+                v.amp.off(), v.flt.off();
+        }
+        else if (c.elastic)
         {
             v.sinceGrain += 1.0f;
             if (v.sinceGrain >= (float) hop)
