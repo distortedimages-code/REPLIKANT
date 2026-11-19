@@ -15,6 +15,7 @@
 #pragma once
 
 #include "Space.h"
+#include "Echo.h"
 #include <memory>
 
 #include <array>

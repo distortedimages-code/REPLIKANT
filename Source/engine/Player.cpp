@@ -129,6 +129,7 @@ void Player::prepare (double sampleRate, int maxBlock)
     chorus.prepare (sr);
     crush.prepare (sr);
     space.prepare (sr);
+    echo.prepare (sr);
     for (auto& w : wet)
         w = 0.0f;
     volumeGain = juce::Decibels::decibelsToGain (get (snd::volume));
@@ -161,6 +162,7 @@ void Player::resetEffects()
     chorus.reset();
     crush.reset();
     space.reset();
+    echo.reset();
 }
 
 void Player::setInstrument (const Instrument* i)
@@ -1675,7 +1677,7 @@ void Player::modulate (int offset, int n, const Transport& t, Chunk& c, bool atR
     const bool neutralNow = neutral.load (std::memory_order_relaxed);
     if (neutralNow)
         for (int id : { (int) snd::fModel, (int) snd::dModel, (int) snd::spOn, (int) snd::piOn, (int) snd::chOn, (int) snd::crOn,
-                        (int) snd::rvOn, (int) snd::wtf })
+                        (int) snd::rvOn, (int) snd::ecOn, (int) snd::wtf })
             c.v[id] = 0.0f;
     if (wasNeutral && ! neutralNow)
         glidePrimed = false;        // let go: the settings as they are now, not glided to from before
@@ -1826,7 +1828,7 @@ void Player::runChain (float* L, float* R, int n, const Chunk& c)
         }
     };
 
-    // the stages, in the order chosen (0 drive, the model kept while it fades out; 1..5 the effects)
+    // the stages, in the order chosen (0 drive, the model kept while it fades out; 1..6 the effects)
     int code = orderNow;
     for (int pos = 0; pos < numStages; ++pos, code /= numStages)
     {
@@ -1930,6 +1932,32 @@ void Player::runChain (float* L, float* R, int n, const Chunk& c)
                 s.dry = c.v[snd::rvDry];
                 space.set (s);
                 stage (5, c.v[snd::rvOn] > 0.5f, [this] (float* l, float* r, int m) { space.process (l, r, m); });
+            }
+                break;
+            case 6:
+            {
+                // ECHO: TIME, or the division at the tempo (at most 5 s)
+                static const double beats[] = { 0.0, 0.25, 1.0 / 3.0, 0.5, 0.75, 2.0 / 3.0, 1.0, 1.5, 2.0, 3.0, 4.0 };
+                const int sync = juce::jlimit (0, 10, (int) c.v[snd::ecSync]);
+                dsp::EchoSettings s;
+                s.time = sync == 0 ? c.v[snd::ecTime] * 0.001f
+                                   : (float) juce::jmin (5.0, beats[sync] * 60.0 / juce::jmax (20.0, c.bpm));
+                s.heads = (int) c.v[snd::ecHeads];
+                s.spread = c.v[snd::ecSpread];
+                s.feedback = c.v[snd::ecFeedback];
+                s.tone = c.v[snd::ecTone];
+                s.direction = (int) c.v[snd::ecDir];
+                s.motion = (int) c.v[snd::ecMotion];
+                s.sweep = c.v[snd::ecSweep];
+                s.rate = c.v[snd::ecRate];
+                s.width = c.v[snd::ecWidth];
+                s.wear = c.v[snd::ecWear];
+                s.mix = c.v[snd::ecMix];
+                echo.set (s);
+                const bool on = c.v[snd::ecOn] > 0.5f;
+                if (on && wet[6] <= 0.0f)
+                    echo.reset();            // (switched on: no echo of what played before)
+                stage (6, on, [this] (float* l, float* r, int m) { echo.process (l, r, m); });
             }
                 break;
             default:

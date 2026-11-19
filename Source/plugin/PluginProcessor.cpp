@@ -824,7 +824,7 @@ void ReplikantProcessor::injectResample (rk::Channels audio)
     // the sound, to play it as it was heard (the Player holds the chain neutral until these are in)
     if (resampleOptions.resetFx)
         for (int id : { (int) snd::fModel, (int) snd::dModel, (int) snd::spOn, (int) snd::piOn, (int) snd::chOn, (int) snd::crOn,
-                        (int) snd::rvOn, (int) snd::wtf })
+                        (int) snd::rvOn, (int) snd::ecOn, (int) snd::wtf })
             setSoundParam (id, 0.0f);
     setSoundParam (snd::engine, (float) snd::sampler);
     setSoundParam (snd::playMode, 0.0f);
@@ -1325,7 +1325,7 @@ juce::var ReplikantProcessor::soundToVar() const
 // the chain's order, by the stages' names (an unknown or missing order: the usual one)
 juce::var ReplikantProcessor::fxOrderToVar() const
 {
-    static const char* names[Player::numStages] = { "drive", "spectre", "pitch", "chorus", "crush", "espace" };
+    static const char* names[Player::numStages] = { "drive", "spectre", "pitch", "chorus", "crush", "espace", "echo" };
     juce::Array<juce::var> a;
     for (int st : player.fxOrder())
         a.add (juce::String (names[st]));
@@ -1334,13 +1334,25 @@ juce::var ReplikantProcessor::fxOrderToVar() const
 
 void ReplikantProcessor::fxOrderFromVar (const juce::var& v)
 {
-    static const char* names[Player::numStages] = { "drive", "spectre", "pitch", "chorus", "crush", "espace" };
-    std::array<int, Player::numStages> order { 0, 1, 2, 3, 4, 5 };
-    if (v.isArray() && v.size() == Player::numStages)
-        for (int p = 0; p < Player::numStages; ++p)
+    // the stages by name; one missing (ECHO, in an order kept before 0.4.5) goes in before ESPACE
+    static const char* names[Player::numStages] = { "drive", "spectre", "pitch", "chorus", "crush", "espace", "echo" };
+    std::vector<int> listed;
+    if (v.isArray())
+        for (int p = 0; p < v.size(); ++p)
             for (int st = 0; st < Player::numStages; ++st)
-                if (v[p].toString() == names[st])
-                    order[(size_t) p] = st;
+                if (v[p].toString() == names[st] && std::find (listed.begin(), listed.end(), st) == listed.end())
+                    listed.push_back (st);
+    if (listed.empty())
+        listed = { 0, 1, 2, 3, 4, 6, 5 };
+    for (int st = 0; st < Player::numStages; ++st)
+        if (std::find (listed.begin(), listed.end(), st) == listed.end())
+        {
+            const auto space = std::find (listed.begin(), listed.end(), 5);
+            listed.insert (st == 6 ? space : listed.end(), st);
+        }
+    std::array<int, Player::numStages> order {};
+    for (int p = 0; p < Player::numStages; ++p)
+        order[(size_t) p] = listed[(size_t) p];
     player.setFxOrder (order);      // (not a permutation: ignored, the order stays)
 }
 

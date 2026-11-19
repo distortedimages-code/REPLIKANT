@@ -49,6 +49,7 @@ add_library(rk_core STATIC
     Source/dsp/Drive.cpp
     Source/dsp/Modulators.cpp
     Source/dsp/Space.cpp
+    Source/dsp/Echo.cpp
     Source/dsp/Effects.cpp
     Source/dsp/Cycles.cpp
     Source/dsp/Polyphase.cpp

@@ -922,6 +922,150 @@ static void testEffectLevels()
     CHECK (std::abs (worst) < 1.5, "an effect moves the level by %.2f dB (%s)", worst, worstName);
 }
 
+// ECHO (0.4.5): its heads where SPREAD puts them, reversed heads, SCAN's intervals, bounded past 100 % of feedback,
+// the dry untouched, TIME turned without a click
+static void testEcho()
+{
+    const double sr = 48000.0;
+    auto run = [sr] (EchoSettings st, std::vector<float>& l, std::vector<float>& r)
+    {
+        Echo e;
+        e.prepare (sr);
+        e.set (st);
+        e.reset();
+        for (size_t at = 0; at < l.size(); at += 32)
+        {
+            const int n = (int) std::min<size_t> (32, l.size() - at);
+            e.process (l.data() + at, r.data() + at, n);
+        }
+    };
+    // an impulse, four heads over 100 ms: echoes at 25, 50, 75 and 100 ms
+    {
+        EchoSettings st;
+        st.time = 0.1f; st.heads = 4; st.spread = 1.0f; st.feedback = 0.0f; st.mix = 1.0f; st.wear = 0.0f; st.width = 0.0f;
+        std::vector<float> l ((size_t) sr / 2, 0.0f), r = l;
+        l[100] = r[100] = 1.0f;
+        run (st, l, r);
+        bool all = true;
+        for (int k = 1; k <= 4; ++k)
+        {
+            const size_t at = 100 + (size_t) (0.025 * sr * k);
+            float peak = 0.0f;
+            for (size_t i = at - 3; i <= at + 3; ++i)
+                peak = std::max (peak, std::abs (l[i]));
+            all = all && peak > 0.35f;
+            if (peak <= 0.35f)
+                std::printf ("  head %d: %.3f\n", k, peak);
+        }
+        float stray = 0.0f;
+        for (size_t i = 200; i < (size_t) (0.024 * sr); ++i)
+            stray = std::max (stray, std::abs (l[i]));
+        CHECK (all && stray < 0.01f, "four heads at 25, 50, 75, 100 ms (stray %.4f)", stray);
+        CHECK (std::abs (l[100] - 1.0f) < 1.0e-6f, "the dry untouched: %.6f", l[100]);
+    }
+    // SCAN, one head (it goes up), a full sweep: an octave above
+    {
+        EchoSettings st;
+        st.time = 0.3f; st.heads = 1; st.feedback = 0.0f; st.mix = 1.0f; st.wear = 0.0f; st.motion = 2; st.sweep = 1.0f;
+        std::vector<float> l ((size_t) sr * 2), r;
+        for (size_t i = 0; i < l.size(); ++i)
+            l[i] = 0.3f * (float) std::sin (2.0 * 3.14159265358979 * 300.0 * (double) i / sr);
+        r = l;
+        auto dry = l;
+        run (st, l, r);
+        std::vector<float> wet (l.size());
+        for (size_t i = 0; i < l.size(); ++i)
+            wet[i] = l[i] - dry[i];
+        auto tone = [&wet, sr] (double hz)
+        {
+            double re = 0, im = 0;
+            for (size_t i = (size_t) sr; i < wet.size(); ++i)
+            {
+                re += wet[i] * std::cos (2.0 * 3.14159265358979 * hz * (double) i / sr);
+                im += wet[i] * std::sin (2.0 * 3.14159265358979 * hz * (double) i / sr);
+            }
+            return std::sqrt (re * re + im * im);
+        };
+        CHECK (tone (600.0) > 10.0 * tone (300.0), "SCAN an octave up: 600 Hz %.1f against 300 Hz %.1f", tone (600.0), tone (300.0));
+    }
+    // reversed heads: the echo of a rising ramp comes back falling
+    {
+        EchoSettings st;
+        st.time = 0.4f; st.heads = 1; st.feedback = 0.0f; st.mix = 1.0f; st.wear = 0.0f; st.direction = 1;
+        std::vector<float> l ((size_t) sr * 2, 0.0f), r;
+        for (size_t i = 0; i < (size_t) (sr * 1.5); ++i)
+            l[i] = (float) ((double) (i % 4800) / 4800.0) * 0.5f;    // saws rising every 100 ms
+        r = l;
+        auto dry = l;
+        run (st, l, r);
+        int falling = 0, rising = 0;
+        for (size_t i = (size_t) sr; i < (size_t) (sr * 1.4); ++i)
+        {
+            const float d = (l[i] - dry[i]) - (l[i - 1] - dry[i - 1]);
+            if (d < -1.0e-5f && d > -0.01f) ++falling;
+            if (d > 1.0e-5f && d < 0.01f) ++rising;
+        }
+        CHECK (falling > 3 * rising, "REV: the ramps come back falling (%d falling, %d rising)", falling, rising);
+    }
+    // 110 % of feedback, noise for 10 s, all of it moving: held by the tape
+    {
+        EchoSettings st;
+        st.time = 0.15f; st.heads = 4; st.feedback = 1.1f; st.mix = 1.0f; st.wear = 0.5f; st.motion = 1; st.sweep = 1.0f; st.rate = 3.0f; st.direction = 2;
+        std::vector<float> l ((size_t) sr * 10), r;
+        std::mt19937 rng (3);
+        std::uniform_real_distribution<float> u (-0.5f, 0.5f);
+        for (auto& x : l) x = u (rng);
+        r = l;
+        run (st, l, r);
+        float peak = 0.0f;
+        bool finite = true;
+        for (size_t i = 0; i < l.size(); ++i)
+        {
+            finite = finite && std::isfinite (l[i]) && std::isfinite (r[i]);
+            peak = std::max (peak, std::max (std::abs (l[i]), std::abs (r[i])));
+        }
+        CHECK (finite && peak < 4.0f, "110 %% feedback held: peak %.2f", peak);
+    }
+    // TIME turned while a sine plays: the echo glides (no step bigger than the sine's own)
+    {
+        Echo e;
+        e.prepare (sr);
+        EchoSettings st;
+        st.time = 0.2f; st.heads = 2; st.feedback = 0.5f; st.mix = 0.8f; st.wear = 0.0f;
+        e.set (st);
+        std::vector<float> l ((size_t) sr * 3), r;
+        for (size_t i = 0; i < l.size(); ++i)
+            l[i] = 0.3f * (float) std::sin (2.0 * 3.14159265358979 * 220.0 * (double) i / sr);
+        r = l;
+        float worst = 0.0f;
+        for (size_t at = 0; at < l.size(); at += 32)
+        {
+            if (at == (size_t) sr) { st.time = 0.05f; e.set (st); }
+            if (at == (size_t) (sr * 2)) { st.heads = 4; st.motion = 2; st.sweep = 0.5f; st.direction = 2; e.set (st); }
+            e.process (l.data() + at, r.data() + at, 32);
+        }
+        for (size_t i = (size_t) (sr * 0.5); i < l.size(); ++i)
+            worst = std::max (worst, std::abs (l[i] - l[i - 1]));
+        // (the sine moves at most 0.3 * 2π 220 / 48000 = 0.0086 a sample; its echoes, three times that)
+        CHECK (worst < 0.06f, "TIME and the heads changed without a click: worst step %.4f", worst);
+    }
+    // the cost: four heads scanning, reversed
+    {
+        Echo e;
+        e.prepare (sr);
+        EchoSettings st;
+        st.heads = 4; st.motion = 2; st.direction = 2; st.feedback = 0.6f;
+        e.set (st);
+        std::vector<float> l (32, 0.1f), r (32, 0.1f);
+        const double t0 = now();
+        for (int b = 0; b < 15000; ++b)
+            e.process (l.data(), r.data(), 32);
+        const double cpu = (now() - t0) / (15000.0 * 32.0 / sr) * 100.0;
+        std::printf ("  ECHO, four heads scanning: %.2f %% of a core\n", cpu);
+        CHECK (cpu < 8.0, "ECHO's cost %.2f %%", cpu);
+    }
+}
+
 int main()
 {
     testOversampler();
@@ -932,6 +1076,7 @@ int main()
     testCube();
     testNoClicks();
     testEffectLevels();
+    testEcho();
     testModulators();
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;

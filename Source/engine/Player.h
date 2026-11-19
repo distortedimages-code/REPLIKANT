@@ -87,9 +87,9 @@ public:
     void clearScene (int scene);
 
     //========================================================================== the chain's order
-    // the six stages (0 drive, 1 SPECTRE, 2 PITCH, 3 CHORUS, 4 CRUSH, 5 ESPACE) in the order they run; a new order
-    // is taken through a 10 ms dip of the chain's output (no click)
-    static constexpr int numStages = 6;
+    // the seven stages (0 drive, 1 SPECTRE, 2 PITCH, 3 CHORUS, 4 CRUSH, 5 ESPACE, 6 ECHO) in the order they run; a
+    // new order is taken through a 10 ms dip of the chain's output (no click)
+    static constexpr int numStages = 7;
     void setFxOrder (const std::array<int, numStages>&);      // ignored unless a permutation
     std::array<int, numStages> fxOrder() const;
 
@@ -350,8 +350,12 @@ private:
     dsp::Chorus chorus;
     dsp::Crush crush;
     dsp::Space space;
-    float wet[6] {};                     // drive and the five effects, faded in and out
-    static constexpr int defaultOrder = 0 + 1 * 6 + 2 * 36 + 3 * 216 + 4 * 1296 + 5 * 7776;   // stage at position p: digit p (base 6)
+public:
+    dsp::Echo echo;                      // (the screen reads its heads)
+private:
+    float wet[numStages] {};             // drive and the six effects, faded in and out
+    // the stage at position p: digit p (base 7); ECHO before ESPACE
+    static constexpr int defaultOrder = 0 + 1 * 7 + 2 * 49 + 3 * 343 + 4 * 2401 + 6 * 16807 + 5 * 117649;
     std::atomic<int> orderWanted { defaultOrder };
     int orderNow = defaultOrder, orderPhase = 0;    // 1: fading out to change, 2: fading back in
     float orderGain = 1.0f;

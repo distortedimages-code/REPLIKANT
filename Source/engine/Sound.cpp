@@ -234,6 +234,20 @@ namespace
         { "fTrim",     "Trim",                        K::linear,  -24, 12, 0, 1, nullptr, true, "dB" },
         { "rvDry",     "Dry",                         K::linear,  0, 1, 1, 1, nullptr, true, "%" },
         { "wtfLen",    "WTF?! steps",                 K::integer, 2, 16, 8, 1, nullptr, false, "" },
+        { "ecOn",      "Echo",                        K::toggle,  0, 1, 0, 1, nullptr, false, "" },
+        { "ecTime",    "Time",                        K::log,     20, 2000, 375, 1, nullptr, true, "ms" },
+        { "ecSync",    "Sync",                        K::choice,  0, 10, 0, 1, "FREE|1/16|1/8 T|1/8|1/8 .|1/4 T|1/4|1/4 .|1/2|1/2 .|1 BAR", false, "" },
+        { "ecHeads",   "Heads",                       K::integer, 1, 4, 3, 1, nullptr, false, "" },
+        { "ecSpread",  "Spread",                      K::linear,  0, 1, 1, 1, nullptr, true, "%" },
+        { "ecFeedback","Feedback",                    K::linear,  0, 1.1f, 0.35f, 1, nullptr, true, "%" },
+        { "ecTone",    "Tone",                        K::linear,  -1, 1, -0.2f, 1, nullptr, true, "sym" },
+        { "ecDir",     "Direction",                   K::choice,  0, 2, 0, 1, "FWD|REV|ALT", false, "" },
+        { "ecMotion",  "Motion",                      K::choice,  0, 3, 0, 1, "STILL|WOBBLE|SCAN|JUMP", false, "" },
+        { "ecSweep",   "Sweep",                       K::linear,  0, 1, 0.3f, 1, nullptr, true, "%" },
+        { "ecRate",    "Rate",                        K::log,     0.02f, 10, 0.5f, 1, nullptr, true, "Hz" },
+        { "ecWidth",   "Width",                       K::linear,  0, 1, 0.7f, 1, nullptr, true, "%" },
+        { "ecWear",    "Wear",                        K::linear,  0, 1, 0.2f, 1, nullptr, true, "%" },
+        { "ecMix",     "Wet",                         K::linear,  0, 1, 0.35f, 1, nullptr, true, "%" },
     };
 
     std::string fmt (const char* f, double v)
@@ -430,6 +444,7 @@ std::string longName (int id)
     if (in (fCube, fTrim))         return "Filter " + name;
     if (id == rvDry)               return "Espace Dry";
     if (id == wtfLen)              return "WTF?! Steps";
+    if (in (ecTime, ecMix))        return "Echo " + name;
     if (in (rdTake, rdPads))       return "Radio " + name;
     if (in (rdPadTune, rdPadLevel)) return "Radio Pads " + name;
     return name;

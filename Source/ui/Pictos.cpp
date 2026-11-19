@@ -407,6 +407,21 @@ void picto (juce::Graphics& g, Picto kind, juce::Rectangle<float> area, juce::Co
             d.line (0.78f, 0.92f, 0.82f, 0.92f);
             break;
 
+        case Picto::echo:
+        {
+            // a blip and its repeats, evenly spaced, each one softer (a tape's heads)
+            d.line (0.04f, 0.78f, 0.96f, 0.78f, 0.35f);
+            const float xs[3] = { 0.2f, 0.5f, 0.8f }, hs[3] = { 0.56f, 0.38f, 0.22f };
+            for (int i = 0; i < 3; ++i)
+            {
+                juce::Path q;
+                q.startNewSubPath (d.p (xs[i] - 0.11f, 0.78f));
+                q.quadraticTo (d.p (xs[i], 0.78f - 2.0f * hs[i]), d.p (xs[i] + 0.11f, 0.78f));
+                d.stroke (q, i == 0 ? 1.0f : 0.8f - 0.15f * (float) i);
+            }
+            break;
+        }
+
         case Picto::cube:
         {
             // a cube seen from above, a point inside it
@@ -661,6 +676,7 @@ Picto stagePicto (int stage, int driveModel)
         case 3:  return Picto::chorus;
         case 4:  return Picto::crush;
         case 5:  return Picto::space;
+        case 6:  return Picto::echo;
         default: return Picto::none;
     }
 }

@@ -85,6 +85,8 @@ namespace snd
         fCube, fY, fZ, fSmooth, fTrim,
         // (0.4.5) ESPACE's dry, apart from its wet (MIX); how many draws WTF?!'s LOOP goes through
         rvDry, wtfLen,
+        // (0.4.5) ECHO: a tape loop and its four heads
+        ecOn, ecTime, ecSync, ecHeads, ecSpread, ecFeedback, ecTone, ecDir, ecMotion, ecSweep, ecRate, ecWidth, ecWear, ecMix,
         count
     };
 

@@ -168,7 +168,7 @@ public:
             paintCube (g, in);
         else if (m.mode == Machine::radioMode && vizNow == "tune")
             {}                                  // (the tuner over it)
-        else if (m.mode == Machine::radioMode && ! (vizNow == "fx" && spectreBank()))
+        else if (m.mode == Machine::radioMode && ! (vizNow == "fx" && (spectreBank() || echoBank())))
             radioScreen.paint (g, in, proc(), m.radioPad());
         else if (vizNow == "orbite")
             paintOrbite (g, in);
@@ -178,6 +178,8 @@ public:
             paintTuner (g, in);
         else if (vizNow == "fx" && spectreBank())
             paintSpectre (g, in);
+        else if (vizNow == "fx" && echoBank())
+            paintEcho (g, in);
         else if (m.mode == Machine::synthMode)
             paintSynth (g, in);
         else if (m.mode == Machine::samplerMode)
@@ -310,7 +312,7 @@ public:
         {
             // a click: that effect's bank (the drive lives on the filter's page)
             const int st = order[(size_t) from];
-            const int banks[Player::numStages] = { 0, 1, 4, 5, 6, 7 };
+            const int banks[Player::numStages] = { 0, 1, 4, 5, 6, 7, 8 };
             m.bankOf[juce::String ("fx") + juce::String (m.mode)] = banks[st];
             m.focus = nullptr;
             m.layoutEncoders();
@@ -318,8 +320,8 @@ public:
             return;
         }
         // a drag: the stage moved to where it was let go
-        const float w = (fxRow.getWidth() - 5.0f * 10.0f) / 6.0f;
-        const int to = juce::jlimit (0, Player::numStages - 1, (int) std::floor ((dragX - fxRow.getX()) / (w + 10.0f)));
+        const float w = (fxRow.getWidth() - (float) (Player::numStages - 1) * 8.0f) / (float) Player::numStages;
+        const int to = juce::jlimit (0, Player::numStages - 1, (int) std::floor ((dragX - fxRow.getX()) / (w + 8.0f)));
         const int st = order[(size_t) from];
         std::vector<int> v (order.begin(), order.end());
         v.erase (v.begin() + from);
@@ -754,7 +756,7 @@ public:
             setSound (pr, snd::dModel, model > 0 ? 0.0f : (float) lastDriveModel);
             return;
         }
-        const int ids[Player::numStages] = { -1, snd::spOn, snd::piOn, snd::chOn, snd::crOn, snd::rvOn };
+        const int ids[Player::numStages] = { -1, snd::spOn, snd::piOn, snd::chOn, snd::crOn, snd::rvOn, snd::ecOn };
         setSound (pr, ids[st], P (pr, ids[st]) > 0.5f ? 0.0f : 1.0f);
     }
 
@@ -789,6 +791,111 @@ private:
     {
         const auto it = m.bankOf.find (juce::String ("fx") + juce::String (m.mode));
         return it != m.bankOf.end() && it->second >= 1 && it->second <= 3;
+    }
+    bool echoBank() const
+    {
+        const auto it = m.bankOf.find (juce::String ("fx") + juce::String (m.mode));
+        return it != m.bankOf.end() && it->second >= 8 && it->second <= 9;
+    }
+
+    // ECHO: the tape running right to left from the write head, its heads (where they read, which way), and below,
+    // where the echoes fall over two TIMEs (each head, then each head's echo through the others, FEEDBACK down)
+    void paintEcho (juce::Graphics& g, juce::Rectangle<float> r)
+    {
+        auto& p = proc();
+        const bool on = P (p, snd::ecOn) > 0.5f;
+        const auto& echo = p.player.echo;
+        const int heads = (int) P (p, snd::ecHeads);
+        const int dir = (int) P (p, snd::ecDir), motion = (int) P (p, snd::ecMotion);
+        const float fb = liveValue (p, snd::ecFeedback);
+        const float seconds = echo.shownSeconds.load();
+        auto top = r.removeFromTop (60.0f);
+        text (g, "echo", top.removeFromTop (40.0f), grotesk (32.0f, 300), on ? col::screenText : col::screenDim, juce::Justification::centredLeft);
+        const int sync = (int) P (p, snd::ecSync);
+        const auto syncs = snd::choicesOf (snd::ecSync);
+        const char* motions[] = { "still", "wobble", "scan", "jump" };
+        const char* dirs[] = { "forward", "reverse", "alternate" };
+        juce::String sub = on ? juce::String (juce::roundToInt (seconds * 1000.0f)) + " ms" : juce::String ("off · switch it on in the chain");
+        if (on)
+        {
+            if (sync > 0)
+                sub << " (" << juce::String::fromUTF8 (syncs[(size_t) juce::jlimit (0, (int) syncs.size() - 1, sync)].c_str()).toLowerCase() << ")";
+            sub << " · " << heads << (heads > 1 ? " heads · " : " head · ") << dirs[juce::jlimit (0, 2, dir)] << " · " << motions[juce::jlimit (0, 3, motion)];
+        }
+        text (g, sub, top, mono (11.0f), col::screenDim, juce::Justification::topLeft);
+        r.removeFromTop (6.0f);
+
+        // the tape
+        auto tapeRow = r.removeFromTop (r.getHeight() * 0.42f);
+        const float x0 = tapeRow.getX() + 26.0f, x1 = tapeRow.getRight() - 8.0f;
+        auto xAt = [x0, x1] (float t) { return x0 + (x1 - x0) * juce::jlimit (0.0f, 1.0f, t / 1.5f); };   // (to 1.5 TIME)
+        const auto band = juce::Rectangle<float> (x0, tapeRow.getCentreY() - 9.0f, x1 - x0, 18.0f);
+        g.setColour (col::screenLine);
+        g.fillRoundedRectangle (band, 4.0f);
+        for (int t = 0; t <= 6; ++t)
+        {
+            const float x = xAt ((float) t * 0.25f);
+            g.setColour (t == 4 ? col::screenDim : col::screenGrid);
+            g.drawVerticalLine ((int) x, band.getY() - 6.0f, band.getBottom() + 6.0f);
+        }
+        text (g, "time", { xAt (1.0f) - 30.0f, band.getBottom() + 6.0f, 60.0f, 14.0f }, mono (10.0f), col::screenDim, juce::Justification::centred);
+        // the write head, at the left
+        g.setColour (col::sRed);
+        g.fillRoundedRectangle (x0 - 22.0f, band.getY() - 6.0f, 14.0f, band.getHeight() + 12.0f, 3.0f);
+        text (g, "in", { x0 - 26.0f, band.getBottom() + 6.0f, 22.0f, 14.0f }, mono (10.0f), col::sRed, juce::Justification::centred);
+        const juce::Colour colours[4] = { col::sYellow, col::sBlue, col::sOrange, col::sViolet };
+        float at[4], lvl[4];
+        for (int k = 0; k < 4; ++k)
+        {
+            at[k] = echo.shownAt[(size_t) k].load();
+            lvl[k] = echo.shownLevel[(size_t) k].load();
+            if (lvl[k] < 0.01f)
+                continue;
+            const float x = xAt (at[k]);
+            const auto c = colours[k].withAlpha (on ? juce::jlimit (0.3f, 1.0f, lvl[k] * 2.0f) : 0.3f);
+            g.setColour (c);
+            g.fillRoundedRectangle (x - 5.0f, band.getY() - 10.0f, 10.0f, band.getHeight() + 20.0f, 3.0f);
+            // which way it reads: ahead (with the tape) or back
+            const bool back = dir == 1 || (dir == 2 && k % 2 == 1);
+            juce::Path a;
+            const float ay = band.getY() - 18.0f, s = back ? 1.0f : -1.0f;
+            a.addTriangle (x + s * 7.0f, ay, x - s * 3.0f, ay - 5.0f, x - s * 3.0f, ay + 5.0f);
+            g.fillPath (a);
+            text (g, juce::String (k + 1), { x - 10.0f, band.getBottom() + 12.0f, 20.0f, 14.0f }, mono (10.0f, 600), c, juce::Justification::centred);
+        }
+
+        // where the echoes fall: each head, then through the heads again (FEEDBACK each time), to 3 TIMEs
+        auto lane = r.reduced (0.0f, 8.0f);
+        const float lx0 = lane.getX() + 26.0f, lx1 = lane.getRight() - 8.0f;
+        g.setColour (col::screenGrid);
+        g.drawHorizontalLine ((int) lane.getBottom(), lx0, lx1);
+        auto lxAt = [lx0, lx1] (float t) { return lx0 + (lx1 - lx0) * t / 3.0f; };
+        for (int t = 1; t <= 3; ++t)
+            g.drawVerticalLine ((int) lxAt ((float) t), lane.getY(), lane.getBottom());
+        g.setColour (col::screenText.withAlpha (on ? 0.9f : 0.3f));
+        g.fillRect (lxAt (0.0f) - 1.0f, lane.getY(), 2.0f, lane.getHeight());      // (the sound itself)
+        struct Tap { float t, a; int k; };
+        std::vector<Tap> heard, all, gen, next;
+        for (int k = 0; k < 4; ++k)
+            if (lvl[k] > 0.01f)
+                heard.push_back ({ at[k], lvl[k], k });
+        all = gen = heard;
+        for (int depth = 1; depth < 4 && fb > 0.01f; ++depth)
+        {
+            next.clear();
+            for (auto& a : gen)
+                for (auto& b : heard)
+                    if (a.t + b.t < 3.0f && a.a * b.a * fb > 0.02f && next.size() < 256)
+                        next.push_back ({ a.t + b.t, a.a * b.a * fb, b.k });
+            all.insert (all.end(), next.begin(), next.end());
+            gen.swap (next);
+        }
+        for (auto& tp : all)
+        {
+            const float x = lxAt (tp.t), h = lane.getHeight() * juce::jlimit (0.0f, 1.0f, tp.a * 1.4f);
+            g.setColour (colours[tp.k].withAlpha (on ? 0.85f : 0.25f));
+            g.fillRect (x - 1.0f, lane.getBottom() - h, 2.0f, h);
+        }
     }
 
     void paintTitle (juce::Graphics& g, juce::Rectangle<float> r)
@@ -1781,27 +1888,28 @@ private:
         else if (viz == "fx")
         {
             // the chain in its order: drag a stage to move it, click it for its settings
-            const int ons[6] = { (int) P (p, snd::dModel) > 0, P (p, snd::spOn) > 0.5f, P (p, snd::piOn) > 0.5f, P (p, snd::chOn) > 0.5f,
-                                 P (p, snd::crOn) > 0.5f, P (p, snd::rvOn) > 0.5f };
-            const char* names[6] = { "drive", "spectre", "pitch", "chorus", "crush", "espace" };
-            const int bankStage[8] = { 0, 1, 1, 1, 2, 3, 4, 5 };
-            const int shownStage = bankStage[juce::jlimit (0, 7, m.bankOf[juce::String ("fx") + juce::String (m.mode)])];
+            constexpr int ns = Player::numStages;
+            const int ons[ns] = { (int) P (p, snd::dModel) > 0, P (p, snd::spOn) > 0.5f, P (p, snd::piOn) > 0.5f, P (p, snd::chOn) > 0.5f,
+                                  P (p, snd::crOn) > 0.5f, P (p, snd::rvOn) > 0.5f, P (p, snd::ecOn) > 0.5f };
+            const char* names[ns] = { "drive", "spectre", "pitch", "chorus", "crush", "espace", "echo" };
+            const int bankStage[10] = { 0, 1, 1, 1, 2, 3, 4, 5, 6, 6 };
+            const int shownStage = bankStage[juce::jlimit (0, 9, m.bankOf[juce::String ("fx") + juce::String (m.mode)])];
             const auto order = p.player.fxOrder();
             fxShown = true;
             fxRow = r.withSizeKeepingCentre (r.getWidth(), 80.0f).translated (0.0f, -8.0f);
-            const float w = (fxRow.getWidth() - 5.0f * 10.0f) / 6.0f;
+            const float w = (fxRow.getWidth() - (float) (ns - 1) * 8.0f) / (float) ns;
             text (g, "in → … → out · drag to reorder · the switch bypasses"_fr, r.removeFromBottom (18.0f), mono (10.0f), col::screenDim, juce::Justification::centred, true);
-            for (int pos = 0; pos < 6; ++pos)
+            for (int pos = 0; pos < ns; ++pos)
             {
                 const int st = order[(size_t) pos];
-                auto box = juce::Rectangle<float> (fxRow.getX() + (float) pos * (w + 10.0f), fxRow.getY(), w, fxRow.getHeight());
+                auto box = juce::Rectangle<float> (fxRow.getX() + (float) pos * (w + 8.0f), fxRow.getY(), w, fxRow.getHeight());
                 fxBoxes[pos] = box;
                 if (pos == dragPos)
                     box = box.withX (juce::jlimit (fxRow.getX(), fxRow.getRight() - w, dragX - w * 0.5f)).translated (0.0f, -6.0f);
-                if (pos < 5)
+                if (pos < ns - 1)
                 {
                     g.setColour (col::screenGhost);
-                    g.fillRect (fxBoxes[pos].getRight() + 1.0f, fxRow.getCentreY() - 1.0f, 8.0f, 2.0f);
+                    g.fillRect (fxBoxes[pos].getRight() + 1.0f, fxRow.getCentreY() - 1.0f, 6.0f, 2.0f);
                 }
                 g.setColour (ons[st] ? col::sYellow : col::screen);
                 g.fillRoundedRectangle (box, 6.0f);
@@ -1817,7 +1925,7 @@ private:
                 g.setColour (ons[st] ? col::sYellow : col::screenDim);
                 g.fillEllipse (juce::Rectangle<float> (10.0f, 10.0f).withCentre ({ ons[st] ? sw.getRight() - 7.0f : sw.getX() + 7.0f, sw.getCentreY() }));
                 picto (g, stagePicto (st, (int) P (p, snd::dModel)), inBox.removeFromTop (inBox.getHeight() - 16.0f).withSizeKeepingCentre (26.0f, 26.0f), ink, 1.5f);
-                text (g, names[st], inBox, mono (10.0f, 500), ink, juce::Justification::centred);
+                text (g, names[st], inBox, mono (9.5f, 500), ink, juce::Justification::centred);
             }
         }
         else if (viz == "cycleplan")
@@ -2907,6 +3015,13 @@ void Machine::buildPages()
         pg.banks.push_back ({ "crush", { S (snd::crBits), S (snd::crRate), S (snd::crJitter), sep (S (snd::crTone)), sep (S (snd::crMix)) } });
         pg.banks.push_back ({ "espace", { S (snd::rvSize), S (snd::rvDecay), S (snd::rvTone), sep (S (snd::rvShimmer)), S (snd::rvMod), sep (S (snd::rvDry)),
                                           S (snd::rvMix) } });
+        // ECHO: its tape and heads; how they read
+        auto ecFree = [this] { return (int) P (proc, snd::ecSync) == 0; };
+        pg.banks.push_back ({ "echo", { as (S (snd::ecSync), Ctl::Look::display), S (snd::ecTime, nullptr, ecFree), sep (S (snd::ecHeads)), S (snd::ecSpread),
+                                        sep (S (snd::ecFeedback)), S (snd::ecTone), sep (S (snd::ecMix)) } });
+        pg.banks.push_back ({ "echo +", { as (S (snd::ecDir), Ctl::Look::ledList), as (S (snd::ecMotion), Ctl::Look::ledList), sep (S (snd::ecSweep)),
+                                          S (snd::ecRate, nullptr, [this] { const int mo = (int) P (proc, snd::ecMotion); return mo == 1 || mo == 3; }),
+                                          sep (S (snd::ecWidth)), S (snd::ecWear) } });
         return pg;
     };
     // ORBITE: the carrier and how it's wired, then each satellite
@@ -3334,6 +3449,19 @@ void Machine::buildPages()
         tip (*v, snd::fZ, "Le troisième axe du cube (son nom est à l'écran), à moduler."_fr);
         tip (*v, snd::rvDry, "Le son sec, à côté de la réverbe : à 100 %, la réverbe s'ajoute sans rien lui prendre."_fr);
         tip (*v, snd::rvMix, "Le niveau de la réverbe, ajoutée au son sec."_fr);
+        tip (*v, snd::ecSync, "FREE : le temps en millisecondes (TIME). Sinon, la bande dure une division, au tempo."_fr);
+        tip (*v, snd::ecTime, "La longueur de la bande : la dernière tête lit à TIME derrière l'enregistrement. Tourné, la bande ralentit ou accélère (la hauteur glisse)."_fr);
+        tip (*v, snd::ecHeads, "Combien de têtes lisent la bande, de 1 à 4, chacune de son côté dans la stéréo."_fr);
+        tip (*v, snd::ecSpread, "Où sont les têtes : à 100 %, au quart, à la moitié, aux trois quarts et au bout de TIME ; à 0, toutes au bout."_fr);
+        tip (*v, snd::ecFeedback, "Ce que les têtes renvoient sur la bande. Au-delà de 100 %, ça monte et la bande sature : ça tient sans exploser."_fr);
+        tip (*v, snd::ecTone, "À gauche, les échos s'assombrissent à chaque passage ; à droite, ils s'amincissent."_fr);
+        tip (*v, snd::ecDir, "FWD : les têtes lisent dans le sens de la bande. REV : à l'envers. ALT : une tête sur deux à l'envers."_fr);
+        tip (*v, snd::ecMotion, "STILL : les têtes restent en place. WOBBLE : elles se balancent, une sur deux dans l'autre sens. SCAN : elles glissent le long de la bande, une vers l'avant (les échos montent), une vers l'arrière (ils descendent). JUMP : elles sautent ailleurs sur la bande, au rythme de RATE."_fr);
+        tip (*v, snd::ecSweep, "Jusqu'où vont les têtes : le balancement de WOBBLE, l'intervalle de SCAN (jusqu'à l'octave), la portée des sauts de JUMP."_fr);
+        tip (*v, snd::ecRate, "La vitesse du balancement (WOBBLE) ou des sauts (JUMP)."_fr);
+        tip (*v, snd::ecWidth, "Les têtes réparties dans la stéréo : à 0, toutes au centre."_fr);
+        tip (*v, snd::ecWear, "L'usure de la bande : pleurage, scintillement, saturation, aigus perdus à chaque passage."_fr);
+        tip (*v, snd::ecMix, "Le niveau des échos, ajoutés au son sec (qui reste tel quel)."_fr);
         tip (*v, snd::fSmooth, "Le temps que met le point pour rejoindre X, Y et Z quand ils sautent (0 à 200 ms) : des transitions lisses, ou nerveuses."_fr);
         tip (*v, snd::fTrim, "Le niveau à la sortie du cube (-24 à +12 dB)."_fr);
         for (int mi = 0; mi < snd::numMods; ++mi)

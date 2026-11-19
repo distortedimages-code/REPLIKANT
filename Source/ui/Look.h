@@ -94,13 +94,14 @@ namespace te
         jack, keys, clock, onset, vuMeter, resample, record,    // the capture
         orbit, mixer,                                           // (0.3.2) ORBITE, the MIXEUR
         radio, antenna, air, slice, pads,                       // (0.3.5) RADIO: the mode, its pages
-        cube                                                    // (0.4.4) the filter's CUBE
+        cube,                                                   // (0.4.4) the filter's CUBE
+        echo                                                    // (0.4.5) ECHO
     };
     // drawn in the square centred in the area, `thickness` in pixels
     void picto (juce::Graphics&, Picto, juce::Rectangle<float>, juce::Colour, float thickness = 1.5f);
     Picto filterModelPicto (int model);         // snd::fModel's choices
     Picto filterTypePicto (int type);           // snd::fType's
     Picto driveModelPicto (int model);          // snd::dModel's
-    Picto stagePicto (int stage, int driveModel);   // Player's stages (drive, spectre, pitch, chorus, crush, espace)
+    Picto stagePicto (int stage, int driveModel);   // Player's stages (drive, spectre, pitch, chorus, crush, espace, echo)
     Picto modPicto (int type);                  // snd::mType's (onde, pas, hasard, env, suiveur)
 }
