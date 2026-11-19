@@ -452,15 +452,40 @@ static void testListen()
         bool finite = true;
         for (auto v : out) { top = std::max (top, std::abs (v)); finite = finite && std::isfinite (v); }
         CHECK (finite && top < 2.5f, "the air at its top: peak %.2f", top);
-        // STAT alone when nothing comes in, nothing at 0
-        e5->bank.setState (0, radio::failed, radio::web);
+        // (0.4.12) the station lost: MORPH holds it a while (half: about a second), then nothing, no static whatever
+        // STAT says (it's gone)
+        e5->bank.setState (0, radio::tuning, radio::web);
         radio::Settings z;
         z.stat = 0.6f;
-        auto hissOut = run (*e5, *f, z, 1.0);
-        CHECK (rms (hissOut.data() + hissOut.size() - 4800, 4800) > 0.005, "static heard alone");
-        z.stat = 0.0f;
-        auto none = run (*e5, *f, z, 1.0);
-        CHECK (rms (none.data() + none.size() - 4800, 4800) < 1.0e-4, "nothing at 0: %g", rms (none.data() + none.size() - 4800, 4800));
+        z.morph = 0.5f;
+        auto lost = run (*e5, *f, z, 3.0);
+        const double heldEarly = rms (lost.data() + 2400, 4800), heldLate = rms (lost.data() + lost.size() - 4800, 4800);
+        CHECK (heldEarly > 0.01, "the station left held: %g", heldEarly);
+        CHECK (heldLate < 1.0e-4, "then nothing, no static: %g", heldLate);
+        // back, then lost again, then back: no click as it goes (the held one in, the new one over it)
+        auto stepsOf = [] (const std::vector<float>& v, float& top)
+        {
+            float w = 0.0f;
+            for (size_t i = 1; i < v.size(); ++i) { w = std::max (w, std::abs (v[i] - v[i - 1])); top = std::max (top, std::abs (v[i])); }
+            return w;
+        };
+        e5->bank.setState (0, radio::live, radio::web);
+        auto back = run (*e5, *f, z, 2.0);
+        e5->bank.setState (0, radio::tuning, radio::web);
+        auto gone = run (*e5, *f, z, 0.4);
+        e5->bank.setState (0, radio::live, radio::web);
+        auto again = run (*e5, *f, z, 1.5);
+        float pk = 0.0f;
+        const float w1 = stepsOf (back, pk), w2 = stepsOf (gone, pk), w3 = stepsOf (again, pk);
+        const double backLate = rms (back.data() + back.size() - 4800, 4800), mid = rms (gone.data() + 9600, 4800);
+        std::printf ("  morph: held %.3f, steps %.3f %.3f %.3f of a peak %.3f, back %.3f\n", mid, w1, w2, w3, pk, backLate);
+        CHECK (backLate > 0.05 && mid > 0.3 * backLate, "back, and held while lost: %g %g", backLate, mid);
+        CHECK (std::max (w1, std::max (w2, w3)) < 0.25f * pk, "no click: %g %g %g of %g", w1, w2, w3, pk);
+        // MORPH 0: gone at once (a fade)
+        z.morph = 0.0f;
+        e5->bank.setState (0, radio::tuning, radio::web);
+        auto cut = run (*e5, *f, z, 0.5);
+        CHECK (rms (cut.data() + cut.size() - 4800, 4800) < 1.0e-3, "MORPH 0: gone: %g", rms (cut.data() + cut.size() - 4800, 4800));
         delete f;
         f = nullptr;
     }

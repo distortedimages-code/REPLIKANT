@@ -48,6 +48,7 @@ namespace drum
         pFilter, pCutoff, pReso, pFEnv, pFAttack, pFDecay, pDrive,
         pLevel, pPan, pChoke,
         pVel, pProb, pMicro, pRetrig, pCount, pCurve, pRVel,
+        pStereo,                                  // (0.4.12) a sound in stereo (PAN its balance), else mono (PAN places it)
         numParams
     };
     enum class Kind { linear, log, integer, choice, toggle };
@@ -185,6 +186,7 @@ namespace drum
             float fenv = 0.0f, fatt = 1.0f, fattInc = 1.0f, fdecCoef = 1.0f;   // the filter's envelope
             bool fhold = false;
             float ic[2][2] {}, dz[2] {};
+            bool stereo = false;                  // (its sound's two sides kept apart)
             bool hold = false;
         };
         std::array<Voice, numTracks * 2> voices;

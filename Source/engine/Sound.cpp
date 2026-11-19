@@ -264,6 +264,7 @@ namespace
         { "lmCeiling", "Ceiling",                     K::linear,  -12, 0, -0.3f, 1, nullptr, false, "dB" },
         { "lmRelease", "Release",                     K::log,     10, 1000, 120, 1, nullptr, false, "ms" },
         { "lmDrive",   "Drive",                       K::linear,  0, 12, 0, 1, nullptr, false, "dB" },
+        { "rdMorph",   "Morph",                       K::linear,  0, 1, 0.5f, 1, nullptr, true, "%" },
     };
 
     std::string fmt (const char* f, double v)
@@ -480,7 +481,7 @@ std::string longName (int id)
     if (id == wtfLen)              return "WTF?! Steps";
     if (in (ecTime, ecMix))        return "Echo " + name;
     if (in (cpIn, cpLevel))        return "Comp " + name;
-    if (id == rdDensity || id == rdVary) return "Radio " + name;
+    if (id == rdDensity || id == rdVary || id == rdMorph) return "Radio " + name;
     if (in (lmOn, lmDrive))        return id == lmOn ? std::string ("Output Limit") : "Limit " + name;
     if (in (rdTake, rdPads))       return "Radio " + name;
     if (in (rdPadTune, rdPadLevel)) return "Radio Pads " + name;

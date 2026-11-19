@@ -181,6 +181,8 @@ Ctl soundCtl (ReplikantProcessor& p, int id, const char* label, std::function<bo
     if (d.kind == snd::Kind::choice || d.kind == snd::Kind::toggle || d.kind == snd::Kind::integer)
         c.steps = (int) std::lround (d.hi - d.lo) + 1;
     c.bipolar = d.kind != snd::Kind::choice && d.lo < 0.0f && d.hi > 0.0f;
+    if (c.bipolar)
+        c.origin = snd::toNorm (id, 0.0f);         // (-36 .. +12 dB: from 0 dB, not from the middle)
     c.toggle = d.kind == snd::Kind::toggle;
     c.begin = [param] { param->beginChangeGesture(); };
     c.end = [param] { param->endChangeGesture(); };
@@ -247,6 +249,8 @@ Ctl numberCtl (const juce::String& name, double lo, double hi, double step, std:
     if (step >= 1.0 && (hi - lo) / step <= 16.0)
         c.steps = (int) std::lround ((hi - lo) / step) + 1;
     c.bipolar = lo < 0.0 && hi > 0.0;
+    if (c.bipolar)
+        c.origin = toNorm (0.0);
     c.defaultNorm = c.getNorm();
     // its scale: the two ends (as it writes them), the middle when it is zero
     c.marks.push_back ({ 0.0f, fmt (lo) });
@@ -381,7 +385,7 @@ void Encoder::paint (juce::Graphics& g)
     const auto ink2 = on ? col::deckInk2 : col::deckInk2.withAlpha (0.45f);
     text (g, ctl->name, r.removeFromTop (22.0f).withTrimmedTop (6.0f), mono (12.0f, 500), ink2, juce::Justification::centred);
     auto tags = r.removeFromBottom (16.0f);
-    const bool showValue = ctl->look == Ctl::Look::knob;
+    const bool showValue = ctl->look == Ctl::Look::knob || ctl->look == Ctl::Look::tuning;
     auto valueBox = showValue ? r.removeFromBottom (24.0f) : juce::Rectangle<float>();
     auto area = r;                                              // the control itself
     const float value = shownNorm();
@@ -560,6 +564,16 @@ void Encoder::paint (juce::Graphics& g)
                   juce::Justification::centred);
             break;
         }
+        case Ctl::Look::tuning:
+        {
+            // the big tuning knob: as big as its place allows, its dial round it
+            const float radius = juce::jmin (46.0f, area.getWidth() * 0.31f, area.getHeight() * 0.37f);
+            const auto c = area.getCentre().translated (0.0f, 2.0f);
+            const float turns = ctl->spin ? ctl->spin() : value * 10.0f;
+            tuningKnob (g, c, radius, turns - std::floor (turns), sceneEdit ? col::violet : col::cap (index), ! on,
+                        col::deckInk2.withMultipliedAlpha (on ? 0.85f : 0.35f));
+            break;
+        }
         case Ctl::Look::knob:
         default:
         {
@@ -594,7 +608,7 @@ void Encoder::paint (juce::Graphics& g)
                 }
             }
             paintScale (g, c, radius, on);
-            encoder (g, c, radius, value, ctl->bipolar, sceneEdit ? col::violet : col::cap (index),
+            encoder (g, c, radius, value, ctl->bipolar ? ctl->origin : 0.0f, sceneEdit ? col::violet : col::cap (index),
                      sceneEdit ? juce::Colours::white : col::notch (index), modFrom, modTo, modColour, ! on);
             break;
         }
@@ -818,6 +832,8 @@ void Encoder::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelD
     const float d = (std::abs (w.deltaY) > 0.0f ? w.deltaY : -w.deltaX) * (w.isReversed ? -1.0f : 1.0f);
     if (ctl->steps > 1 && ctl->steps <= 16)
         nudge (d > 0.0f ? 1.0f / (float) (ctl->steps - 1) : -1.0f / (float) (ctl->steps - 1), false);
+    else if (ctl->look == Ctl::Look::tuning)
+        nudge (d * 0.08f * juce::jmin (1.0f, 240.0f / ctl->dragPixels), e.mods.isShiftDown());   // (small steps: it's for tuning)
     else
         nudge (d * 0.08f, e.mods.isShiftDown());
     if (onTouch)
@@ -830,6 +846,8 @@ void Encoder::refreshIfChanged()
         return;
     juce::String sig;
     sig << shownNorm() << "|" << valueText (*ctl, arm) << "|" << (int) ctl->isEnabled() << "|" << (int) focused;
+    if (ctl->spin)
+        sig << "|" << ctl->spin();
     if (ctl->routeDest() >= 0 && arm.player != nullptr)
     {
         if (ctl->param >= 0)

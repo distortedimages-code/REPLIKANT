@@ -69,10 +69,12 @@ namespace te
     void screen (juce::Graphics&, juce::Rectangle<float>, float radius = 14.0f);
     // a vertical LED meter (dBFS -60..0)
     void ledMeter (juce::Graphics&, juce::Rectangle<float>, float level, const juce::String& name);
-    // an encoder: its value (lit from the start, from the middle when bipolar), a band in `modColour` from
+    // (0.4.12) the big tuning knob: `turn` how far round (0..1), its dial (0..9) printed round it in `ink`
+    void tuningKnob (juce::Graphics&, juce::Point<float> centre, float radius, float turn, juce::Colour cap, bool dim, juce::Colour ink);
+    // an encoder: its value (lit from `from`: the start, or where its zero is), a band in `modColour` from
     // `modFrom` to `modTo` (none when equal); in CLAIR ticks and a coloured cap with its notch, in NOIR & OR a black
     // knob in relief with a lit arc
-    void encoder (juce::Graphics&, juce::Point<float> centre, float radius, float value, bool bipolar, juce::Colour cap,
+    void encoder (juce::Graphics&, juce::Point<float> centre, float radius, float value, float from, juce::Colour cap,
                   juce::Colour notch, float modFrom = 0.0f, float modTo = 0.0f, juce::Colour modColour = {}, bool dim = false,
                   juce::Colour lit = juce::Colour());      // (none: the theme's)
     // the name: REPLIK8 over a band that says SAMPLER, in a rounded frame

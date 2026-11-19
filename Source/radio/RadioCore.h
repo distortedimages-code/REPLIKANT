@@ -13,10 +13,11 @@
 //             LENGTH of it played again in time, a new one taken at each turn by chance, GRAB), DIG (LENGTH taken
 //             further back at each turn, somewhere in the last DEPTH seconds); TUNE transposes the loops, as a tape
 //  AIR        BAND (the receiver's width: FULL .. 250 Hz, four poles), CENTRE (where the band sits), FADING (the
-//             signal going and coming back, a notch wandering through it), RATE (how fast), WHISTLE (a carrier's
-//             whistle beating against it), CRACKLE (crackle, past 70 % the crashes of a storm far away), DRIVE (the
-//             detector and the small speaker pushed), STATIC (the hiss and the crackle of the air, alone when
-//             nothing comes in)
+//             signal going and coming back, a notch wandering through it), RATE (how fast), CRACKLE (crackle, past
+//             70 % the crashes of a storm far away), DRIVE (the detector and the small speaker pushed). (0.4.12: no
+//             more STATIC, no more WHISTLE: their parameters stay, unused, for old projects)
+//  MORPH      (0.4.12, LIVE) the station left (retuned, another station, another receiver) held: its last half second
+//             as overlapping grains, darkening as it dies away, while the next one fades in over it
 //  CUT        (0.4.7) a rhythm cut out of all the receivers at once: LENGTH steps (sixteenths), each one a receiver
 //             taken at random and a moment of its last DEPTH seconds (on an attack nearby), or a rest (DENSITY); VARY
 //             gives some steps ratchets, some played backwards, some cut short. The pattern loops; at each turn GRAB
@@ -159,7 +160,8 @@ namespace radio
     {
         bool on = true;                            // ON AIR: off, the radio isn't heard (nor kept); the pads play on
         int rx = 0, mode = modeLive, len = 7;
-        float squelch = 0.0f, grab = 0.25f, depth = 6.0f, tune = 0.0f, stat = 0.15f, level = 0.8f;
+        float squelch = 0.0f, grab = 0.25f, depth = 6.0f, tune = 0.0f, stat = 0.0f, level = 0.8f;   // (stat, whistle: unused since 0.4.12)
+        float morph = 0.5f;                        // (0.4.12) a station left: held and crossfaded into the next
         float band = 0.0f, centre = 1000.0f, fade = 0.0f, fadeRate = 0.3f, whistle = 0.0f, crackle = 0.0f, drive = 0.0f;
         float padTune = 0.0f, padDecay = 1.0f, padLevel = 0.8f;
         float density = 0.75f, vary = 0.35f;       // CUT
@@ -257,6 +259,15 @@ namespace radio
 
         // ---- what was heard
         std::vector<float> heardL, heardR;
+        // ---- (0.4.12) MORPH: the station left (a new frequency, another station, another receiver), its last half second
+        // held as overlapping grains, darkening as it fades, while the next one comes in over it
+        static constexpr int holdFrames = rate / 2;
+        std::vector<float> holdBuf;               // stereo, interleaved
+        int holdLen = 0;
+        float holdEnv = 0.0f, holdIn = 1.0f, holdAtt = 0.0f, holdLp[2] {}, holdPh = 0.0f;
+        int holdStart[2] {};
+        bool wasLive = false;
+        void holdFrom (const Rx&, double at);
         std::atomic<int64_t> heardW { 0 };
         std::atomic<int64_t> recFrom { -1 };
         std::vector<float> peaks;

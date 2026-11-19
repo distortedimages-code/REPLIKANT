@@ -49,6 +49,7 @@ namespace
         { "rcnt",  "Count",      K::integer, 1, 16, 3, nullptr, "hits" },
         { "rcrv",  "Curve",      K::linear,  -1, 1, 0, nullptr, "crv" },
         { "rvel",  "Vel curve",  K::linear,  -1, 1, 0, nullptr, "crv" },
+        { "stereo", "Stereo",    K::toggle,  0, 1, 1, nullptr, "" },
     };
     const float speeds[numSpeeds] = { 0.125f, 0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f };
     const float retrigDen[numRetrigs] = { 0, 1, 2, 4, 8, 12, 16, 24, 32, 48, 64, 96, 128 };
@@ -516,6 +517,8 @@ void Engine::startVoice (int track, const float* p, float vel, const float* base
     v.sound = src == synth ? nullptr : usedSound[(size_t) track].load (std::memory_order_acquire);
     if (src != synth && (v.sound == nullptr || v.sound->audio == nullptr || v.sound->length() < 2))
         v.sound = nullptr;
+    v.stereo = v.sound != nullptr && p[pStereo] > 0.5f;
+    v.ic[1][0] = v.ic[1][1] = 0.0f;
     if (v.sound != nullptr)
     {
         const int len = v.sound->length();
@@ -628,8 +631,11 @@ void Engine::renderVoice (Voice& v, float* L, float* R, float* F, int n)
     const float hpA = 1.0f - std::exp (-twoPi * 2000.0f * isr);
     const float clickCoef = std::exp (-1.0f / (0.0006f * fsr));
     const float level = clampf (v.p[pLevel], 0.0f, 1.0f) * 1.2f * v.vel * v.vel;
-    const float th = (clampf (v.p[pPan], -1.0f, 1.0f) + 1.0f) * 0.785398163f;
-    const float gl = std::cos (th) * 1.41421356f, gr = std::sin (th) * 1.41421356f;
+    // PAN: a mono voice placed (equal power), a stereo one balanced (each side at 1 in the middle)
+    const float pan = clampf (v.p[pPan], -1.0f, 1.0f);
+    const float th = (pan + 1.0f) * 0.785398163f;
+    const float gl = v.stereo ? (pan > 0.0f ? 1.0f - pan : 1.0f) : std::cos (th) * 1.41421356f;
+    const float gr = v.stereo ? (pan < 0.0f ? 1.0f + pan : 1.0f) : std::sin (th) * 1.41421356f;
     const auto* A = v.sound != nullptr ? v.sound->audio.get() : nullptr;
     const int len = A != nullptr ? (int) A->l.size() : 0;
     int lvl = 0;
@@ -638,7 +644,7 @@ void Engine::renderVoice (Voice& v, float* L, float* R, float* F, int n)
         const float semis = sweep * v.swEnv;
         v.swEnv *= v.swCoef;
         const float pitch = std::exp2 (semis * (1.0f / 12.0f));
-        float x = 0.0f;
+        float x = 0.0f, xr = 0.0f;       // (xr: the right side, for a voice in stereo)
         bool bodyLeft = false;
         if (synthBody && body > 0.0f)
         {
@@ -675,7 +681,13 @@ void Engine::renderVoice (Voice& v, float* L, float* R, float* F, int n)
             // (its ends faded: 2 ms)
             const double room = v.step >= 0.0 ? (double) v.to - v.pos : v.pos - (double) v.from;
             const float edge = (float) std::min (1.0, room / (0.002 * A->sampleRate));
-            x = 0.5f * (yl + yr) * body * edge;
+            if (v.stereo)
+            {
+                x = yl * body * edge;
+                xr = yr * body * edge;
+            }
+            else
+                x = 0.5f * (yl + yr) * body * edge;
             v.pos += v.step * (double) pitch;
             bodyLeft = true;
             (void) len;
@@ -705,6 +717,7 @@ void Engine::renderVoice (Voice& v, float* L, float* R, float* F, int n)
         else
             v.env *= v.decCoef;
         x = x * v.env + nz + ck;
+        xr = v.stereo ? xr * v.env + nz + ck : x;
         if (moving)
         {
             if (v.fatt < 1.0f)
@@ -722,14 +735,25 @@ void Engine::renderVoice (Voice& v, float* L, float* R, float* F, int n)
             float lp, bp, hp;
             svf.tick (x, v.ic[0][0], v.ic[0][1], lp, bp, hp);
             x = ft == 0 ? lp : (ft == 1 ? hp : bp);
+            if (v.stereo)
+            {
+                svf.tick (xr, v.ic[1][0], v.ic[1][1], lp, bp, hp);
+                xr = ft == 0 ? lp : (ft == 1 ? hp : bp);
+            }
         }
         if (drv > 0.001f)
+        {
             x = std::tanh (x * dg) * dn;
+            if (v.stereo)
+                xr = std::tanh (xr * dg) * dn;
+        }
+        if (! v.stereo)
+            xr = x;
         const float g = level * v.fade;
         L[i] += x * g * gl;
-        R[i] += x * g * gr;
+        R[i] += xr * g * gr;
         if (F != nullptr)
-            F[i] += x * g;
+            F[i] += 0.5f * (x + xr) * g;
         v.t += isr;
         if (v.fadeStep != 0.0f)
         {
@@ -747,7 +771,7 @@ void Engine::renderVoice (Voice& v, float* L, float* R, float* F, int n)
             return;
         }
     }
-    if (! std::isfinite (v.ic[0][0]) || ! std::isfinite (v.ic[0][1]))
+    if (! std::isfinite (v.ic[0][0]) || ! std::isfinite (v.ic[0][1]) || ! std::isfinite (v.ic[1][0]) || ! std::isfinite (v.ic[1][1]))
         v.active = false;
 }
 

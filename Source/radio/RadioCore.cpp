@@ -10,7 +10,7 @@ namespace radio
 namespace
 {
     constexpr int fifoMask = fifoFrames - 1, histMask = histFrames - 1, guardFrames = 16;
-    constexpr float twoPi = 6.28318530717958647f;
+    constexpr float twoPi = 6.28318530717958647f, pi = 3.14159265358979324f;
 
     inline float hermite (float xm1, float x0, float x1, float x2, float t)
     {
@@ -251,6 +251,7 @@ void Engine::allocate()
     for (auto& l : loops)
         l.assign ((size_t) loopFrames * 2, 0);
     cutBuf.assign ((size_t) cutSteps * cutFrames * 2, 0);
+    holdBuf.assign ((size_t) holdFrames * 2, 0.0f);
     makeHeard();
     reset();
     armed.store (true, std::memory_order_release);
@@ -277,10 +278,43 @@ void Engine::prepare (double sampleRate, int)
     reset();
 }
 
+// MORPH: what the receiver played just before `at` (its last 15 ms left out: the history's own fade as the sound went),
+// half a second of it, kept to hold
+void Engine::holdFrom (const Rx& rr, double at)
+{
+    if (holdBuf.empty() || rr.hist.empty())
+        return;
+    const int64_t end = (int64_t) std::floor (at) - (int64_t) (0.015 * rate), from = end - holdFrames;
+    if (from < rr.hw - (int64_t) histFrames + 4096 || end > rr.hw)
+        return;
+    float pk = 0.0f;
+    for (int j = 0; j < holdFrames; ++j)
+        for (int c = 0; c < 2; ++c)
+        {
+            const float v = bank.at (rr, (double) (from + j), c);
+            holdBuf[(size_t) j * 2 + (size_t) c] = v;
+            pk = std::max (pk, std::abs (v));
+        }
+    if (pk < 1.0e-3f)
+        return;                                 // (nothing was playing: nothing to hold)
+    holdLen = holdFrames;
+    holdEnv = 1.0f;
+    holdIn = 0.0f;
+    holdAtt = 0.0f;
+    holdLp[0] = holdLp[1] = 0.0f;
+    holdPh = 0.0f;
+    holdStart[0] = holdLen / 2;
+    holdStart[1] = holdLen / 4;
+}
+
 void Engine::reset()
 {
     mode = -1;
     rxNow = -1;
+    holdLen = 0;
+    holdEnv = 0.0f;
+    holdIn = 1.0f;
+    wasLive = false;
     cutMade = false;
     cutStep = -1;
     cv[0] = cv[1] = {};
@@ -458,6 +492,10 @@ void Engine::listen (float* L, float* R, int n, const Settings& s)
     bool turn = false;
     if (md != mode || k != rxNow)
     {
+        // (LIVE to LIVE on another receiver: the one left held, while the new one comes in)
+        if (mode == modeLive && md == modeLive && rxNow >= 0 && rxNow != k && wasLive)
+            holdFrom (bank.rx[rxNow], p);
+        wasLive = false;                        // (the new one's own past is not what was heard)
         mode = md;
         rxNow = k;
         p = (double) r.hw - (double) n * inc - 8.0;
@@ -531,6 +569,26 @@ void Engine::listen (float* L, float* R, int n, const Settings& s)
         cutNow.store (-1, std::memory_order_relaxed);
     }
 
+    // MORPH: the station heard lost (retuned, another station, the network): its last moment held. The next one fades
+    // in over it (MORPH 0: 30 ms, full: 1.2 s); what is held dies away (0: 0.15 s, full: 6 s), darkening
+    const bool liveNow = md == modeLive && st == live;
+    if (md == modeLive)
+    {
+        if (wasLive && ! liveNow)
+            holdFrom (r, p);
+        wasLive = liveNow;
+    }
+    else
+    {
+        wasLive = false;
+        holdEnv = 0.0f;
+        holdIn = 1.0f;
+    }
+    const float morph = clamp01 (s.morph);
+    const float inStep = isr / (0.03f + 1.17f * morph * morph), attStep = isr / 0.02f;
+    const float holdCoef = std::exp (-isr / (0.15f + 5.85f * morph * morph * morph) * 3.0f);
+    const int grain = std::max (256, std::min (holdLen / 2, (int) (0.14f * fsr)));
+
     // TUNE: LIVE a shift (Hz), LOOP and DIG a transposition
     const float shHz = md == modeLive ? shiftHz (s.tune) : 0.0f;
     const bool shift = std::abs (shHz) > 0.5f;
@@ -542,10 +600,8 @@ void Engine::listen (float* L, float* R, int n, const Settings& s)
     const float xfInc = 1.0f / xf;
 
     // the air
-    const float stat = clamp01 (s.stat), hiss = 0.22f * stat * stat;
-    const bool tuningNow = md == modeLive && (st == connecting || st == buffering || st == tuning);
-    const float dead = tuningNow ? (0.06f + 0.25f * stat) * (1.0f - r.sig) : 0.0f;
-    const float bandV = clamp01 (s.band), fade = clamp01 (s.fade), het = clamp01 (s.whistle), crk = clamp01 (s.crackle), drv = clamp01 (s.drive);
+    // (0.4.12: no more static, no more whistles; the tuning's dead air is MORPH's hold now)
+    const float bandV = clamp01 (s.band), fade = clamp01 (s.fade), crk = clamp01 (s.crackle), drv = clamp01 (s.drive);
     const bool band = bandV > 0.01f;
     Svf h1, h2, l1, l2, nt;
     if (band)
@@ -559,14 +615,6 @@ void Engine::listen (float* L, float* R, int n, const Settings& s)
     const float fdInc = std::max (0.01f, s.fadeRate) * isr;
     if (fade > 0.002f)
         nt.set (fdF, 1.2f, fsr);
-    // the whistle wanders, slowly
-    if (het > 0.002f)
-    {
-        if (rng.uni() < (float) n * isr * 0.3f)
-            htT = 300.0f + 2200.0f * rng.uni();
-        htF += (htT - htF) * std::min (1.0f, (float) n * isr * 0.8f);
-    }
-    const float htInc = htF * isr, htLvl = 0.12f * het * het;
     const float ckRate = 60.0f * crk * crk * isr;
     const float dg = 1.0f + 10.0f * drv * drv, dmix = std::min (1.0f, drv * 8.0f), dnorm = 1.0f / std::tanh (dg);
     const float dlpA = 1.0f - std::exp (-twoPi * (5200.0f - 3000.0f * drv) * isr);
@@ -591,6 +639,47 @@ void Engine::listen (float* L, float* R, int n, const Settings& s)
             x[0] = bank.at (r, p, 0);
             x[1] = bank.at (r, p, 1);
             p += inc;
+            // MORPH: the new station over the one held
+            holdIn = liveNow ? std::min (1.0f, holdIn + inStep) : 0.0f;
+            const float xin = liveNow ? holdIn : 1.0f;      // (not live: what's left of the station fades on its own, 10 ms)
+            if (holdLen > 0 && holdEnv > 1.0e-4f && holdIn < 1.0f)
+            {
+                // two grains half a turn apart, each from a place of its own (sin² windows: they add up to one)
+                holdPh += 1.0f / (float) grain;
+                if (holdPh >= 1.0f)
+                {
+                    holdPh -= 1.0f;
+                    holdStart[0] = (int) (rng.uni() * (float) std::max (1, holdLen - grain));
+                }
+                const float ph2 = holdPh + 0.5f >= 1.0f ? holdPh - 0.5f : holdPh + 0.5f;
+                if (ph2 < 1.0f / (float) grain)
+                    holdStart[1] = (int) (rng.uni() * (float) std::max (1, holdLen - grain));
+                const float wa = std::sin (pi * holdPh), wb = std::sin (pi * ph2);
+                const int ia = std::min (holdLen - 1, holdStart[0] + (int) (holdPh * (float) grain));
+                const int ib = std::min (holdLen - 1, holdStart[1] + (int) (ph2 * (float) grain));
+                holdAtt = std::min (1.0f, holdAtt + attStep);
+                const float g = holdEnv * holdAtt * (1.0f - holdIn);
+                // darker as it goes (a one-pole from 9 kHz down to 600 Hz)
+                const float fc = 600.0f + 8400.0f * holdEnv * holdEnv;
+                const float a = 1.0f - std::exp (-twoPi * fc * isr);
+                for (int c = 0; c < 2; ++c)
+                {
+                    const float h = wa * wa * holdBuf[(size_t) ia * 2 + (size_t) c] + wb * wb * holdBuf[(size_t) ib * 2 + (size_t) c];
+                    holdLp[c] += (h - holdLp[c]) * a;
+                    x[c] = x[c] * xin + holdLp[c] * g;
+                }
+                holdEnv *= holdCoef;
+            }
+            else
+            {
+                if (holdIn >= 1.0f || holdEnv <= 1.0e-4f)
+                    holdLen = 0;
+                if (xin < 1.0f)
+                {
+                    x[0] *= xin;
+                    x[1] *= xin;
+                }
+            }
         }
         else if (md == modeCut)
         {
@@ -757,40 +846,7 @@ void Engine::listen (float* L, float* R, int n, const Settings& s)
                 x[c] = (x[c] - fade * nt.k * bp) * (1.0f - fade + fade * g);
             }
         }
-        // the whistle, the hiss (and the dial's sweep while it tunes), the crackle
-        dPh += isr * 0.37f;
-        dPh -= std::floor (dPh);
-        if (htLvl > 0.0f)
-        {
-            htPh += htInc * (1.0f + 0.003f * std::sin (twoPi * dPh));
-            htPh -= std::floor (htPh);
-            const float w = htLvl * std::sin (twoPi * htPh) * (0.4f + 0.6f * r.sig);
-            x[0] += w;
-            x[1] += w;
-        }
-        if (hiss > 0.0f || dead > 0.0f)
-        {
-            for (int c = 0; c < 2; ++c)
-            {
-                const float w = rng.bi();
-                pk[c][0] = 0.997f * pk[c][0] + 0.03f * w;
-                pk[c][1] = 0.96f * pk[c][1] + 0.12f * w;
-                pk[c][2] = 0.6f * pk[c][2] + 0.3f * w;
-                x[c] += (pk[c][0] + pk[c][1] + pk[c][2] + 0.2f * w) * 1.3f * (hiss + dead);
-            }
-            if (dead > 0.0f)
-            {
-                // the dial's sweep: a whistle falling through the band, again and again
-                swPh += isr * 0.7f;
-                swPh -= std::floor (swPh);
-                const float f = 3200.0f - 3000.0f * swPh;
-                htPh += f * isr;
-                htPh -= std::floor (htPh);
-                const float w = dead * 0.25f * std::sin (twoPi * htPh) * (1.0f - swPh);
-                x[0] += w;
-                x[1] += w;
-            }
-        }
+        // the crackle
         if (ckRate > 0.0f)
         {
             if (ckLeft <= 0 && rng.uni() < ckRate)

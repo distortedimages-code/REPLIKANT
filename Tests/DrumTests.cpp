@@ -329,6 +329,48 @@ static void testSources()
     for (int i = 10; i < 4700; ++i)
         err = std::max (err, (double) std::abs (g.L[(size_t) i] - a->l[(size_t) i] * 0.5f * 1.2f));
     CHECK (err < 1.0e-4, "a sample as it is: %g", err);
+    // (0.4.12) STEREO (on by default): a sound's two sides kept apart; off, the two summed (the middle of both)
+    {
+        auto st = std::make_shared<radio::Take::Audio>();
+        st->sampleRate = sr;
+        st->l = a->l;
+        st->r.assign (a->l.size(), 0.0f);
+        Sound ss;
+        ss.audio = st;
+        g.e.setSound (1, &ss);
+        auto& t1 = g.e.pattern (0).tr[1];
+        t1.p[pLevel] = 0.5f;
+        CHECK (t1.p[pStereo] > 0.5f, "stereo by default: %g", (double) t1.p[pStereo]);
+        g.play (0.1, 120.0, 0.5f, { { 0, firstNote + 1, 127 } }, false);
+        double el = 0, pr = 0;
+        for (int i = 10; i < 4700; ++i)
+        {
+            el = std::max (el, (double) std::abs (g.L[(size_t) i] - st->l[(size_t) i] * 0.5f * 1.2f));
+            pr = std::max (pr, (double) std::abs (g.R[(size_t) i]));
+        }
+        CHECK (el < 1.0e-4 && pr < 1.0e-6, "stereo: left as it is (%g), right silent (%g)", el, pr);
+        t1.p[pStereo] = 0.0f;
+        g.play (0.1, 120.0, 0.5f, { { 0, firstNote + 1, 127 } }, false);
+        double em = 0;
+        for (int i = 10; i < 4700; ++i)
+            em = std::max (em, std::max (std::abs ((double) g.L[(size_t) i] - st->l[(size_t) i] * 0.25 * 1.2),
+                                         std::abs ((double) g.R[(size_t) i] - st->l[(size_t) i] * 0.25 * 1.2)));
+        CHECK (em < 1.0e-4, "mono: both sides the middle of the two: %g", em);
+        // PAN, in stereo, a balance: hard left, the right side gone, the left as it was
+        t1.p[pStereo] = 1.0f;
+        st->r = st->l;
+        t1.p[pPan] = -1.0f;
+        g.play (0.1, 120.0, 0.5f, { { 0, firstNote + 1, 127 } }, false);
+        double bl = 0, br = 0;
+        for (int i = 10; i < 4700; ++i)
+        {
+            bl = std::max (bl, (double) std::abs (g.L[(size_t) i] - st->l[(size_t) i] * 0.5f * 1.2f));
+            br = std::max (br, (double) std::abs (g.R[(size_t) i]));
+        }
+        CHECK (bl < 1.0e-4 && br < 1.0e-6, "stereo balance: %g %g", bl, br);
+        t1.p[pPan] = 0.0f;
+        g.e.setSound (1, &g.click);
+    }
     // TUNE +12: twice as fast (its end at half the time)
     tk.p[pTune] = 12.0f;
     g.play (0.1, 120.0, 0.5f, { { 0, firstNote, 127 } }, false);

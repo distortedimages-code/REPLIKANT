@@ -3044,7 +3044,7 @@ public:
         text (g, "wtf?!", in.removeFromTop (16.0f), mono (13.0f, 600), col::red, juce::Justification::centred);
         knob = in.removeFromTop (juce::jlimit (60.0f, 96.0f, in.getHeight() - 84.0f));
         const float v = P (m.proc, snd::wtf);
-        encoder (g, knob.getCentre(), juce::jmin (44.0f, knob.getHeight() * 0.42f), v, false, col::red, juce::Colours::white, 0.0f, 0.0f, {}, false, col::red);
+        encoder (g, knob.getCentre(), juce::jmin (44.0f, knob.getHeight() * 0.42f), v, 0.0f, col::red, juce::Colours::white, 0.0f, 0.0f, {}, false, col::red);
         text (g, juce::String (juce::roundToInt (v * 100.0f)) + " %", in.removeFromTop (16.0f), mono (13.0f, 500), col::ink, juce::Justification::centred);
 
         // LOOP's length: sixteen points, the loop's lit (the draw playing brighter); LIVE: dimmed
@@ -3797,7 +3797,8 @@ void Machine::buildPages()
         v.push_back ({ "source", "dsrc", { { "source", { D (drum::pSource), sep (D (drum::pBank, nullptr, srcIs ({ drum::synth }))),
                                                            D (drum::pPosition, nullptr, srcIs ({ drum::synth })), D (drum::pSlice, nullptr, srcIs ({ drum::slices })),
                                                            D (drum::pStart, nullptr, srcIs ({ drum::sample, drum::slices })),
-                                                           D (drum::pReverse, nullptr, srcIs ({ drum::sample, drum::slices })), sep (D (drum::pChoke)) } } } });
+                                                           D (drum::pReverse, nullptr, srcIs ({ drum::sample, drum::slices })),
+                                                           D (drum::pStereo, nullptr, srcIs ({ drum::sample, drum::slices })), sep (D (drum::pChoke)) } } } });
         v.push_back ({ "pitch", "dpitch", { { "pitch", { D (drum::pNote), D (drum::pTune), sep (D (drum::pSweep)), D (drum::pSweepTime),
                                                            sep (D (drum::pPmod, nullptr, srcIs ({ drum::synth }))), D (drum::pRatio, nullptr, srcIs ({ drum::synth })) } } } });
         v.push_back ({ "amp", "damp", { { "amp", { D (drum::pAttack), D (drum::pDecay), sep (D (drum::pBody)), D (drum::pClick), D (drum::pNoise),
@@ -3892,6 +3893,7 @@ void Machine::buildPages()
         dtip (drum::pSlice, "La tranche jouée (à verrouiller pas par pas : chaque pas sa tranche)."_fr);
         dtip (drum::pStart, "Où le son commence."_fr);
         dtip (drum::pReverse, "Le son joué à l'envers."_fr);
+        dtip (drum::pStereo, "ON : le son en stéréo, ses deux côtés filtrés et poussés à part, PAN en balance. OFF : en mono, placé par PAN."_fr);
         dtip (drum::pChoke, "Les pistes d'un même groupe se coupent (un charleston fermé coupe l'ouvert)."_fr);
         dtip (drum::pNote, "La hauteur de la piste (sur ton clavier, C1 à G1 jouent les pistes 1 à 8, chacune à sa hauteur)."_fr);
         dtip (drum::pTune, "L'accord fin, ±24 demi-tons."_fr);
@@ -3957,9 +3959,12 @@ void Machine::buildPages()
                             },
                             [] (double khz) { return juce::String (khz, khz < 10000.0 ? 1 : 0) + " khz"; }, true);
         f.shown = shortwave;
-        f.dragPixels = 4000.0f;
+        // (0.4.12) the big tuning knob: one turn of its dial, 10 kHz (its figures read the kHz)
+        f.look = Ctl::Look::tuning;
+        f.spin = [this, rxNow] { return proc.hasRadioNet() ? (float) (proc.radioNet().getSource (rxNow()).khz / 10.0) : 0.0f; };
+        f.dragPixels = 12000.0f;
         f.sepBefore = true;
-        f.tip = "La fréquence du récepteur ondes courtes (glisse lentement : 4000 pixels pour toute la bande ; le tuner a ses pas de 0,1 à 5 kHz)."_fr;
+        f.tip = "Le gros potard d'accord : glisse pour parcourir la bande (environ 7 kHz par pixel vers 10 MHz ; Maj : 1 kHz), la molette pour les petits pas. Un tour de son cadran = 10 kHz : ses chiffres lisent les kHz."_fr;
         tb.ctls.push_back (f);
         auto md = choiceCtl ("Demod", { "am", "usb", "lsb", "cw" },
                              [this, rxNow]
@@ -3979,17 +3984,17 @@ void Machine::buildPages()
         md.tip = "AM : la radiodiffusion. USB, LSB : la bande latérale (les radioamateurs au-dessus et au-dessous de 10 MHz). CW : le morse."_fr;
         tb.ctls.push_back (md);
         tb.ctls.push_back (sep (S (snd::rdLevel)));
-        tb.ctls.push_back (S (snd::rdStatic));
+        tb.ctls.push_back (S (snd::rdMorph));
         v.push_back ({ "tune", "tune", { tb } });
-        // (CUT: its density and its variations in place of TUNE and STATIC; GRAB and DEPTH too)
+        // (CUT: its density and its variations in place of TUNE and MORPH; GRAB and DEPTH too)
         auto notCut = [this] { return (int) P (proc, snd::rdMode) != radio::modeCut; };
         auto cutOn = modeIs (radio::modeCut);
         auto grabbing = [this] { const int rm = (int) P (proc, snd::rdMode); return rm == radio::modeLoop || rm == radio::modeCut; };
         auto digging = [this] { const int rm = (int) P (proc, snd::rdMode); return rm == radio::modeDig || rm == radio::modeCut; };
         auto rdTuneCtl = S (snd::rdTune);
         rdTuneCtl.shown = notCut;
-        auto rdStaticCtl = S (snd::rdStatic);
-        rdStaticCtl.shown = notCut;
+        auto rdMorphCtl = S (snd::rdMorph);
+        rdMorphCtl.shown = notCut;
         auto densityCtl = S (snd::rdDensity);
         densityCtl.shown = cutOn;
         auto varyCtl = S (snd::rdVary);
@@ -4000,9 +4005,9 @@ void Machine::buildPages()
         depthCtl.shown = digging;
         v.push_back ({ "listen", "listen", { { "listen", { S (snd::rdOn), sep (S (snd::rdMode)), rdTuneCtl, S (snd::rdLen, nullptr, loops),
                                                               S (snd::rdSquelch, nullptr, modeIs (radio::modeLive)), densityCtl, varyCtl, grabCtl,
-                                                              depthCtl, sep (S (snd::rdLevel)), rdStaticCtl } } } });
-        v.push_back ({ "air", "air", { { "air", { S (snd::rdBand), S (snd::rdCentre), sep (S (snd::rdFade)), S (snd::rdRate), sep (S (snd::rdWhistle)),
-                                                    S (snd::rdCrackle), sep (S (snd::rdDrive)), S (snd::rdStatic) } } } });
+                                                              depthCtl, sep (S (snd::rdLevel)), rdMorphCtl } } } });
+        v.push_back ({ "air", "air", { { "air", { S (snd::rdBand), S (snd::rdCentre), sep (S (snd::rdFade)), S (snd::rdRate),
+                                                    sep (S (snd::rdCrackle)), sep (S (snd::rdDrive)) } } } });
         v.push_back ({ "take", "take", { { "take", { S (snd::rdTake), sep (S (snd::rdSens)), S (snd::rdPads) } } } });
         v.push_back ({ "pads", "pads", { { "pads", { S (snd::rdPadTune), S (snd::rdPadDecay), sep (S (snd::rdChoke)), sep (S (snd::rdPadLevel)) } } } });
         v.push_back (filterPage());
@@ -4028,12 +4033,11 @@ void Machine::buildPages()
         rtip (snd::rdSquelch, "Seul ce qui est assez fort passe (de -66 à -10 dB) : sur une voix, il hache entre les mots."_fr);
         rtip (snd::rdGrab, "La chance qu'un tour prenne une nouvelle boucle (en CUT : que chaque pas soit tiré à nouveau). KEEP : la première reste. À fond : une nouvelle à chaque tour."_fr);
         rtip (snd::rdDepth, "Jusqu'où DIG (et CUT) va chercher en arrière : de 1 à 20 s."_fr);
-        rtip (snd::rdStatic, "Le souffle et les craquements de l'air : ce qu'on entend seul quand rien n'arrive."_fr);
+        rtip (snd::rdMorph, "Changer de fréquence ou de station : la dernière seconde entendue reste suspendue, s'éteint doucement et se fond dans la suivante. À 0 un fondu court, à fond une longue traîne."_fr);
         rtip (snd::rdBand, "La largeur du récepteur, de FULL à 250 Hz (un filtre à quatre pôles)."_fr);
         rtip (snd::rdCentre, "Où la bande se place quand elle se resserre, de 300 Hz à 3 kHz."_fr);
         rtip (snd::rdFade, "Le signal qui s'en va et revient, une encoche qui le traverse : le fading des ondes courtes."_fr);
         rtip (snd::rdRate, "La vitesse du fading."_fr);
-        rtip (snd::rdWhistle, "Le sifflement d'une porteuse voisine, qui erre lentement."_fr);
         rtip (snd::rdCrackle, "Des craquements ; au-delà de 70 %, les fracas d'un orage lointain."_fr);
         rtip (snd::rdDrive, "Le détecteur et le petit haut-parleur poussés."_fr);
         rtip (snd::rdTake, "Jusqu'où GRAB remonte dans ce qui a été entendu (l'air compris) : de 1 à 30 s."_fr);

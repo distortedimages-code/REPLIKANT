@@ -137,6 +137,8 @@ Ctl drumCtl (ReplikantProcessor& p, DrumEdit& e, int param, const char* label, s
     if (d.kind == drum::Kind::choice || d.kind == drum::Kind::toggle || d.kind == drum::Kind::integer)
         c.steps = (int) std::lround (d.hi - d.lo) + 1;
     c.bipolar = d.kind != drum::Kind::choice && d.lo < 0.0f && d.hi > 0.0f;
+    if (c.bipolar)
+        c.origin = drum::toNorm (param, 0.0f);
     c.toggle = d.kind == drum::Kind::toggle;
     if (d.kind == drum::Kind::choice || d.kind == drum::Kind::toggle)
         for (auto& o : drum::choicesOf (param))

@@ -4,6 +4,13 @@
 
 **Page de téléchargement** : https://distortedimages-code.github.io/REPLIKANT/
 
+## La version 0.4.12 : MORPH, le potard d'accord, le DRUM en stéréo
+
+- **MORPH** (`radio::Engine`, `Settings::morph`, `snd::rdMorph` ajouté en fin de liste) : en LIVE, quand le récepteur écouté cesse d'être `live` (accord, autre station, réseau) ou qu'on passe à un autre récepteur, `holdFrom` copie sa dernière demi-seconde (moins 15 ms) de l'historique ; elle est rejouée en deux grains fenêtrés en sin² décalés d'un demi-tour (somme constante), chacun repris à une place tirée au hasard, filtrée par un passe-bas d'un pôle qui descend de 9 kHz à 600 Hz avec son enveloppe ; elle entre en 20 ms, meurt en 0,15 s (MORPH 0) à 6 s (à fond) et s'efface sous la station suivante, qui entre en 30 ms à 1,2 s. Pas de station tenue si rien ne jouait. Le souffle, le bruit d'accord, le balayage et le sifflement sont retirés (`stat` et `whistle` restent dans `Settings`, inutilisés). `RadioTests` : la station tenue puis plus rien, aucun saut d'échantillon au-dessus du quart de la crête (aller, perdu, retour), MORPH 0 éteint en 0,5 s.
+- **Potard d'accord** (`Ctl::Look::tuning`, `Ctl::spin`, `tuningKnob` dans `Look.cpp`) : la fréquence ondes courtes en logarithmique sur 12 000 pixels, la molette réduite d'autant ; `spin` = kHz / 10, le cadran 0..9 imprimé autour.
+- **L'arc des potards** (`Ctl::origin`, `encoder (..., from, ...)`) : un réglage qui passe par zéro allume son arc depuis la position de son zéro (`snd::toNorm (id, 0)`, `drum::toNorm`, celle de `numberCtl`), plus depuis le milieu.
+- **DRUM en stéréo** (`drum::pStereo`, ajouté en fin de liste, 1 par défaut) : une voix de sample garde ses deux canaux (filtre à variables d'état et drive pour chacun, `ic[1]`), PAN en balance (chaque côté à 1 au milieu), la voix mono en puissance constante comme avant ; la sortie de suivi (FOLLOW) prend la moyenne. `DrumTests` : la gauche seule reste à gauche, STEREO coupé donne le milieu des deux, la balance.
+
 ## La version 0.4.11 : la liste des récepteurs
 
 - **Liste** (`RadioNet::receivers`) : `http://rx.linkfanel.net/kiwisdr_com.js` (un tableau JavaScript d'objets aux champs en chaînes, la virgule finale retirée avant `juce::JSON::parse`), puis `http://kiwisdr.com/public/` (qui affiche désormais une page à cliquer avant la liste) ; `parseReceivers` lit l'une ou l'autre forme, `addReceiver` les mêmes champs ; un hôte `*.proxy.kiwisdr.com` sans port est joint sur 8073 (le port 80 ne fait que rediriger). Le protocole des récepteurs (`/<ts>/SND`, `SET auth`, `AR OK`, ADPCM) est inchangé et toujours accepté (v1.902), comme `/ws/kiwi/<ts>/SND` du client web. `RadioNetTests` : les deux formes, la plus libre d'abord, celle hors ligne retirée.

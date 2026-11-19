@@ -1,3 +1,10 @@
+**REPLIK8 0.4.12** : changer de station sans siffler, un gros potard d'accord, le DRUM en stéréo.
+
+- **Plus de sifflements ni de souffle à l'accord** : quand un récepteur change de fréquence, de station ou que tu passes à un autre récepteur, la station quittée est figée (sa dernière demi-seconde, en grains qui se chevauchent), elle s'assombrit et s'efface pendant que la suivante arrive par-dessus. **MORPH** (page LISTEN, à la place de STATIC) règle ce passage : à 0, un simple fondu de 30 ms ; à 50 %, la station tenue environ une seconde ; à fond, une longue traîne de plusieurs secondes. Les réglages STATIC et WHISTLE de l'air sont retirés (CRACKLE reste)
+- **Un gros potard d'accord** pour la fréquence des récepteurs ondes courtes : une jupe noire striée qui tourne, son cadran gradué de 0 à 9 imprimé autour (un tour = 10 kHz, ses chiffres lisent les kHz). Glisse pour parcourir la bande (environ 7 kHz par pixel vers 10 MHz, Maj : 1 kHz), la molette pour les petits pas
+- **Les potards à zéro au milieu de leur course** (VOLUME de -36 à +12 dB, et les autres réglages qui passent par zéro sans être symétriques) : leur arc lumineux part maintenant de leur zéro, plus du haut du potard
+- **Le DRUM joue les sons et les prises en stéréo** : un sample stéréo, une prise de la radio et ses tranches gardent leur gauche et leur droite (filtre et drive sur chaque côté). PAN devient une balance. **STEREO** (page SOURCE, allumé par défaut) : coupé, la piste repasse en mono, placée par PAN comme avant
+
 **REPLIK8 0.4.11** : les récepteurs ondes courtes reviennent.
 
 - **La liste des récepteurs ondes courtes était vide** : la page qui les recensait demande maintenant de cliquer avant de les montrer. REPLIK8 lit la liste sur la carte qui la republie toutes les quelques minutes (plus de 800 récepteurs dans le monde), les plus libres en premier, et revient à l'ancienne page si celle-ci ne répond pas

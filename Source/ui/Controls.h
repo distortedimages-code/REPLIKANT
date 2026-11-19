@@ -33,6 +33,7 @@ namespace te
         float defaultNorm = 0.0f;
         int steps = 0;                                   // > 1: that many values (a choice, a whole number)
         bool bipolar = false;
+        float origin = 0.5f;                             // (bipolar) where its zero is (0..1): its lit arc starts there
         bool toggle = false;                             // on or off: drawn as a switch, not a knob
         // how it looks on the desk (chosen from what it is by dress(); a page can choose another):
         //   knob     a knob with its printed scale (ticks, a few values written round it), its value in a small LCD
@@ -41,7 +42,9 @@ namespace te
         //   buttons  a push button per position (a few, short names), a lamp above the one chosen
         //   ledList  the positions written one under the other, a lamp by the one chosen
         //   display  an orange digital display, arrows each side (a click in the middle: the list)
-        enum class Look { knob, toggle, twoWay, buttons, ledList, display };
+        //   tuning   (0.4.12) a big tuning knob: a fluted skirt, a coloured cap, its dial printed round it (0..9, a full
+        //            turn), its value in the LCD; `spin` says how far round it is (in turns)
+        enum class Look { knob, toggle, twoWay, buttons, ledList, display, tuning };
         Look look = Look::knob;
         juce::StringArray options;                       // its positions' names (a choice)
         struct Mark { float at; juce::String label; };   // a value printed round a knob, where it sits (0..1)
@@ -55,6 +58,7 @@ namespace te
         bool sepBefore = false;                          // a line before it on the desk (a new group)
         float quantum = 0.0f;                            // > 0: kept on whole multiples of it (in its own units)
         float dragPixels = 240.0f;                       // the drag that sweeps its whole range
+        std::function<float()> spin;                     // (tuning) how far round the knob is, in turns
         std::function<void()> begin, end;                // the gesture (a host records automation between them)
         std::function<void()> changed;                   // after it was set
         juce::String tip;

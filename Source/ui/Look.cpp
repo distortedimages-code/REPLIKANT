@@ -264,7 +264,7 @@ void ledMeter (juce::Graphics& g, juce::Rectangle<float> r, float level, const j
     }
 }
 
-static void knobInRelief (juce::Graphics& g, juce::Point<float> c, float radius, float value, bool bipolar, juce::Colour cap,
+static void knobInRelief (juce::Graphics& g, juce::Point<float> c, float radius, float value, float fromNorm, juce::Colour cap,
                           float modFrom, float modTo, juce::Colour modColour, bool dim, juce::Colour lit)
 {
     const float pi = juce::MathConstants<float>::pi;
@@ -275,7 +275,7 @@ static void knobInRelief (juce::Graphics& g, juce::Point<float> c, float radius,
     track.addCentredArc (c.x, c.y, ra, ra, 0.0f, angle (0.0f), angle (1.0f), true);
     g.setColour (juce::Colours::black.withAlpha (0.28f));
     g.strokePath (track, juce::PathStrokeType (radius * 0.07f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    const float from = bipolar ? 0.5f : 0.0f;
+    const float from = juce::jlimit (0.0f, 1.0f, fromNorm);
     if (std::abs (value - from) > 1.0e-3f)
     {
         juce::Path arc;
@@ -314,11 +314,88 @@ static void knobInRelief (juce::Graphics& g, juce::Point<float> c, float radius,
     g.drawLine (c.x + rk * 0.45f * std::sin (a), c.y - rk * 0.45f * std::cos (a), c.x + rk * 0.88f * std::sin (a), c.y - rk * 0.88f * std::cos (a), radius * 0.075f);
 }
 
-void encoder (juce::Graphics& g, juce::Point<float> c, float radius, float value, bool bipolar, juce::Colour cap,
+// the big tuning knob: its dial printed on the desk round it (ten figures, fifty graduations, a full turn), then the knob:
+// its shadow, a black skirt fluted all round (the flutes turn with it), a raised body, a coloured cap, its white line
+void tuningKnob (juce::Graphics& g, juce::Point<float> c, float radius, float turn, juce::Colour cap, bool dim, juce::Colour ink)
+{
+    const float twoPi = juce::MathConstants<float>::twoPi;
+    auto at = [c] (float a, float r) { return juce::Point<float> (c.x + std::sin (a) * r, c.y - std::cos (a) * r); };
+    // the dial
+    g.setColour (ink);
+    for (int i = 0; i < 50; ++i)
+    {
+        const float a = twoPi * (float) i / 50.0f;
+        const bool big = i % 5 == 0;
+        g.drawLine ({ at (a, radius * 1.04f), at (a, radius * (big ? 1.15f : 1.09f)) }, big ? 1.3f : 0.8f);
+    }
+    const auto fig = juce::Font (juce::FontOptions (groteskFace (600)).withHeight (juce::jmax (8.5f, radius * 0.24f)));
+    g.setFont (fig);
+    for (int i = 0; i < 10; ++i)
+    {
+        const auto p = at (twoPi * (float) i / 10.0f, radius * 1.29f);
+        g.drawText (juce::String (i), juce::Rectangle<float> (16.0f, 12.0f).withCentre (p), juce::Justification::centred, false);
+    }
+    // its shadow on the desk
+    for (int i = 4; i >= 1; --i)
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.10f));
+        const float rr = radius + (float) i * 0.8f;
+        g.fillEllipse (c.x - rr, c.y - rr + (float) i * 1.4f, rr * 2.0f, rr * 2.0f);
+    }
+    // the skirt: a black disc fluted all round, the flutes turning with it
+    const int flutes = 28;
+    const float a0 = twoPi * turn;
+    juce::Path skirt;
+    for (int k = 0; k <= flutes * 6; ++k)
+    {
+        const float u = (float) k / (float) (flutes * 6);
+        const float a = a0 + twoPi * u;
+        const float bump = 0.5f + 0.5f * std::cos (twoPi * (float) flutes * u);
+        const auto p = at (a, radius * (0.95f + 0.05f * bump));
+        if (k == 0) skirt.startNewSubPath (p); else skirt.lineTo (p);
+    }
+    skirt.closeSubPath();
+    const auto base = dim ? juce::Colour (0xff2c2c2c) : juce::Colour (0xff161616);
+    g.setGradientFill (juce::ColourGradient (base.brighter (0.5f), c.x, c.y - radius, base.darker (0.7f), c.x, c.y + radius, false));
+    g.fillPath (skirt);
+    // the flutes' edges catching the light (lit above, lost below)
+    for (int k = 0; k < flutes; ++k)
+    {
+        const float a = a0 + twoPi * ((float) k + 0.5f) / (float) flutes;
+        const float lit = 0.5f + 0.5f * std::cos (a);
+        g.setColour (juce::Colours::white.withAlpha (0.04f + 0.16f * lit * lit));
+        g.drawLine ({ at (a, radius * 0.80f), at (a, radius * 0.93f) }, 1.0f);
+    }
+    g.setColour (juce::Colours::white.withAlpha (0.14f));
+    g.strokePath (skirt, juce::PathStrokeType (0.8f));
+    // the body, raised: a ring catching the light from above
+    const float rb = radius * 0.74f;
+    g.setGradientFill (juce::ColourGradient (base.brighter (0.9f), c.x, c.y - rb, base.darker (0.5f), c.x, c.y + rb, false));
+    g.fillEllipse (c.x - rb, c.y - rb, rb * 2.0f, rb * 2.0f);
+    g.setGradientFill (juce::ColourGradient (base.brighter (0.25f), c.x, c.y - rb, base, c.x, c.y + rb * 0.6f, false));
+    g.fillEllipse (c.x - rb * 0.9f, c.y - rb * 0.9f, rb * 1.8f, rb * 1.8f);
+    // the cap, its colour, a glint
+    const float rc = radius * 0.46f;
+    const auto capC = dim ? cap.withMultipliedSaturation (0.4f).darker (0.4f) : cap;
+    g.setGradientFill (juce::ColourGradient (capC.brighter (0.45f), c.x - rc * 0.3f, c.y - rc * 0.5f, capC.darker (0.45f), c.x + rc * 0.4f, c.y + rc, true));
+    g.fillEllipse (c.x - rc, c.y - rc, rc * 2.0f, rc * 2.0f);
+    g.setColour (juce::Colours::black.withAlpha (0.45f));
+    g.drawEllipse (c.x - rc, c.y - rc, rc * 2.0f, rc * 2.0f, 1.0f);
+    g.setColour (juce::Colours::white.withAlpha (dim ? 0.12f : 0.32f));
+    g.fillEllipse (c.x - rc * 0.55f, c.y - rc * 0.75f, rc * 0.8f, rc * 0.45f);
+    // the white line, from the cap to the skirt's edge (where it reads on the dial)
+    const auto white = juce::Colour (0xfff3ead9).withAlpha (dim ? 0.45f : 1.0f);
+    g.setColour (white);
+    g.drawLine ({ at (a0, rc * 1.05f), at (a0, radius * 0.97f) }, juce::jmax (2.0f, radius * 0.07f));
+    g.setColour ((capC.getPerceivedBrightness() > 0.6f ? juce::Colour (0xff121312) : white).withMultipliedAlpha (dim ? 0.5f : 1.0f));
+    g.fillEllipse (juce::Rectangle<float> (radius * 0.1f, radius * 0.1f).withCentre (at (a0, rc * 0.55f)));
+}
+
+void encoder (juce::Graphics& g, juce::Point<float> c, float radius, float value, float from, juce::Colour cap,
               juce::Colour notch, float modFrom, float modTo, juce::Colour modColour, bool dim, juce::Colour lit)
 {
     juce::ignoreUnused (notch);
-    knobInRelief (g, c, radius, value, bipolar, cap, modFrom, modTo, modColour, dim, lit);
+    knobInRelief (g, c, radius, value, from, cap, modFrom, modTo, modColour, dim, lit);
 }
 
 void badge (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour ink, juce::Colour face, juce::Colour band, juce::Colour bandInk)

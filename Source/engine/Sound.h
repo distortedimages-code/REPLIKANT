@@ -93,6 +93,8 @@ namespace snd
         rdDensity, rdVary,
         // (0.4.7) LIMIT, the last thing before the outputs (SETTINGS)
         lmOn, lmCeiling, lmRelease, lmDrive,
+        // (0.4.12) RADIO: a station left for another, held and crossfaded (in place of the tuning noise)
+        rdMorph,
         count
     };
 

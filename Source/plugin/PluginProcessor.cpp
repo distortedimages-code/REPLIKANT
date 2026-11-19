@@ -412,13 +412,14 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         rs.grab = V (snd::rdGrab);
         rs.depth = V (snd::rdDepth);
         rs.tune = V (snd::rdTune);
-        rs.stat = V (snd::rdStatic);
+        rs.stat = 0.0f;                                // (0.4.12: no more static)
+        rs.morph = V (snd::rdMorph);
         rs.level = V (snd::rdLevel);
         rs.band = V (snd::rdBand);
         rs.centre = V (snd::rdCentre);
         rs.fade = V (snd::rdFade);
         rs.fadeRate = V (snd::rdRate);
-        rs.whistle = V (snd::rdWhistle);
+        rs.whistle = 0.0f;
         rs.crackle = V (snd::rdCrackle);
         rs.drive = V (snd::rdDrive);
         rs.padTune = V (snd::rdPadTune);
