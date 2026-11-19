@@ -1717,7 +1717,7 @@ void Player::modulate (int offset, int n, const Transport& t, Chunk& c, bool atR
 
 
 // WTF?!: each of the engine's most telling settings pulled from where it is by up to the whole knob's amount, a new
-// pull every eighth note, glided to (30 ms); LOOP draws the same eight again and again
+// pull every eighth note, glided to (30 ms); LOOP draws the same ones (2 to 16, from its seed) again and again
 void Player::applyWtf (double ppq, int n, Chunk& c)
 {
     const float amount = c.v[snd::wtf];
@@ -1731,11 +1731,24 @@ void Player::applyWtf (double ppq, int n, Chunk& c)
     static const int drumIds[wtfCount] = { -1, -1, -1, -1, -1, -1, -1, -1, snd::cutoff, snd::reso };
     const int* ids = synthEngine ? synthIds : (engineNow == snd::drum ? drumIds : samplerIds);
     const auto step = (int64_t) std::floor (ppq * 2.0);
-    if (step != wtfStep)
+    const uint32_t seed = wtfSeed.load (std::memory_order_relaxed);
+    const bool loop = (int) c.v[snd::wtfMode] == 1;
+    if (step != wtfStep || seed != wtfSeedNow)
     {
         wtfStep = step;
-        if ((int) c.v[snd::wtfMode] == 1)
-            wtfRng = 0x7f4a7c15u + (uint32_t) (((step % 8) + 8) % 8) * 2654435761u;   // LOOP: the eighth's own draw
+        wtfSeedNow = seed;
+        if (loop)
+        {
+            // LOOP: the draw of its place in the loop (the first seed, eight long: as before 0.4.5)
+            const int len = juce::jlimit (2, 16, (int) c.v[snd::wtfLen]);
+            const int at = (int) (((step % len) + len) % len);
+            wtfRng = seed + (uint32_t) at * 2654435761u;
+            if (wtfRng == 0)
+                wtfRng = 1;
+            wtfLoopStep.store (at, std::memory_order_relaxed);
+        }
+        else
+            wtfLoopStep.store (-1, std::memory_order_relaxed);
         for (auto& t : wtfTarget)
             t = uniform (wtfRng) * 2.0f - 1.0f;
     }

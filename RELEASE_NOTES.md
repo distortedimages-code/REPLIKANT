@@ -1,3 +1,14 @@
+**REPLIK8 0.4.5** : plus un clic, des effets qui gardent le volume, un suiveur qui écoute ce que tu veux.
+
+- **Plus de clics** : tous les potards glissent en douceur, échantillon par échantillon (les niveaux du mixer, le DRIVE, les positions dans les cycles, le filtre). Changer de modèle de drive ou de filtre, de forme d'onde dans SPECTRE ou de mode dans CHORUS passe par un fondu de quelques millisecondes
+- **Les effets gardent le volume** : SPECTRE, PITCH, CHORUS et ESPACE ne font plus baisser le son. Le mélange sec/effet se fait à puissance constante et l'effet arrive au niveau du son sec : on l'ouvre, il s'ajoute, rien ne se creuse
+- **ESPACE : DRY et WET** séparés. À 100 % de DRY, la réverbe s'ajoute sans rien prendre au son
+- **DRIVE refait** : plus d'effet de phase quand on le mélange (le mélange se fait dans la saturation, la bande pleure pareil à gauche et à droite), et un niveau qui reste à sa place quand on pousse
+- **FOLLOW marche partout** : il écoute l'entrée audio (INPUT), l'instrument lui-même (SELF : ses voix, ou ce que jouent le DRUM et la RADIO), le sidechain du DAW, ou une piste du DRUM seule (DRUM 1 à 8). L'écran montre ce qu'il envoie, en direct
+- **Vers le haut, vers le bas, des deux côtés** : chaque mod a sa polarité, ± (la modulation s'étend des deux côtés du réglage) ou + (elle part du réglage et va d'un seul côté). Une route peut maintenant descendre : arme le mod, tourne le potard vers la gauche. Les enveloppes et les suiveurs passent aussi en ±
+- **WTF?! LOOP** : sa boucle va de 2 à 16 tirages (clique les points), et le dé en tire une nouvelle. En LIVE, le dé relance un tirage tout de suite. La boucle est gardée avec le son
+- **DRUM à 44,1 kHz** : il jouait un peu trop lent et trop grave quand le DAW tournait à 44,1 kHz. Corrigé
+
 **REPLIK8 0.4.4** : CUBE, un filtre qu'on parcourt en trois dimensions.
 
 - **CUBE**, un nouveau modèle dans FILTER : sept sections de résonances et de creux posées aux huit coins d'un cube. Déplace le point dedans et le filtre passe d'un coin à l'autre sans une couture : des voyelles qui se changent l'une en l'autre, des formants qui glissent, des peignes qui s'accordent, des cloches qui deviennent des barres de métal

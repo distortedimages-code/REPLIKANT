@@ -233,6 +233,7 @@ namespace
         { "fSmooth",   "Smooth",                      K::linear,  0, 200, 10, 1, nullptr, false, "ms" },
         { "fTrim",     "Trim",                        K::linear,  -24, 12, 0, 1, nullptr, true, "dB" },
         { "rvDry",     "Dry",                         K::linear,  0, 1, 1, 1, nullptr, true, "%" },
+        { "wtfLen",    "WTF?! steps",                 K::integer, 2, 16, 8, 1, nullptr, false, "" },
     };
 
     std::string fmt (const char* f, double v)
@@ -428,6 +429,7 @@ std::string longName (int id)
     if (in (spClock, spAssign))    return "Spectre " + name;
     if (in (fCube, fTrim))         return "Filter " + name;
     if (id == rvDry)               return "Espace Dry";
+    if (id == wtfLen)              return "WTF?! Steps";
     if (in (rdTake, rdPads))       return "Radio " + name;
     if (in (rdPadTune, rdPadLevel)) return "Radio Pads " + name;
     return name;

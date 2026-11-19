@@ -317,12 +317,15 @@ private:
     static constexpr int wtfCount = 10;
     std::array<float, wtfCount> wtfTarget {}, wtfNow {};
     int64_t wtfStep = -1;
-    uint32_t wtfRng = 0x7f4a7c15u;
+    uint32_t wtfRng = 0x7f4a7c15u, wtfSeedNow = 0x7f4a7c15u;
     void applyWtf (double ppq, int n, Chunk&);
 public:
     // WTF?!'s pulls now (normalised, its amount in them): the DRUM takes them for its hits
     const float* wtfPulls() const        { return wtfNow.data(); }
     static constexpr int numWtfPulls = wtfCount;
+    // LOOP's draws come from this seed (kept with the sound): a new one, a new loop (LIVE: a new draw at once)
+    std::atomic<uint32_t> wtfSeed { 0x7f4a7c15u };
+    std::atomic<int> wtfLoopStep { -1 };     // the draw LOOP plays now (-1: LIVE)
 private:
 
     // modulators

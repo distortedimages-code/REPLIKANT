@@ -1126,6 +1126,7 @@ void ReplikantProcessor::getStateInformation (juce::MemoryBlock& dest)
     if (auto st = params.copyState().createXml())
         xml.addChildElement (st.release());
     xml.setAttribute ("routes", juce::JSON::toString (modsToVar(), true));
+    xml.setAttribute ("wtfSeed", juce::String ((juce::int64) player.wtfSeed.load()));
     xml.setAttribute ("scenes", juce::JSON::toString (scenesToVar(), true));
     xml.setAttribute ("fxOrder", juce::JSON::toString (fxOrderToVar(), true));
     {
@@ -1181,6 +1182,7 @@ void ReplikantProcessor::setStateInformation (const void* data, int size)
     // the routes, steps and loops of the modulators (not parameters)
     if (xml->hasAttribute ("routes"))
         modsFromVar (juce::JSON::parse (xml->getStringAttribute ("routes")));
+    player.wtfSeed = (uint32_t) xml->getStringAttribute ("wtfSeed", "2135587861").getLargeIntValue();
     scenesFromVar (juce::JSON::parse (xml->getStringAttribute ("scenes")));
     fxOrderFromVar (juce::JSON::parse (xml->getStringAttribute ("fxOrder")));
     // RADIO: the receivers tuned as they were (connected when the tab listens to one), the take read back
@@ -1314,6 +1316,7 @@ juce::var ReplikantProcessor::soundToVar() const
             p->setProperty (snd::def (i).id, (double) player.get (i));
     o->setProperty ("params", juce::var (p));
     o->setProperty ("mods", modsToVar());
+    o->setProperty ("wtfSeed", (juce::int64) player.wtfSeed.load());
     o->setProperty ("scenes", scenesToVar());
     o->setProperty ("fxOrder", fxOrderToVar());
     return juce::var (o);
@@ -1360,6 +1363,7 @@ void ReplikantProcessor::soundFromVar (const juce::var& v)
             param->setValueNotifyingHost (param->convertTo0to1 (snd::legal (i, value)));
         }
     modsFromVar (v["mods"]);
+    player.wtfSeed = v.hasProperty ("wtfSeed") ? (uint32_t) (juce::int64) v["wtfSeed"] : 0x7f4a7c15u;
     scenesFromVar (v["scenes"]);
     fxOrderFromVar (v["fxOrder"]);
     sendChangeMessage();

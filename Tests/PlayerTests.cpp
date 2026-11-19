@@ -1653,6 +1653,47 @@ static void testFollower()
     }
 }
 
+// WTF?! LOOP (0.4.5): its length (2 to 16 draws) loops, a new seed draws another loop; LIVE never repeats
+static void testWtfLoop()
+{
+    auto draws = [] (float mode, int len, uint32_t seed, int count)
+    {
+        Player p;
+        plain (p);
+        p.set (snd::wtf, 1.0f);
+        p.set (snd::wtfMode, mode);
+        p.set (snd::wtfLen, (float) len);
+        p.wtfSeed = seed;
+        std::vector<float> out;
+        juce::AudioBuffer<float> buf (2, 256);
+        Player::Transport t;
+        t.playing = true;
+        t.bpm = 120.0;
+        const int eighth = (int) (sr * 0.25);
+        for (int pos = 0; pos < eighth * count; pos += 256)
+        {
+            t.ppq = (double) pos / sr * 2.0;
+            buf.clear();
+            p.render (buf, {}, t, nullptr, 0, false);
+            if ((pos / 256) % (eighth / 256) == (eighth / 256) - 2)
+                out.push_back (p.wtfPulls()[0]);       // (late in each eighth: glided there)
+        }
+        return out;
+    };
+    auto a = draws (1.0f, 3, 0x7f4a7c15u, 9);
+    bool loops = a.size() == 9;
+    for (size_t i = 3; i < a.size(); ++i)
+        loops = loops && std::abs (a[i] - a[i - 3]) < 1.0e-3f;
+    CHECK (loops && std::abs (a[0] - a[1]) > 1.0e-3f, "LOOP of 3 comes back every 3 eighths");
+    auto b = draws (1.0f, 3, 12345u, 3);
+    CHECK (b.size() == 3 && std::abs (a[0] - b[0]) + std::abs (a[1] - b[1]) > 1.0e-2f, "a new seed, another loop");
+    auto c = draws (0.0f, 3, 0x7f4a7c15u, 9);
+    bool repeats = true;
+    for (size_t i = 3; i < c.size(); ++i)
+        repeats = repeats && std::abs (c[i] - c[i - 3]) < 1.0e-3f;
+    CHECK (! repeats, "LIVE draws anew");
+}
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI gui;
@@ -1698,6 +1739,7 @@ int main()
     testVoices();
     testFilterModsFx();
     testFollower();
+    testWtfLoop();
     testSmoothing();
     testSynth();
     testStability();

@@ -2418,7 +2418,8 @@ class WtfPanel : public juce::Component,
 public:
     explicit WtfPanel (Machine& mm) : m (mm)
     {
-        setTooltip ("WTF?! : le son tiré loin de lui-même, un nouveau tirage à chaque croche (LIVE) ou une boucle de huit qui revient (LOOP). RETOUR : le son tel qu'il est."_fr);
+        setTooltip ("WTF?! : le son tiré loin de lui-même, un nouveau tirage à chaque croche (LIVE) ou une boucle de tirages qui revient (LOOP). "
+                    "Les points : la longueur de la boucle, de 2 à 16 (clique-les). Le dé : un nouveau tirage, une nouvelle boucle. BACK : le son tel qu'il est."_fr);
     }
 
     void paint (juce::Graphics& g) override
@@ -2427,19 +2428,50 @@ public:
         g.setColour (col::face);
         g.fillRoundedRectangle (r, 14.0f);
         auto in = r.reduced (10.0f, 8.0f);
-        text (g, "wtf?!", in.removeFromTop (18.0f), mono (13.0f, 600), col::red, juce::Justification::centred);
-        knob = in.removeFromTop (96.0f);
+        text (g, "wtf?!", in.removeFromTop (16.0f), mono (13.0f, 600), col::red, juce::Justification::centred);
+        knob = in.removeFromTop (juce::jlimit (60.0f, 96.0f, in.getHeight() - 84.0f));
         const float v = P (m.proc, snd::wtf);
-        encoder (g, knob.getCentre(), 44.0f, v, false, col::red, juce::Colours::white, 0.0f, 0.0f, {}, false, col::red);
-        text (g, juce::String (juce::roundToInt (v * 100.0f)) + " %", in.removeFromTop (20.0f), mono (14.0f, 500), col::ink, juce::Justification::centred);
-        auto row = in.removeFromBottom (30.0f);
-        modeKey = row.removeFromLeft (row.getWidth() * 0.5f - 3.0f);
-        row.removeFromLeft (6.0f);
-        backKey = row;
+        encoder (g, knob.getCentre(), juce::jmin (44.0f, knob.getHeight() * 0.42f), v, false, col::red, juce::Colours::white, 0.0f, 0.0f, {}, false, col::red);
+        text (g, juce::String (juce::roundToInt (v * 100.0f)) + " %", in.removeFromTop (16.0f), mono (13.0f, 500), col::ink, juce::Justification::centred);
+
+        // LOOP's length: sixteen points, the loop's lit (the draw playing brighter); LIVE: dimmed
         const bool loop = P (m.proc, snd::wtfMode) > 0.5f;
+        const int len = juce::jlimit (2, 16, (int) P (m.proc, snd::wtfLen));
+        const int now = m.proc.player.wtfLoopStep.load();
+        auto row = in.removeFromBottom (28.0f);
+        in.removeFromBottom (6.0f);
+        dots = in.removeFromBottom (22.0f);
+        const float cw = dots.getWidth() / 8.0f, ch = dots.getHeight() / 2.0f;
+        for (int i = 0; i < 16; ++i)
+        {
+            const auto cell = juce::Rectangle<float> (dots.getX() + cw * (float) (i % 8), dots.getY() + ch * (float) (i / 8), cw, ch);
+            const auto d = cell.withSizeKeepingCentre (7.0f, 7.0f);
+            const bool inLoop = i < len;
+            if (loop && inLoop && i == now && v > 0.0f)
+            {
+                g.setColour (col::red.withAlpha (0.35f));
+                g.fillEllipse (d.expanded (2.5f));
+            }
+            g.setColour (! inLoop ? col::ink3.withAlpha (0.35f)
+                                  : (loop ? (i == now ? col::red : col::ink.withAlpha (0.75f)) : col::ink3.withAlpha (0.8f)));
+            if (inLoop)
+                g.fillEllipse (d);
+            else
+                g.drawEllipse (d.reduced (0.5f), 1.0f);
+        }
+
+        // the keys: LIVE / LOOP, a new draw (the die), BACK
+        const float kw = (row.getWidth() - 8.0f) / 3.0f;
+        modeKey = row.removeFromLeft (kw + 6.0f);
+        row.removeFromLeft (4.0f);
+        newKey = row.removeFromLeft (kw - 12.0f);
+        row.removeFromLeft (4.0f);
+        backKey = row;
         key (g, modeKey, KeyState::on, false, 6.0f);
+        key (g, newKey, KeyState::normal, false, 6.0f);
         key (g, backKey, KeyState::normal, false, 6.0f);
         text (g, loop ? "loop" : "live", modeKey.withTrimmedBottom (3.0f), mono (11.0f, 500), col::keyOnInk, juce::Justification::centred);
+        picto (g, Picto::random, newKey.withTrimmedBottom (3.0f).withSizeKeepingCentre (18.0f, 18.0f), col::ink, 1.3f);
         text (g, "back", backKey.withTrimmedBottom (3.0f), mono (11.0f, 500), col::ink, juce::Justification::centred);
     }
 
@@ -2447,6 +2479,26 @@ public:
     {
         if (modeKey.contains (e.position)) { setSound (m.proc, snd::wtfMode, P (m.proc, snd::wtfMode) > 0.5f ? 0.0f : 1.0f); repaint(); return; }
         if (backKey.contains (e.position)) { setSound (m.proc, snd::wtf, 0.0f); repaint(); return; }
+        if (newKey.contains (e.position))
+        {
+            uint32_t s = 0;
+            while (s == 0 || s == m.proc.player.wtfSeed.load())
+                s = (uint32_t) juce::Random::getSystemRandom().nextInt();
+            m.proc.player.wtfSeed = s;
+            repaint();
+            return;
+        }
+        if (dots.contains (e.position))
+        {
+            const float cw = dots.getWidth() / 8.0f, ch = dots.getHeight() / 2.0f;
+            const int col = juce::jlimit (0, 7, (int) ((e.position.x - dots.getX()) / cw));
+            const int rowIx = juce::jlimit (0, 1, (int) ((e.position.y - dots.getY()) / ch));
+            setSound (m.proc, snd::wtfLen, (float) juce::jmax (2, rowIx * 8 + col + 1));
+            if (P (m.proc, snd::wtfMode) < 0.5f)
+                setSound (m.proc, snd::wtfMode, 1.0f);       // (a length is a loop's)
+            repaint();
+            return;
+        }
         if (knob.contains (e.position))
         {
             start = P (m.proc, snd::wtf);
@@ -2473,7 +2525,7 @@ public:
 
 private:
     Machine& m;
-    juce::Rectangle<float> knob, modeKey, backKey;
+    juce::Rectangle<float> knob, modeKey, newKey, backKey, dots;
     float start = 0.0f;
     bool turning = false;
 };
@@ -3813,6 +3865,7 @@ void Machine::showBank (int bank)
     if (p < 0 || p >= (int) pgs.size())
         return;
     bankOf[pgs[(size_t) p].name + juce::String (capture ? 9 : mode)] = juce::jlimit (0, (int) pgs[(size_t) p].banks.size() - 1, bank);
+    focus = nullptr;            // (the new bank's first)
     layoutEncoders();
     repaint();
 }

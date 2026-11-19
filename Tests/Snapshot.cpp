@@ -167,6 +167,23 @@ int main (int argc, char** argv)
     set (snd::fZ, 0.25f);
     run (60);
     shoot ("48-filtre-cube-bells.png");
+    // (0.4.5) a follower listening to the instrument itself, both ways round the cutoff; WTF?! looping six draws
+    set (snd::m2Type, 4.0f);
+    set (snd::m2Source, 1.0f);
+    set (snd::m2Polarity, 0.0f);
+    set (snd::m2Gain, 18.0f);
+    proc.player.setRoute (1, snd::cutoff, 0.35f);
+    set (snd::wtf, 0.45f);
+    set (snd::wtfMode, 1.0f);
+    set (snd::wtfLen, 6.0f);
+    view->showPage (8);
+    view->showBank (1);
+    run (120);
+    shoot ("49-mods-follow.png");
+    set (snd::wtf, 0.0f);
+    set (snd::wtfMode, 0.0f);
+    proc.player.setRoute (1, snd::cutoff, 0.0f);
+    view->showBank (0);
     set (snd::reso, 0.45f);
     set (snd::cutoff, 1800.0f);
     set (snd::fModel, 1.0f);
