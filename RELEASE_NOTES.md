@@ -1,4 +1,4 @@
-**REPLIK8 0.4.22** : les phrases des schémas de WEAVE ne sont plus coupées.
+**REPLIK8 0.4.23** : les phrases des schémas de WEAVE ne sont plus coupées (la 0.4.22, qui n'avait pas pu être construite).
 
 - **Les schémas de WEAVE** : la phrase sous chaque dessin passe sur deux lignes quand il le faut, au lieu d'être coupée. Sans son chargé, la mention « exemple : 4 sons » est dans un coin du dessin plutôt que devant la phrase
 
