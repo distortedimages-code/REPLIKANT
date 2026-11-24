@@ -1771,10 +1771,18 @@ private:
         const int grid = juce::jmax (8, st.grid), perBeat = grid / 4;
         const double bpm = juce::jmax (20.0, (double) P (p, snd::tempo));
         const auto dim = col::screenDim, ln = col::screenLine, ink = col::screenText, hot = col::sOrange;
-        auto caption = r.removeFromBottom (14.0f);
-        r.removeFromBottom (6.0f);
+        // (the line saying it: two lines when it needs them, never cut)
+        auto caption = r.removeFromBottom (26.0f);
+        r.removeFromBottom (4.0f);
         juce::String cap;
         auto small = [] { return mono (9.5f); };
+        if (n == 0)
+        {
+            // (no sound yet: four made up, said in a corner)
+            auto note = r.removeFromTop (12.0f);
+            text (g, "exemple : 4 sons"_fr, note, small(), dim.withAlpha (0.7f), juce::Justification::centredRight);
+            r.removeFromTop (2.0f);
+        }
 
         // a row of steps: each its sound's ink (as lit as `lit` says), the fixed ones underlined, the accidents marked
         auto row = [&] (juce::Rectangle<float> a, const weave::Step* s, int cnt, auto&& lit, bool marks)
@@ -2328,9 +2336,9 @@ private:
                 break;
             }
         }
-        if (n == 0)
-            cap = "(quatre sons pour l'exemple) "_fr + cap;
-        text (g, cap, caption, mono (9.5f), dim, juce::Justification::centredLeft);
+        g.setColour (dim);
+        g.setFont (mono (9.5f));
+        g.drawFittedText (themed (cap), caption.toNearestInt(), juce::Justification::bottomLeft, 2, 1.0f);
         juce::ignoreUnused (all, soundWord);
     }
 

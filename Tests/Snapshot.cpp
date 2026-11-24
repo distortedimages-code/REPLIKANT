@@ -97,6 +97,15 @@ int main (int argc, char** argv)
             view->showPage (0);
             run (20);
             shoot ("81-weave-vide.png");
+        // (no sound yet: SEED's drawing, made of four, its line whole)
+        view->showBank (0);
+        for (const auto& c : view->pagesNow()[0].banks[0].ctls)
+            if (c.param == snd::wvSeed || c.param == snd::wvSpan)
+            {
+                view->touch (c);
+                run (3);
+                shoot ("81-weave-vide-seed.png");
+            }
             // ten sounds made here: loops of a bar or two at 120, textures, a tone
             auto wdir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("rk-weave-shots");
             wdir.deleteRecursively();

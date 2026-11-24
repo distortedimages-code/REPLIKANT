@@ -4,6 +4,10 @@
 
 **Page de téléchargement** : https://distortedimages-code.github.io/REPLIKANT/
 
+## La version 0.4.22 : les légendes entières
+
+- **`paintWeaveViz`** : la légende sur 26 px, en `drawFittedText` sur deux lignes au plus, sans réduire la police ; sans son, « exemple : 4 sons » en haut à droite du dessin. Capture `81-weave-vide-seed`.
+
 ## La version 0.4.21 : START, les schémas de WEAVE
 
 - **`weave::Settings::restart`** (`snd::wvStart`, ajouté à la fin) : `Step::age` (les pas depuis que la tête est sur ce son ; la série de la fin de la trame continue au début quand elle revient) ; en RESTART la source est `(age + shift, ou age si c'est négatif) + local`, au lieu de `S + shift + local`. Testé dans `WeaveTests::testReading (true)` (le bon son au bon endroit, le début à chaque changement, les âges).

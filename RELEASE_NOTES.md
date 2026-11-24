@@ -1,3 +1,7 @@
+**REPLIK8 0.4.22** : les phrases des schémas de WEAVE ne sont plus coupées.
+
+- **Les schémas de WEAVE** : la phrase sous chaque dessin passe sur deux lignes quand il le faut, au lieu d'être coupée. Sans son chargé, la mention « exemple : 4 sons » est dans un coin du dessin plutôt que devant la phrase
+
 **REPLIK8 0.4.21** : WEAVE peut reprendre chaque son à son début, et chaque réglage se dessine sur l'écran.
 
 - **START** (WEAVE, page THREADS) : SYNC, comme avant (la tête prend un son là où en est le morceau, le groove continue d'une boucle à l'autre), ou RESTART (elle le reprend à son début chaque fois qu'elle y arrive : des attaques, plus percussif). En RESTART, un décalage de TIME qui tomberait avant le début du son repart de son attaque
