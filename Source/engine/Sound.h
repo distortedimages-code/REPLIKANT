@@ -100,6 +100,11 @@ namespace snd
         elEngine, elFreeze, elSmear, elTonal, elHarm, elShimmer, elWidth,
         // (0.4.16) the mixer's mutes (on the screen): OSC A or the sample, OSC B, the sub, the noise, ORBITE
         muteA, muteB, muteSub, muteNoise, muteOrb,
+        // (0.4.20) WEAVE (weave/Weave.h): up to sixteen sounds on one grid, a head jumping from one to the other in
+        // rhythm. The rules (BEAT, BACK, MOVE and its STYLE), the accidents (TIME, STUTTER, REVERSE, MUTATE), the
+        // pattern (LENGTH, SEED); how the sounds are fitted (FIT, SPAN, GRID, XFADE, GRAIN) and its level
+        wvBeat, wvBack, wvMove, wvStyle, wvTime, wvStutter, wvReverse, wvMutate, wvLength, wvSeed,
+        wvFit, wvSpan, wvGrid, wvXfade, wvGrain, wvLevel,
         count
     };
 
@@ -112,7 +117,7 @@ namespace snd
     inline int drumDestTrack (int d)                { return (d - count) / drumDestStride; }
     inline int drumDestParam (int d)                { return (d - count) % drumDestStride; }
     constexpr int numDests = count + drumDestTracks * drumDestStride;
-    enum Engine { synth = 0, drum = 1, sampler = 2, radio = 3 };
+    enum Engine { synth = 0, drum = 1, sampler = 2, radio = 3, weave = 4 };
     // what a scene can hold (everything but the scenes themselves and a few settings of the whole)
     bool sceneLockable (int id);
     // what a mod can be routed to: the settings marked modulatable, and (0.4.7) the stepped ones that can change

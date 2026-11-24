@@ -1,3 +1,16 @@
+**REPLIK8 0.4.20** : WEAVE tisse jusqu'à seize sons en rythme, et une icône montre où glisser un son.
+
+- **WEAVE** (touche SAMPLER, puis WEAVE en haut de l'écran) : glisse jusqu'à seize sons sur la fenêtre (des boucles, des textures, des voix…). Chacun est calé sur une longueur en mesures, la plus proche de sa durée, et lu là où en est le morceau. Une tête saute d'un son à l'autre en rythme, sans perdre le temps.
+  - **Les règles** : BEAT, le son qui tombe sur chaque temps (la trame y revient toujours) ; BACK, celui des temps 2 et 4, la place des caisses claires ; MOVE, combien la tête change de son entre les temps, et STYLE, où elle va (RANDOM, WALK dans l'ordre, EUCLID réparti régulièrement, CALL en question-réponse).
+  - **Les accidents heureux** : TIME (un pas lit un autre moment de son son), STUTTER (des répétitions), REVERSE (à l'envers), MUTATE (à chaque passage, une part des pas est retirée : la trame évolue doucement). Les temps fixes restent propres.
+  - **La trame** : LENGTH (1, 2 ou 4 mesures), SEED et DRAW (NEW tire une autre trame, BACK revient à celle d'avant).
+  - **Page THREADS** : FIT (TAPE, la hauteur suit la vitesse comme une bande ; STRETCH, la hauteur gardée, relue en grains), SPAN (la longueur de calage, AUTO ou d'un temps à seize mesures), GRID (croche, double, triple croche), XFADE (le fondu à chaque saut), LEVEL.
+  - Il suit le transport de ta station ou la touche lecture. À l'arrêt, une touche du clavier le lance. Une touche tenue force un son partout (C3 le premier, C#3 le deuxième…).
+  - L'écran montre la trame en couleurs (un son, une couleur ; les temps fixes soulignés ; répétitions, envers et décalages marqués, la tête de lecture) et la liste des sons avec leur forme et leur longueur. La croix en retire un.
+  - Ensuite le filtre, les effets, les mods et les scènes, comme dans les autres modes. Les sons restent avec le projet.
+- **Plusieurs sons glissés sur le SAMPLER** partent dans WEAVE.
+- **Glisser-déposer** : quand tu survoles la fenêtre avec des fichiers, une carte avec une icône dit ce que le dépôt va faire (WEAVE, la piste du DRUM, le sampler). Une petite icône dans un coin de l'écran montre où un son peut se déposer (le sampler, la page SOURCE d'une piste du DRUM, WEAVE)
+
 **REPLIK8 0.4.19** : les sélecteurs de mode se détachent.
 
 - **SYNTH, DRUM, SAMPLER, RADIO** : les quatre touches qui changent de mode ont maintenant un liseret doré gravé à l'intérieur (sombre sur la touche allumée), un texte en gras et des pictos plus épais. On les distingue d'un coup d'œil des autres touches du haut (CAPTURE, FILE, PACK). Chacune a la largeur de son nom, pour que le texte respire partout

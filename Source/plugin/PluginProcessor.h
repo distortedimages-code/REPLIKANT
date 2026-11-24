@@ -13,6 +13,7 @@
 #include "../engine/TestSynth.h"
 #include "../radio/RadioCore.h"
 #include "../drum/DrumCore.h"
+#include "../weave/Weave.h"
 #include "Updater.h"
 #include "MidiClock.h"
 
@@ -205,6 +206,21 @@ public:
     bool drumLoadFile (int track, const juce::File&, juce::String& why);
     void drumClearSound (int track);
 
+    // (0.4.20) WEAVE (weave/Weave.h): up to sixteen sounds, in order, read on one grid. Dropped or chosen, they're
+    // read in the background (32 s at most each) and kept with the project (a WAV where it is, anything else copied
+    // as a WAV beside the instruments, Weave/)
+    weave::Engine weave;
+    int weaveCount() const;
+    juce::String weaveName (int i) const;
+    std::shared_ptr<const weave::Audio> weaveAudio (int i) const;
+    void weaveAdd (const juce::StringArray& files);   // after the ones there (a folder: its sounds)
+    void weaveRemove (int i);
+    void weaveMove (int from, int to);
+    std::atomic<int> weaveLoading { 0 };             // files being read
+    // its settings as set (modulated: as the mods and the scenes move them now)
+    weave::Settings weaveSettings (bool modulated) const;
+    static bool isWeaveSound (const juce::File&);
+
     // the MIDI clock
     MidiClock clock;
     bool clockWithSampling = false;               // a sampling session starts and stops it
@@ -359,6 +375,15 @@ private:
     std::array<DrumSlot, drum::numTracks> drumSlots;
     struct KeptSound { std::shared_ptr<const drum::Sound> sound; double retiredAt = 0.0; };
     std::vector<KeptSound> drumKept;
+    struct WeaveSlot { std::shared_ptr<const weave::Audio> audio; juce::String path, name; };
+    std::vector<WeaveSlot> weaveSlots;
+    struct KeptWeave { std::shared_ptr<const weave::Audio> audio; double retiredAt = 0.0; };
+    std::vector<KeptWeave> weaveKept;
+    void weavePublish();                             // the slots to the engine (the ones dropped kept a moment)
+    juce::var weaveToVar() const;
+    void weaveFromVar (const juce::var&);
+    double weavePpq = 0.0;
+    bool weaveClockWas = false;
     std::shared_ptr<const dsp::CycleBank> drumBasic, drumCaptured, drumCapturedBefore;
     double drumCapturedSince = 0.0;
     double drumPpq = 0.0;

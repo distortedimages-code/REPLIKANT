@@ -97,7 +97,8 @@ namespace te
         orbit, mixer,                                           // (0.3.2) ORBITE, the MIXEUR
         radio, antenna, air, slice, pads,                       // (0.3.5) RADIO: the mode, its pages
         cube,                                                   // (0.4.4) the filter's CUBE
-        echo                                                    // (0.4.5) ECHO
+        echo,                                                   // (0.4.5) ECHO
+        drop, weave                                             // (0.4.20) a sound to drop here; WEAVE
     };
     // drawn in the square centred in the area, `thickness` in pixels
     void picto (juce::Graphics&, Picto, juce::Rectangle<float>, juce::Colour, float thickness = 1.5f);

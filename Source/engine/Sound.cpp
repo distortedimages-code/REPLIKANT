@@ -141,7 +141,7 @@ namespace
         { "sceneB",    "Scene B",                     K::integer, 1, 16, 2, 1, nullptr, false, "" },
         { "tempo",     "Tempo",                       K::linear,  40, 300, 120, 1, nullptr, false, "bpm" },
 
-        { "engine",    "Engine",                      K::choice,  0, 3, 0, 1, "SYNTH|DRUM|SAMPLER|RADIO", false, "" },
+        { "engine",    "Engine",                      K::choice,  0, 4, 0, 1, "SYNTH|DRUM|SAMPLER|RADIO|WEAVE", false, "" },
         { "oaBank",    "Bank",                        K::choice,  0, 1, 0, 1, "BASIC|CAPTURED", false, "" },
         { "oaPos",     "Position",                    K::linear,  0, 1, 0.2857f, 1, nullptr, true, "%" },
         { "oaOct",     "Octave",                      K::integer, -3, 3, 0, 1, nullptr, false, "oct" },
@@ -277,6 +277,22 @@ namespace
         { "muteSub",   "Mute Sub",                    K::toggle,  0, 1, 0, 1, nullptr, false, "" },
         { "muteNoise", "Mute Noise",                  K::toggle,  0, 1, 0, 1, nullptr, false, "" },
         { "muteOrb",   "Mute Orbite",                 K::toggle,  0, 1, 0, 1, nullptr, false, "" },
+        { "wvBeat",    "Beat",                        K::choice,  0, 16, 1, 1, "OFF|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16", false, "" },
+        { "wvBack",    "Back",                        K::choice,  0, 16, 0, 1, "OFF|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16", false, "" },
+        { "wvMove",    "Move",                        K::linear,  0, 1, 0.5f, 1, nullptr, true, "%" },
+        { "wvStyle",   "Style",                       K::choice,  0, 3, 0, 1, "RANDOM|WALK|EUCLID|CALL", false, "" },
+        { "wvTime",    "Time",                        K::linear,  0, 1, 0.15f, 1, nullptr, true, "%" },
+        { "wvStutter", "Stutter",                     K::linear,  0, 1, 0.1f, 1, nullptr, true, "%" },
+        { "wvReverse", "Reverse",                     K::linear,  0, 1, 0, 1, nullptr, true, "%" },
+        { "wvMutate",  "Mutate",                      K::linear,  0, 1, 0, 1, nullptr, true, "%" },
+        { "wvLength",  "Length",                      K::choice,  0, 2, 0, 1, "1 BAR|2 BARS|4 BARS", false, "" },
+        { "wvSeed",    "Seed",                        K::integer, 1, 999, 1, 1, nullptr, false, "" },
+        { "wvFit",     "Fit",                         K::choice,  0, 1, 0, 1, "TAPE|STRETCH", false, "" },
+        { "wvSpan",    "Span",                        K::choice,  0, 7, 0, 1, "AUTO|1/4|1/2|1 BAR|2 BARS|4 BARS|8 BARS|16 BARS", false, "" },
+        { "wvGrid",    "Grid",                        K::choice,  0, 2, 1, 1, "1/8|1/16|1/32", false, "" },
+        { "wvXfade",   "Xfade",                       K::log,     0.5f, 40, 4, 1, nullptr, true, "ms" },
+        { "wvGrain",   "Grain",                       K::log,     20, 200, 70, 1, nullptr, true, "ms" },
+        { "wvLevel",   "Level",                       K::linear,  -24, 12, 0, 1, nullptr, true, "dB" },
     };
 
     std::string fmt (const char* f, double v)
@@ -322,7 +338,7 @@ bool modulates (int id)
     static const int stepped[] = { transpose, reverse, fModel, fType, dModel, spOct, spWave, piA, piB, chMode, oaBank, oaOct, oaSemi,
                                    obBank, obOct, obSemi, orAlgo, orOct, orSemi, s1Wave, s2Wave, subMode, subOct, rdRx, rdMode, rdLen,
                                    spClock, spMult, spDiv, spAssign, fCube, wtfMode, wtfLen, ecSync, ecHeads, ecDir, ecMotion,
-                                   cpAttack, cpRelease };
+                                   cpAttack, cpRelease, wvBeat, wvBack, wvStyle, wvSeed };
     for (int s : stepped)
         if (s == id)
             return true;
@@ -496,6 +512,7 @@ std::string longName (int id)
     if (id == rdDensity || id == rdVary || id == rdMorph) return "Radio " + name;
     if (in (elEngine, elWidth))    return "Stretch " + name;
     if (in (muteA, muteOrb))       return "Mixer " + name;
+    if (in (wvBeat, wvLevel))      return "Weave " + name;
     if (in (lmOn, lmDrive))        return id == lmOn ? std::string ("Output Limit") : "Limit " + name;
     if (in (rdTake, rdPads))       return "Radio " + name;
     if (in (rdPadTune, rdPadLevel)) return "Radio Pads " + name;

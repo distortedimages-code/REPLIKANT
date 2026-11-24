@@ -422,6 +422,20 @@ void picto (juce::Graphics& g, Picto kind, juce::Rectangle<float> area, juce::Co
             break;
         }
 
+        case Picto::drop:
+            // a tray, an arrow coming down into it
+            d.lines ({ { 0.08f, 0.56f }, { 0.08f, 0.9f }, { 0.92f, 0.9f }, { 0.92f, 0.56f } });
+            d.line (0.5f, 0.06f, 0.5f, 0.68f);
+            d.lines ({ { 0.28f, 0.47f }, { 0.5f, 0.69f }, { 0.72f, 0.47f } });
+            break;
+
+        case Picto::weave:
+            // three threads crossing over and under each other
+            d.stroke (d.wave (0.04f, 0.96f, 0.5f, 0.3f, 1.0f, sinePhase));
+            d.stroke (d.wave (0.04f, 0.96f, 0.5f, 0.3f, 1.0f, [] (float ph, float) { return -std::sin (ph * twoPi); }), 0.8f);
+            d.line (0.04f, 0.5f, 0.96f, 0.5f, 0.6f);
+            break;
+
         case Picto::cube:
         {
             // a cube seen from above, a point inside it

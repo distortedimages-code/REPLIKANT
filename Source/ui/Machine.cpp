@@ -7,6 +7,7 @@
 #include "../dsp/VAFilter.h"
 
 #include <RkNotesData.h>
+#include <map>
 
 #if JucePlugin_Build_Standalone
  #include <juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h>
@@ -176,6 +177,8 @@ public:
         zones.clear();
         switches.clear();
         tabs.clear();
+        sideArea = weaveAddArea = {};
+        weaveRemoves.clear();
         auto titleRow = in.removeFromTop (22.0f);
         paintTitle (g, titleRow);
         // (0.4.7) a mod armed: how to route it, over the title
@@ -228,8 +231,17 @@ public:
             paintSynth (g, in);
         else if (m.mode == Machine::samplerMode)
             paintSampler (g, in);
+        else if (m.mode == Machine::weaveMode)
+            paintWeave (g, in);
         else
             paintDrum (g, in);
+        // (0.4.20) where a sound can be dropped: said in a corner (the sampler's sound, a track's)
+        if (! m.capture && ((m.mode == Machine::samplerMode && (vizNow == "lecture" || vizNow == "loop"))
+                            || (m.mode == Machine::drumMode && vizNow == "dsrc")))
+            dropHint (g, in.withHeight (18.0f),
+                      m.mode == Machine::drumMode ? "glisse un son : piste "_fr + juce::String (proc().drumTrack.load() + 1)
+                                                  : juce::String ("glisse un son ici (plusieurs : WEAVE)"_fr),
+                      col::screenDim);
         paintPanel (g, panel);
         const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
         if (m.message.isNotEmpty() && now < m.messageUntil)
@@ -317,9 +329,27 @@ public:
             editSteps (e);
             return;
         }
+        // (0.4.20) the sampler or WEAVE
+        if (sideArea.contains (e.position))
+        {
+            m.showMode (m.mode == Machine::weaveMode ? Machine::samplerMode : Machine::weaveMode);
+            return;
+        }
+        for (auto& [area, i] : weaveRemoves)
+            if (area.contains (e.position))
+            {
+                proc().weaveRemove (i);
+                repaint();
+                return;
+            }
+        if (weaveAddArea.contains (e.position))
+        {
+            m.openWeave();
+            return;
+        }
         // (0.4.16) a switch on the screen (the mixer's mutes): flipped
         for (auto& [area, id] : switches)
-            if (area.contains (e.position))
+            if (id >= 0 && area.contains (e.position))
             {
                 if (auto* q = proc().params.getParameter (snd::def (id).id))
                 {
@@ -540,6 +570,10 @@ public:
     static constexpr float kC30 = 0.8660254f, kS30 = 0.5f;
     static constexpr int cubeIds[3] = { snd::cutoff, snd::fY, snd::fZ };
     std::vector<juce::Rectangle<float>> tabs;
+    // (0.4.20) the switch between the sampler and WEAVE (the title's tag); WEAVE's: its sounds' crosses, its drop zone
+    juce::Rectangle<float> sideArea, weaveAddArea;
+    std::vector<std::pair<juce::Rectangle<float>, int>> weaveRemoves;
+    std::map<const weave::Audio*, std::vector<float>> weavePeaks;
     bool radioShown = false, heardPress = false;     // (0.4.16) the radio's screen painted; a hand on its memory
     struct Zone { juce::Rectangle<float> area; int xId = -1, yId = -1; float xSpan = 1.0f, ySpan = 1.0f; };
     std::vector<Zone> zones;
@@ -1215,6 +1249,9 @@ private:
             tab = tab || t.contains (e.position);
         for (auto& s : switches)
             tab = tab || s.first.contains (e.position);
+        for (auto& s : weaveRemoves)
+            tab = tab || s.first.contains (e.position);
+        tab = tab || weaveAddArea.contains (e.position);
         if (radioShown && radioScreen.heardArea.contains (e.position))
         {
             setMouseCursor (juce::MouseCursor::IBeamCursor);       // (the memory: a click, a drag)
@@ -1247,6 +1284,24 @@ private:
             const int bA = (int) P (proc(), snd::oaBank), bB = (int) P (proc(), snd::obBank);
             sub << "osc a " << (bA == 1 ? "captured" : "basic") << " · osc b "_fr << (bB == 1 ? "captured" : "basic");
             sub = juce::String::fromUTF8 (sub.toRawUTF8());
+        }
+        else if (m.mode == Machine::weaveMode)
+        {
+            tag = "weave";
+            const int n = proc().weaveCount();
+            title = n == 0 ? juce::String ("weave") : juce::String (n) + (n > 1 ? " sons"_fr : " son"_fr);
+            const auto st = proc().weaveSettings (false);
+            if (n == 0)
+                sub = proc().weaveLoading.load() > 0 ? "lecture des sons…"_fr : "aucun son : glisse-les sur la fenêtre (16 au plus)"_fr;
+            else
+            {
+                sub << "beat " << (st.beat >= 0 && st.beat < n ? juce::String (st.beat + 1) : juce::String ("off"))
+                    << " · back " << (st.back >= 0 && st.back < n ? juce::String (st.back + 1) : juce::String ("off"))
+                    << " · " << juce::String (snd::text (snd::wvStyle, P (proc(), snd::wvStyle))).toLowerCase()
+                    << " · " << st.bars << (st.bars > 1 ? " bars" : " bar")
+                    << " · seed " << (int) st.seed;
+                sub = juce::String::fromUTF8 (sub.toRawUTF8());
+            }
         }
         else if (m.mode == Machine::samplerMode)
         {
@@ -1302,6 +1357,40 @@ private:
         const Picto icon = m.capture ? (proc().isSampling() ? Picto::record : (m.captureKind == Machine::resampleKind ? Picto::resample : Picto::jack))
                          : (m.mode == Machine::synthMode ? Picto::sine : (m.mode == Machine::samplerMode ? Picto::cassette
                                                                          : (m.mode == Machine::radioMode ? Picto::radio : Picto::drum)));
+        if (! m.capture && (m.mode == Machine::samplerMode || m.mode == Machine::weaveMode))
+        {
+            // (0.4.20) the sampler or WEAVE: the two side by side, the one playing lit; a click goes to the other
+            const bool wv = m.mode == Machine::weaveMode;
+            const juce::String names[2] = { "sampler", "weave" };
+            const Picto icons[2] = { Picto::cassette, Picto::weave };
+            auto all = r;
+            for (int k = 0; k < 2; ++k)
+            {
+                const bool lit = (k == 1) == wv;
+                const float w = (float) juce::GlyphArrangement::getStringWidthInt (f, themed (names[k])) + 14.0f + 20.0f;
+                auto t = r.removeFromLeft (w).reduced (0.0f, 1.0f);
+                if (lit)
+                {
+                    g.setColour (col::sOrange);
+                    g.fillRoundedRectangle (t, 4.0f);
+                }
+                else
+                {
+                    g.setColour (col::sOrange.withAlpha (0.45f));
+                    g.drawRoundedRectangle (t.reduced (0.5f), 4.0f, 1.0f);
+                }
+                auto ti = t.reduced (7.0f, 0.0f);
+                const auto ink = lit ? col::screen : col::sOrange.withAlpha (0.7f);
+                picto (g, icons[k], ti.removeFromLeft (15.0f).withSizeKeepingCentre (15.0f, 15.0f), ink, 1.4f);
+                text (g, names[k], ti.withTrimmedLeft (5.0f), f, ink, juce::Justification::centredLeft);
+                r.removeFromLeft (4.0f);
+            }
+            sideArea = all.withRight (r.getX());
+            switches.push_back ({ sideArea, -1 });          // (the hand over it; the click is sideArea's)
+            r.removeFromLeft (6.0f);
+        }
+        else
+        {
         const float tw = (float) juce::GlyphArrangement::getStringWidthInt (f, themed (tag)) + 14.0f + 20.0f;
         auto t = r.removeFromLeft (tw).reduced (0.0f, 1.0f);
         g.setColour (proc().isSampling() || proc().player.resampleState() == Player::Resample::recording
@@ -1311,6 +1400,7 @@ private:
         picto (g, icon, ti.removeFromLeft (15.0f).withSizeKeepingCentre (15.0f, 15.0f), col::screen, 1.4f);
         text (g, tag, ti.withTrimmedLeft (5.0f), f, col::screen, juce::Justification::centredLeft);
         r.removeFromLeft (10.0f);
+        }
         // the page, on the right (its banks: the tabs along the bottom)
         auto& pages = m.pagesShown();
         const int pi = m.pageIndex();
@@ -1604,6 +1694,196 @@ private:
     }
 
     //------------------------------------------------------------------ SAMPLER: the sample, its start, its loop
+    //------------------------------------------------------------------ WEAVE (0.4.20): the weave, its sounds
+    static juce::Colour threadColour (int i)
+    {
+        // sixteen inks, warm to cool and back, apart from each other
+        static const float hues[16] = { 0.08f, 0.55f, 0.95f, 0.30f, 0.14f, 0.68f, 0.45f, 0.83f,
+                                        0.03f, 0.60f, 0.20f, 0.75f, 0.38f, 0.90f, 0.50f, 0.11f };
+        return juce::Colour::fromHSV (hues[(size_t) (i & 15)], 0.55f, 0.95f, 1.0f);
+    }
+    // a sound's outline (64 peaks), kept for as long as the sound is
+    const std::vector<float>& peaksOf (const weave::Audio* a)
+    {
+        auto& v = weavePeaks[a];
+        if (v.empty() && a != nullptr && a->frames() > 0)
+        {
+            const int n = a->frames(), cols = 64;
+            v.assign ((size_t) cols, 0.0f);
+            for (int c = 0; c < cols; ++c)
+            {
+                const int from = (int) ((juce::int64) n * c / cols), to = (int) ((juce::int64) n * (c + 1) / cols);
+                float pk = 0.0f;
+                for (int i = from; i < to; i += 4)
+                    pk = juce::jmax (pk, std::abs (a->l[(size_t) i]), std::abs (a->r[(size_t) i]));
+                v[(size_t) c] = pk;
+            }
+        }
+        return v;
+    }
+    // a sound can be dropped here: a tray and its arrow, a word
+    static void dropHint (juce::Graphics& g, juce::Rectangle<float> r, const juce::String& words, juce::Colour c)
+    {
+        auto row = r.removeFromBottom (18.0f);
+        const float tw = (float) juce::GlyphArrangement::getStringWidthInt (mono (10.5f), themed (words)) + 4.0f;
+        auto box = row.removeFromRight (tw + 22.0f);
+        picto (g, Picto::drop, box.removeFromLeft (16.0f).withSizeKeepingCentre (14.0f, 14.0f), c, 1.3f);
+        text (g, words, box.withTrimmedLeft (6.0f), mono (10.5f), c, juce::Justification::centredLeft);
+    }
+
+    void paintWeave (juce::Graphics& g, juce::Rectangle<float> r)
+    {
+        auto& p = proc();
+        const int n = p.weaveCount();
+        if (n == 0)
+        {
+            // nothing yet: where to drop them
+            auto zone = r.reduced (6.0f, 8.0f);
+            weaveAddArea = zone;
+            juce::Path dash, outline;
+            outline.addRoundedRectangle (zone, 10.0f);
+            const float dl[2] = { 7.0f, 5.0f };
+            juce::PathStrokeType (1.3f).createDashedStroke (dash, outline, dl, 2);
+            g.setColour (col::sOrange.withAlpha (0.6f));
+            g.fillPath (dash);
+            auto mid = zone.withSizeKeepingCentre (zone.getWidth(), 110.0f);
+            picto (g, Picto::drop, mid.removeFromTop (52.0f).withSizeKeepingCentre (48.0f, 48.0f), col::sOrange, 2.0f);
+            mid.removeFromTop (8.0f);
+            text (g, p.weaveLoading.load() > 0 ? "lecture des sons…"_fr : "glisse ici tes sons : jusqu'à seize"_fr, mid.removeFromTop (22.0f), mono (15.0f, 600),
+                  col::screenText, juce::Justification::centred);
+            text (g, "des boucles, des textures, des voix… ou clique pour les choisir"_fr, mid.removeFromTop (18.0f), mono (11.5f), col::screenDim,
+                  juce::Justification::centred);
+            return;
+        }
+        // the pattern now, as the audio plays it (the same rules drawn here)
+        const auto st = p.weaveSettings (true);
+        std::array<weave::Step, weave::maxSteps> steps {};
+        const int total = weave::plan (st, n, p.weave.shownCycle.load(), p.weave.shownForce.load(), steps.data());
+        const int now = p.weave.shownStep.load();
+        const int perBeat = juce::jmax (1, st.grid / 4);
+        auto strip = r.removeFromTop (juce::jmin (64.0f, r.getHeight() * 0.36f));
+        const float cw = strip.getWidth() / (float) total;
+        for (int s = 0; s < total; ++s)
+        {
+            const auto& sp = steps[(size_t) s];
+            auto cell = juce::Rectangle<float> (strip.getX() + cw * (float) s, strip.getY(), cw, strip.getHeight()).reduced (cw > 8.0f ? 1.0f : 0.5f, 0.0f);
+            if (s % perBeat == 0 && s > 0)
+            {
+                g.setColour (col::screenDim.withAlpha (s % (perBeat * 4) == 0 ? 0.8f : 0.35f));
+                g.fillRect (cell.getX() - 1.0f, strip.getY() - 3.0f, 1.0f, strip.getHeight() + 6.0f);
+            }
+            if (sp.thread < 0)
+                continue;
+            const auto c = threadColour (sp.thread);
+            const bool here = s == now;
+            auto body = cell.withTrimmedBottom (8.0f);
+            // the repeats: the cell cut in as many
+            const int rep = juce::jmax (1, (int) sp.ratchet);
+            const float rh = body.getWidth() / (float) rep;
+            for (int k = 0; k < rep; ++k)
+            {
+                auto part = body.withX (body.getX() + rh * (float) k).withWidth (rh).reduced (rep > 1 ? 0.6f : 0.0f, 0.0f);
+                g.setColour (c.withAlpha (here ? 1.0f : 0.62f));
+                g.fillRoundedRectangle (part, 2.0f);
+            }
+            // backwards: a notch from the right; another moment: a dot at the top
+            if (sp.reverse)
+            {
+                juce::Path tri;
+                const float tx = body.getRight() - 2.0f, ty = body.getCentreY(), ts = juce::jmin (5.0f, body.getWidth() * 0.35f);
+                tri.addTriangle (tx, ty - ts, tx, ty + ts, tx - ts * 1.3f, ty);
+                g.setColour (col::screen.withAlpha (0.8f));
+                g.fillPath (tri);
+            }
+            if (sp.shift != 0)
+            {
+                g.setColour (col::screen.withAlpha (0.85f));
+                g.fillEllipse (body.getCentreX() - 2.0f, body.getY() + 3.0f, 4.0f, 4.0f);
+            }
+            if (cw >= 14.0f)
+                text (g, juce::String (sp.thread + 1), body.withTrimmedTop (body.getHeight() * 0.45f), mono (10.0f, 600), col::screen.withAlpha (0.85f),
+                      juce::Justification::centred);
+            // the beats and backbeats, held: a bar under them
+            auto foot = cell.removeFromBottom (5.0f);
+            g.setColour (sp.fixed ? col::sOrange : c.withAlpha (0.25f));
+            g.fillRect (foot.withHeight (sp.fixed ? 3.0f : 1.5f));
+            if (here)
+            {
+                g.setColour (col::screenText);
+                g.drawRoundedRectangle (body.expanded (1.0f), 2.5f, 1.4f);
+            }
+        }
+        r.removeFromTop (12.0f);
+        // the sounds: two columns of eight, each its ink, its number, its name, its outline, its span; a cross to take
+        // it away; the one playing lit
+        const int playing = now >= 0 && now < total ? steps[(size_t) now].thread : -1;
+        const int rows = juce::jmax (1, (n + 1) / 2);       // (two columns, filled down)
+        const bool more = n < weave::maxThreads;
+        const float colW = (r.getWidth() - 12.0f) * 0.5f;
+        const float rowH = juce::jlimit (12.0f, 22.0f, (r.getHeight() - (more ? 22.0f : 0.0f)) / (float) juce::jmax (rows, 4));
+        const double bpm = P (p, snd::tempo);
+        for (int i = 0; i < n; ++i)
+        {
+            const int cx = i < rows ? 0 : 1, ry = i % rows;
+            auto row = juce::Rectangle<float> (r.getX() + (colW + 12.0f) * (float) cx, r.getY() + rowH * (float) ry, colW, rowH - 3.0f);
+            const auto c = threadColour (i);
+            const bool lit = i == playing;
+            if (lit)
+            {
+                g.setColour (c.withAlpha (0.16f));
+                g.fillRoundedRectangle (row.expanded (2.0f, 1.0f), 3.0f);
+            }
+            auto chip = row.removeFromLeft (22.0f).reduced (1.0f, 1.0f);
+            g.setColour (c);
+            g.fillRoundedRectangle (chip, 3.0f);
+            text (g, juce::String (i + 1), chip, mono (10.5f, 700), col::screen, juce::Justification::centred);
+            auto cross = row.removeFromRight (16.0f);
+            weaveRemoves.push_back ({ cross.expanded (2.0f), i });
+            g.setColour (col::screenDim);
+            const auto xc = cross.withSizeKeepingCentre (7.0f, 7.0f);
+            g.drawLine (xc.getX(), xc.getY(), xc.getRight(), xc.getBottom(), 1.2f);
+            g.drawLine (xc.getRight(), xc.getY(), xc.getX(), xc.getBottom(), 1.2f);
+            const auto a = p.weaveAudio (i);
+            const double secs = a != nullptr && a->sampleRate > 0.0 ? a->frames() / a->sampleRate : 0.0;
+            const double span = weave::spanBars (st, secs, bpm);
+            const juce::String spanText = span < 1.0 ? (span < 0.5 ? juce::String ("1/4") : juce::String ("1/2")) : juce::String ((int) span) + (span > 1.0 ? " bars" : " bar");
+            text (g, spanText, row.removeFromRight (52.0f), mono (10.0f), col::screenDim, juce::Justification::centredRight);
+            auto wave = row.removeFromRight (juce::jmin (90.0f, row.getWidth() * 0.4f)).reduced (4.0f, 2.0f);
+            if (a != nullptr)
+            {
+                const auto& pk = peaksOf (a.get());
+                g.setColour (c.withAlpha (lit ? 0.95f : 0.55f));
+                for (size_t k = 0; k < pk.size(); ++k)
+                {
+                    const float x = wave.getX() + wave.getWidth() * (float) k / (float) pk.size();
+                    const float h = juce::jmax (1.0f, wave.getHeight() * juce::jmin (1.0f, pk[k]));
+                    g.fillRect (x, wave.getCentreY() - h * 0.5f, juce::jmax (1.0f, wave.getWidth() / (float) pk.size() - 0.5f), h);
+                }
+            }
+            text (g, p.weaveName (i), row.withTrimmedLeft (6.0f), mono (juce::jmin (11.5f, rowH * 0.62f), lit ? 600 : 400), lit ? col::screenText : col::screenDim,
+                  juce::Justification::centredLeft, true);
+        }
+        // room for more: drop them on the window, or click here
+        if (more)
+        {
+            auto foot = r.withTrimmedTop (rowH * (float) rows + 4.0f);
+            if (foot.getHeight() >= 16.0f)
+            {
+                auto hint = foot.removeFromTop (18.0f).removeFromLeft (colW);
+                weaveAddArea = hint;
+                dropHint (g, hint, p.weaveLoading.load() > 0 ? "lecture…"_fr : "ajouter des sons (ou glisse-les)"_fr, col::sOrange.withAlpha (0.8f));
+            }
+        }
+        // (the sounds let go: their outlines with them)
+        for (auto it = weavePeaks.begin(); it != weavePeaks.end();)
+        {
+            bool kept = false;
+            for (int i = 0; i < n && ! kept; ++i)
+                kept = p.weaveAudio (i).get() == it->first;
+            it = kept ? std::next (it) : weavePeaks.erase (it);
+        }
+    }
+
     void paintSampler (juce::Graphics& g, juce::Rectangle<float> r)
     {
         auto ins = proc().getInstrument();
@@ -3871,21 +4151,21 @@ Machine::Machine (ReplikantProcessor& p) : proc (p), updatePanel (p.updater)
     zoom = (float) proc.settingsFile().getDoubleValue ("zoom", 1.0);
 
     // the header
-    const char* modeNames[numModes] = { "synth", "drum", "sampler", "radio" };
+    const char* modeNames[numModeKeys] = { "synth", "drum", "sampler", "radio" };
     const juce::Colour none = juce::Colours::transparentBlack;
-    for (int i = 0; i < numModes; ++i)
+    for (int i = 0; i < numModeKeys; ++i)
     {
         auto& k = modeKeys[i];
         k.setButtonText (juce::String::fromUTF8 (modeNames[i]));
-        k.look = [this, i] { return mode == i && ! capture ? KeyState::on : KeyState::normal; };
-        k.onClick = [this, i] { showMode (i); };
+        k.look = [this, i] { return (mode == i || (i == samplerMode && mode == weaveMode)) && ! capture ? KeyState::on : KeyState::normal; };
+        k.onClick = [this, i] { showMode (i == samplerMode ? samplerSide : i); };
         k.selector = true;
         k.icon = i == synthMode ? Picto::sine : (i == drumMode ? Picto::drum : (i == samplerMode ? Picto::cassette : Picto::radio));
         addAndMakeVisible (k);
     }
     modeKeys[drumMode].setTooltip ("Huit pistes et leur séquenceur : une voix faite des cycles du synthé, un son glissé, ou une prise de la radio et ses tranches."_fr);
     modeKeys[synthMode].setTooltip ("Deux oscillateurs qui lisent des cycles (les basiques, ou ceux de ton synthé), un sub, du bruit, l'unisson."_fr);
-    modeKeys[samplerMode].setTooltip ("L'instrument : ton synthé capturé note par note, ou un son glissé sur la fenêtre."_fr);
+    modeKeys[samplerMode].setTooltip ("L'instrument : ton synthé capturé note par note, ou un son glissé sur la fenêtre. Ou WEAVE (à choisir en haut de l'écran) : jusqu'à seize sons calés sur la même grille, joués à tour de rôle en rythme."_fr);
     modeKeys[radioMode].setTooltip ("La radio : une station sur internet ou un récepteur ondes courtes, son air, des prises découpées en pads, envoyées au sampler ou au drum."_fr);
     captureKey.setButtonText ("capture");
     captureKey.dot = col::red;
@@ -4018,6 +4298,10 @@ Machine::Machine (ReplikantProcessor& p) : proc (p), updatePanel (p.updater)
     shownResample = proc.lastResample;
     const int engine = (int) P (proc, snd::engine);
     mode = juce::jlimit (0, numModes - 1, engine);
+    samplerSide = mode == weaveMode ? weaveMode : (mode == samplerMode ? samplerMode
+                                                    : (proc.settingsFile().getIntValue ("samplerSide", samplerMode) == weaveMode ? weaveMode : samplerMode));
+    modeKeys[samplerMode].setButtonText (samplerSide == weaveMode ? "weave" : "sampler");
+    modeKeys[samplerMode].icon = samplerSide == weaveMode ? Picto::weave : Picto::cassette;
     if (mode == drumMode)
         proc.drumReady();
     showPage (page[mode]);
@@ -4695,6 +4979,47 @@ void Machine::buildPages()
                     if (c.param == id)
                         c.tip = t;
     };
+    // (0.4.20) WEAVE: its rules and accidents, how its sounds are fitted; then the filter, the effects, the mods
+    {
+        auto& v = pages[weaveMode];
+        v.clear();
+        auto stretchOn = [this] { return (int) P (proc, snd::wvFit) == 1; };
+        auto draw = choiceCtl ("Draw", { "back", "new" }, [] { return 1; },
+                               [this] (int i)
+                               {
+                                   const int sd = (int) P (proc, snd::wvSeed) + (i == 0 ? -1 : 1);
+                                   setSound (proc, snd::wvSeed, (float) (sd < 1 ? 999 : (sd > 999 ? 1 : sd)));
+                               });
+        draw.look = Ctl::Look::buttons;
+        draw.tip = "NEW : une autre trame, tirée des mêmes règles (la graine suivante). BACK : celle d'avant."_fr;
+        v.push_back ({ "weave", "weave", { { "rules", { S (snd::wvBeat), S (snd::wvBack), sep (S (snd::wvMove)), S (snd::wvStyle),
+                                                         sep (S (snd::wvLength)), sep (S (snd::wvSeed)), draw } },
+                                           { "accidents", { S (snd::wvTime), S (snd::wvStutter), S (snd::wvReverse), sep (S (snd::wvMutate)) } } } });
+        v.push_back ({ "threads", "weave", { { "fit", { S (snd::wvFit), S (snd::wvSpan), S (snd::wvGrain, nullptr, stretchOn), sep (S (snd::wvGrid)),
+                                                          S (snd::wvXfade), sep (S (snd::wvLevel)) } } } });
+        auto fp = filterPage();
+        fp.banks.erase (fp.banks.begin() + 1);          // (no notes: no filter envelope)
+        v.push_back (fp);
+        v.push_back (fxPage());
+        v.push_back (modsPage());
+        v.push_back (settingsPage());
+        tip (v, snd::wvBeat, "Le son qui tombe sur chaque temps : la trame y revient à tous les coups, elle tient le morceau."_fr);
+        tip (v, snd::wvBack, "Le son des temps 2 et 4, la place des caisses claires : il y revient à chaque fois. OFF : ces temps-là prennent celui de BEAT."_fr);
+        tip (v, snd::wvMove, "Entre les temps, combien la tête change de son : à 0, elle reste sur celui du temps ; à fond, un autre à chaque pas."_fr);
+        tip (v, snd::wvStyle, "Où elle va quand elle change. RANDOM : n'importe quel autre. WALK : le suivant dans l'ordre (parfois celui d'avant). EUCLID : des changements répartis régulièrement dans la mesure, les sons pris à tour de rôle. CALL : chaque temps reçoit une réponse d'un autre son, sur sa seconde moitié."_fr);
+        tip (v, snd::wvLength, "La longueur de la trame avant qu'elle se répète : une, deux ou quatre mesures."_fr);
+        tip (v, snd::wvSeed, "Le numéro de la trame : les mêmes réglages et le même numéro donnent toujours la même. Change-le pour en tirer une autre."_fr);
+        tip (v, snd::wvTime, "Des pas qui lisent un autre moment de leur son : le pas d'avant rejoué, un temps en arrière, un demi-temps en avance… Les temps fixes restent propres."_fr);
+        tip (v, snd::wvStutter, "Des pas coupés en deux, trois ou quatre répétitions de leur début."_fr);
+        tip (v, snd::wvReverse, "Des pas lus à l'envers."_fr);
+        tip (v, snd::wvMutate, "À chaque passage, cette part des pas est retirée et le reste jusqu'au prochain tirage : la trame évolue doucement. À 0, elle revient identique."_fr);
+        tip (v, snd::wvFit, "TAPE : chaque son lu à la vitesse qu'il faut pour tenir dans sa longueur ; sa hauteur suit, comme une bande. STRETCH : sa hauteur gardée, relu en grains."_fr);
+        tip (v, snd::wvSpan, "La longueur sur laquelle chaque son est calé. AUTO : pour chacun, la plus proche de sa durée (d'un temps à seize mesures), donc la vitesse change peu."_fr);
+        tip (v, snd::wvGrain, "STRETCH : la taille des grains. Courts, les attaques restent nettes ; longs, c'est plus lisse."_fr);
+        tip (v, snd::wvGrid, "Le pas de la trame : la croche, la double, la triple croche."_fr);
+        tip (v, snd::wvXfade, "Le fondu à chaque saut d'un son à l'autre : court, ça claque net ; long, ça glisse."_fr);
+        tip (v, snd::wvLevel, "Le niveau de WEAVE, avant le filtre."_fr);
+    }
     // (0.4.13) STRETCH, its second bank
     {
         auto& sv = pages[samplerMode];
@@ -4755,6 +5080,10 @@ void Machine::buildPages()
         deco ("source", "osc 2", { { 0, 3, "table scan", Picto::cycles }, { 4, 6, "with osc 1" } }, {}, {}, Picto::none, drumMode);
         deco ("source", "play", { { 0, 2, "place scan", Picto::playhead } }, {}, {}, Picto::none, drumMode);
         deco ("source", "hit", { { 0, 1, "stutter" }, { 2, 3, "burst" } }, {}, {}, Picto::none, drumMode);
+        // WEAVE: what comes back, what moves between; its accidents; how the sounds are fitted, where it goes
+        deco ("weave", "rules", { { 0, 1, "fixed", Picto::weave }, { 2, 3, "between" }, { 4, 6, "pattern" } }, {}, {}, Picto::none, weaveMode);
+        deco ("weave", "accidents", { { 0, 2, "accidents" } }, {}, {}, Picto::none, weaveMode);
+        deco ("threads", "fit", { { 0, 2, "fit" }, { 3, 4, "steps" } }, {}, "to filter", Picto::filterBox, weaveMode);
     }
 
     // SPECTRE's, on every mode's effects (and the filter's CUBE)
@@ -5129,6 +5458,13 @@ void Machine::showMode (int m)
 {
     if (m == drumMode)
         proc.drumReady();
+    if (m == samplerMode || m == weaveMode)
+    {
+        samplerSide = m;
+        modeKeys[samplerMode].setButtonText (m == weaveMode ? "weave" : "sampler");
+        modeKeys[samplerMode].icon = m == weaveMode ? Picto::weave : Picto::cassette;
+        proc.settingsFile().setValue ("samplerSide", m);
+    }
     if (assistant->isOpen())
         assistant->close();
     capture = false;
@@ -5532,12 +5868,34 @@ void Machine::paintOverChildren (juce::Graphics& g)
     paintSilkscreen (g);
     if (dropping)
     {
+        // (0.4.20) what the drop will do here, under a tray and its arrow
+        juce::String what;
+        if (! capture && mode == weaveMode)
+            what = "lâche : "_fr + (dropSounds > 1 ? juce::String (dropSounds) + " sons tissés dans WEAVE"_fr : juce::String ("le son tissé dans WEAVE"_fr))
+                   + " (" + juce::String (proc.weaveCount()) + " sur 16)"_fr;
+        else if (! capture && mode == drumMode)
+            what = "lâche : le son sur la piste "_fr + juce::String (proc.drumTrack.load() + 1) + (dropSounds > 1 ? " et les suivantes"_fr : juce::String());
+        else if (! capture && mode == samplerMode && dropSounds > 1)
+            what = "lâche : ces "_fr + juce::String (dropSounds) + " sons dans WEAVE, joués à tour de rôle en rythme"_fr;
+        else
+            what = "lâche : un son pour le sampler, un instrument ou un pack replikant"_fr;
+        auto all = getLocalBounds().toFloat();
         g.setColour (col::accent.withAlpha (0.18f));
-        g.fillRect (getLocalBounds());
+        g.fillRect (all);
         g.setColour (col::accent);
         g.drawRect (getLocalBounds(), 4);
-        text (g, "lâche : un son pour le sampler, un instrument ou un pack replikant"_fr, getLocalBounds().toFloat().removeFromBottom (60.0f),
-              mono (16.0f, 600), col::ink, juce::Justification::centred);
+        auto card = all.withSizeKeepingCentre (juce::jmin (all.getWidth() - 80.0f, 720.0f), 150.0f);
+        g.setColour (col::screen.withAlpha (0.96f));
+        g.fillRoundedRectangle (card, 14.0f);
+        juce::Path dash, outline;
+        outline.addRoundedRectangle (card.reduced (6.0f), 10.0f);
+        const float dl[2] = { 9.0f, 6.0f };
+        juce::PathStrokeType (2.0f).createDashedStroke (dash, outline, dl, 2);
+        g.setColour (col::accent);
+        g.fillPath (dash);
+        auto in = card.reduced (20.0f, 16.0f);
+        picto (g, Picto::drop, in.removeFromTop (68.0f).withSizeKeepingCentre (60.0f, 60.0f), col::accent, 3.0f);
+        text (g, what, in, mono (16.0f, 600), col::screenText, juce::Justification::centred, true);
     }
 }
 
@@ -5563,8 +5921,8 @@ void Machine::resized()
     logo = h.removeFromLeft (200);
     h.removeFromLeft (2);
     // (0.4.19) each selector as wide as its name needs, the four together as before (400)
-    const int modeWidth[numModes] = { 98, 92, 114, 96 };
-    for (int i = 0; i < numModes; ++i)
+    const int modeWidth[numModeKeys] = { 98, 92, 114, 96 };
+    for (int i = 0; i < numModeKeys; ++i)
     {
         modeKeys[i].setBounds (h.removeFromLeft (modeWidth[i]));
         h.removeFromLeft (6);
@@ -5651,16 +6009,57 @@ void Machine::renameInstrument()
 //==============================================================================
 bool Machine::isInterestedInFileDrag (const juce::StringArray& files)
 {
+    if (proc.isSampling())
+        return false;
     for (auto& f : files)
-        if (instrumentio::isImportable (juce::File (f)))
-            return ! proc.isSampling();
+        if (instrumentio::isImportable (juce::File (f)) || ReplikantProcessor::isWeaveSound (juce::File (f))
+            || (mode == weaveMode && juce::File (f).isDirectory()))
+            return true;
     return false;
+}
+
+void Machine::fileDragEnter (const juce::StringArray& files, int, int)
+{
+    dropping = true;
+    dropSounds = 0;
+    for (auto& f : files)
+        dropSounds += ReplikantProcessor::isWeaveSound (juce::File (f)) ? 1 : 0;
+    repaint();
+}
+
+void Machine::openWeave()
+{
+    chooser = std::make_unique<juce::FileChooser> ("Des sons pour WEAVE (seize au plus)"_fr, proc.instrumentsRoot(), "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.ogg");
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
+                          | juce::FileBrowserComponent::canSelectMultipleItems,
+                          [this] (const juce::FileChooser& fc)
+    {
+        juce::StringArray paths;
+        for (const auto& f : fc.getResults())
+            paths.add (f.getFullPathName());
+        if (! paths.isEmpty())
+            proc.weaveAdd (paths);
+    });
 }
 
 void Machine::filesDropped (const juce::StringArray& files, int, int)
 {
     dropping = false;
     repaint();
+    // (0.4.20) WEAVE: the sounds after the ones there. Several sounds on the sampler: WEAVE takes them
+    if (! capture && (mode == weaveMode || mode == samplerMode))
+    {
+        int sounds = 0;
+        for (auto& f : files)
+            sounds += ReplikantProcessor::isWeaveSound (juce::File (f)) || (mode == weaveMode && juce::File (f).isDirectory()) ? 1 : 0;
+        if (mode == weaveMode ? sounds > 0 : sounds > 1)
+        {
+            if (mode != weaveMode)
+                showMode (weaveMode);
+            proc.weaveAdd (files);
+            return;
+        }
+    }
     // DRUM: a sound onto the track shown (the next ones onto the next tracks)
     if (mode == drumMode && ! capture)
     {
@@ -5905,6 +6304,13 @@ void Machine::timerCallback()
     {
         if (engine == drumMode)
             proc.drumReady();
+        if (engine == samplerMode || engine == weaveMode)
+        {
+            samplerSide = engine;
+            modeKeys[samplerMode].setButtonText (engine == weaveMode ? "weave" : "sampler");
+            modeKeys[samplerMode].icon = engine == weaveMode ? Picto::weave : Picto::cassette;
+            modeKeys[samplerMode].repaint();
+        }
         mode = engine;
         focus = nullptr;
         showPage (page[mode]);

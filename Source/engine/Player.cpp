@@ -1790,7 +1790,7 @@ void Player::applyWtf (double ppq, int n, Chunk& c)
                                               snd::cutoff, snd::reso, snd::decay, snd::speed };
     // (DRUM: the pulls go to its hits, DrumCore.h; here only the filter and the drive its tracks pass through)
     static const int drumIds[wtfCount] = { -1, -1, -1, -1, -1, -1, -1, -1, snd::cutoff, snd::reso };
-    const int* ids = synthEngine ? synthIds : (engineNow == snd::drum ? drumIds : samplerIds);
+    const int* ids = synthEngine ? synthIds : (engineNow == snd::drum || engineNow == snd::weave ? drumIds : samplerIds);
     const auto step = (int64_t) std::floor (ppq * 2.0);
     const uint32_t seed = wtfSeed.load (std::memory_order_relaxed);
     const bool loop = (int) c.v[snd::wtfMode] == 1;

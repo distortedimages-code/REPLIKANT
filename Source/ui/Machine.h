@@ -45,8 +45,12 @@ namespace te
         float getZoom() const                      { return zoom; }
         std::function<void (float)> onZoom;
 
-        enum Mode { synthMode = 0, drumMode = 1, samplerMode = 2, radioMode = 3 };
-        static constexpr int numModes = 4;
+        enum Mode { synthMode = 0, drumMode = 1, samplerMode = 2, radioMode = 3, weaveMode = 4 };
+        static constexpr int numModes = 5;
+        // (0.4.20) the header's keys: WEAVE is reached by SAMPLER's (the screen switches between the two)
+        static constexpr int numModeKeys = 4;
+        int samplerSide = samplerMode;             // where SAMPLER's key goes: the sampler or WEAVE (the last one shown)
+        void openWeave();                          // a few sounds chosen for WEAVE
         void showMode (int mode);                  // sets the engine (what plays) and shows its pages
         void showCapture (bool);
         enum CaptureKind { notesKind = 0, cyclesKind = 1, resampleKind = 2 };
@@ -67,7 +71,7 @@ namespace te
         void mouseDown (const juce::MouseEvent&) override;
         bool keyPressed (const juce::KeyPress&) override;
         bool isInterestedInFileDrag (const juce::StringArray&) override;
-        void fileDragEnter (const juce::StringArray&, int, int) override   { dropping = true; repaint(); }
+        void fileDragEnter (const juce::StringArray&, int, int) override;
         void fileDragExit (const juce::StringArray&) override              { dropping = false; repaint(); }
         void filesDropped (const juce::StringArray&, int, int) override;
 
@@ -136,6 +140,7 @@ namespace te
         juce::String focusName;
         float zoom = 1.0f;
         bool dropping = false;
+        int dropSounds = 0;                        // (0.4.20) the sounds among the files dragged over
         bool wasSampling = false;
         juce::String message;
         bool messageWarning = false;
@@ -145,7 +150,7 @@ namespace te
 
         // the header
         juce::Rectangle<int> header, logo, presetBox, bpmBox, meterBox;
-        Key modeKeys[numModes], captureKey, playKey, fileKey, packKey, updateKey;
+        Key modeKeys[numModeKeys], captureKey, playKey, fileKey, packKey, updateKey;
         juce::TextEditor nameEditor;
         // the pack: made on a click, dragged out once ready
         juce::File packReady;

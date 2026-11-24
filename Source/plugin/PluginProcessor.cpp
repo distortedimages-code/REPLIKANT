@@ -155,6 +155,7 @@ void ReplikantProcessor::prepareToPlay (double sr, int block)
     synthMidi.ensureSize (2048);
     radio.prepare (sr, block);
     drum.prepare (sr, juce::jmax (block, 4096) * 2);
+    weave.prepare (sr);
     limiter.prepare (sr);
     setLatencySamples (limiter.latency());          // (LIMIT's look-ahead, on or off: always the same)
     radioBuffer.setSize (2, juce::jmax (block, 4096) * 2, false, true, false);
@@ -386,7 +387,8 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     radio.bank.use.store (radioOn && wanted && ! sampling ? (allRx ? (1 << radio::numRx) - 1 : 1 << juce::jlimit (0, radio::numRx - 1, (int) player.get (snd::rdRx))) : 0,
                           std::memory_order_relaxed);
     const bool drumOn = (int) player.get (snd::engine) == snd::drum && drum.allocated();
-    if (! sampling && (radioOn || drumOn) && n <= radioBuffer.getNumSamples())
+    const bool weaveOn = (int) player.get (snd::engine) == snd::weave;
+    if (! sampling && (radioOn || drumOn || weaveOn) && n <= radioBuffer.getNumSamples())
     {
         radioEvents.clear();
         for (const auto meta : playMidi)
@@ -433,6 +435,36 @@ void ReplikantProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         auto* rr = radioBuffer.getWritePointer (1);
         if (radioOn)
             radio.render (rl, rr, n, rs, radioEvents.data(), (int) radioEvents.size());
+        else if (weaveOn)
+        {
+            // WEAVE: on the host's song position when it plays, else REPLIK8's own clock (the play key), from 0;
+            // stopped, the keys run it
+            weave::Clock wc;
+            const bool own = ! transport.playing && clock.getMode() == MidiClock::Mode::internal && clock.isWanted();
+            if (transport.playing)
+            {
+                wc.running = true;
+                wc.ppq = transport.ppq;
+            }
+            else if (own)
+            {
+                if (! weaveClockWas)
+                    weavePpq = 0.0;
+                wc.running = true;
+                wc.ppq = weavePpq;
+                weavePpq += (double) n / sampleRate * transport.bpm / 60.0;
+            }
+            weaveClockWas = own;
+            wc.bpm = transport.bpm;
+            weave::Event we[64];
+            int nw = 0;
+            for (const auto& ev : radioEvents)
+                if (nw < 64)
+                    we[nw++] = { ev.at, ev.note, ev.velocity };
+            juce::FloatVectorOperations::clear (rl, n);
+            juce::FloatVectorOperations::clear (rr, n);
+            weave.render (rl, rr, n, wc, weaveSettings (true), we, nw);
+        }
         else
         {
             // DRUM: the host's song position when it plays, else REPLIK8's own clock (the play key), from 0
@@ -1711,6 +1743,8 @@ void ReplikantProcessor::getStateInformation (juce::MemoryBlock& dest)
     }
     if (drum.allocated())
         xml.setAttribute ("drum", juce::JSON::toString (drumToVar(), true));
+    if (! weaveSlots.empty())
+        xml.setAttribute ("weave", juce::JSON::toString (weaveToVar(), true));
     copyXmlToBinary (xml, dest);
 }
 
@@ -1786,6 +1820,7 @@ void ReplikantProcessor::setStateInformation (const void* data, int size)
     }
     if (xml->hasAttribute ("drum"))
         drumFromVar (juce::JSON::parse (xml->getStringAttribute ("drum")));
+    weaveFromVar (juce::JSON::parse (xml->getStringAttribute ("weave", "[]")));
     settingsChanged();
     const auto f = instrumentio::movedFolder (juce::File (xml->getStringAttribute ("instrument")));
     if (xml->hasAttribute ("instrument"))
@@ -2469,6 +2504,197 @@ bool ReplikantProcessor::drumLoadFile (int track, const juce::File& f, juce::Str
     return true;
 }
 
+//============================================================================== WEAVE (0.4.20)
+bool ReplikantProcessor::isWeaveSound (const juce::File& f)
+{
+    return f.existsAsFile() && f.hasFileExtension ("wav;aif;aiff;flac;mp3;ogg");
+}
+
+int ReplikantProcessor::weaveCount() const                 { return (int) weaveSlots.size(); }
+juce::String ReplikantProcessor::weaveName (int i) const    { return i >= 0 && i < weaveCount() ? weaveSlots[(size_t) i].name : juce::String(); }
+std::shared_ptr<const weave::Audio> ReplikantProcessor::weaveAudio (int i) const
+{
+    return i >= 0 && i < weaveCount() ? weaveSlots[(size_t) i].audio : nullptr;
+}
+
+void ReplikantProcessor::weavePublish()
+{
+    for (int i = 0; i < weave::maxThreads; ++i)
+        weave.setThread (i, i < weaveCount() ? weaveSlots[(size_t) i].audio.get() : nullptr);
+    sendChangeMessage();
+}
+
+void ReplikantProcessor::weaveAdd (const juce::StringArray& files)
+{
+    // a folder: its sounds, by name
+    juce::Array<juce::File> list;
+    for (const auto& path : files)
+    {
+        const juce::File f (path);
+        if (f.isDirectory())
+        {
+            auto in = f.findChildFiles (juce::File::findFiles, false, "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.ogg");
+            in.sort();
+            list.addArray (in);
+        }
+        else if (isWeaveSound (f))
+            list.add (f);
+    }
+    const int room = weave::maxThreads - weaveCount() - weaveLoading.load();
+    if (list.isEmpty() || room <= 0)
+    {
+        if (onMessage)
+            onMessage (room <= 0 ? "WEAVE est plein : seize sons au plus (retire-en un sur l'écran)."_fr : "Aucun son à tisser là-dedans."_fr);
+        return;
+    }
+    const int skipped = juce::jmax (0, list.size() - room);
+    list.removeRange (room, list.size());
+    weaveLoading += list.size();
+    const auto root = instrumentsRoot();
+    radioPool->addJob ([this, list, root, skipped]
+    {
+        juce::AudioFormatManager formats;
+        formats.registerBasicFormats();
+        std::vector<WeaveSlot> got;
+        juce::StringArray bad;
+        for (const auto& f : list)
+        {
+            std::unique_ptr<juce::AudioFormatReader> r (formats.createReaderFor (f));
+            if (r == nullptr || r->lengthInSamples < 64 || r->sampleRate <= 0.0)
+            {
+                bad.add (f.getFileName());
+                continue;
+            }
+            const int frames = (int) juce::jmin ((juce::int64) (32.0 * r->sampleRate), r->lengthInSamples);
+            juce::AudioBuffer<float> buf (2, frames);
+            r->read (&buf, 0, frames, 0, true, true);
+            auto a = std::make_shared<weave::Audio>();
+            a->sampleRate = r->sampleRate;
+            a->l.assign (buf.getReadPointer (0), buf.getReadPointer (0) + frames);
+            const int rc = r->numChannels > 1 ? 1 : 0;
+            a->r.assign (buf.getReadPointer (rc), buf.getReadPointer (rc) + frames);
+            WeaveSlot sl;
+            sl.audio = a;
+            sl.name = f.getFileNameWithoutExtension();
+            // (a WAV read whole is found again where it is; anything else kept as a WAV beside the instruments)
+            if (f.hasFileExtension ("wav") && frames == (int) r->lengthInSamples)
+                sl.path = f.getFullPathName();
+            else
+            {
+                const auto file = root.getChildFile ("Weave").getNonexistentChildFile (juce::File::createLegalFileName (sl.name).trim().isNotEmpty()
+                                                                                       ? juce::File::createLegalFileName (sl.name).trim() : juce::String ("weave"), ".wav", false);
+                if (file.getParentDirectory().createDirectory().wasOk()
+                    && rk::writeWav (file.getFullPathName().toStdString(), { a->l, a->r }, a->sampleRate, 24, {}))
+                    sl.path = file.getFullPathName();
+            }
+            got.push_back (std::move (sl));
+        }
+        later ([this, got, bad, skipped, n = list.size()]
+        {
+            weaveLoading -= n;
+            for (const auto& sl : got)
+                if (weaveCount() < weave::maxThreads)
+                    weaveSlots.push_back (sl);
+            weavePublish();
+            if (onMessage)
+            {
+                juce::String m;
+                if (! got.empty())
+                    m << (got.size() == 1 ? got[0].name + " tissé"_fr : juce::String ((int) got.size()) + " sons tissés"_fr)
+                      << " · "_fr << weaveCount() << " sur 16"_fr;
+                if (! bad.isEmpty())
+                    m << (m.isEmpty() ? "" : " · ") << "illisible : "_fr << bad.joinIntoString (", ");
+                if (skipped > 0)
+                    m << " · "_fr << skipped << " de trop (16 au plus)"_fr;
+                onMessage (m);
+            }
+        });
+    });
+}
+
+void ReplikantProcessor::weaveRemove (int i)
+{
+    if (i < 0 || i >= weaveCount())
+        return;
+    weaveKept.push_back ({ weaveSlots[(size_t) i].audio, juce::Time::getMillisecondCounterHiRes() * 0.001 });
+    weaveSlots.erase (weaveSlots.begin() + i);
+    weavePublish();
+}
+
+void ReplikantProcessor::weaveMove (int from, int to)
+{
+    if (from < 0 || from >= weaveCount() || to < 0 || to >= weaveCount() || from == to)
+        return;
+    auto sl = weaveSlots[(size_t) from];
+    weaveSlots.erase (weaveSlots.begin() + from);
+    weaveSlots.insert (weaveSlots.begin() + to, sl);
+    weavePublish();
+}
+
+weave::Settings ReplikantProcessor::weaveSettings (bool modulated) const
+{
+    auto V = [this, modulated] (int id)
+    {
+        const float m = modulated ? player.modulatedNorm (id) : -1.0f;
+        return m >= 0.0f ? snd::fromNorm (id, m) : player.get (id);
+    };
+    weave::Settings st;
+    st.beat = (int) std::lround (V (snd::wvBeat)) - 1;
+    st.back = (int) std::lround (V (snd::wvBack)) - 1;
+    st.move = V (snd::wvMove);
+    st.style = juce::jlimit (0, 3, (int) std::lround (V (snd::wvStyle)));
+    st.time = V (snd::wvTime);
+    st.stutter = V (snd::wvStutter);
+    st.reverse = V (snd::wvReverse);
+    st.mutate = V (snd::wvMutate);
+    st.bars = 1 << juce::jlimit (0, 2, (int) std::lround (V (snd::wvLength)));
+    st.seed = (uint32_t) juce::jlimit (1, 999, (int) std::lround (V (snd::wvSeed)));
+    st.fit = (int) std::lround (V (snd::wvFit)) == 1 ? weave::fitStretch : weave::fitTape;
+    st.span = juce::jlimit (0, 7, (int) std::lround (V (snd::wvSpan)));
+    st.grid = 8 << juce::jlimit (0, 2, (int) std::lround (V (snd::wvGrid)));
+    st.xfadeMs = V (snd::wvXfade);
+    st.grainMs = V (snd::wvGrain);
+    st.gain = juce::Decibels::decibelsToGain (V (snd::wvLevel));
+    return st;
+}
+
+juce::var ReplikantProcessor::weaveToVar() const
+{
+    juce::Array<juce::var> a;
+    for (const auto& sl : weaveSlots)
+    {
+        if (sl.path.isEmpty())
+            continue;
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("path", sl.path);
+        o->setProperty ("name", sl.name);
+        a.add (juce::var (o));
+    }
+    return a;
+}
+
+void ReplikantProcessor::weaveFromVar (const juce::var& v)
+{
+    for (const auto& sl : weaveSlots)
+        weaveKept.push_back ({ sl.audio, juce::Time::getMillisecondCounterHiRes() * 0.001 });
+    weaveSlots.clear();
+    weavePublish();
+    juce::StringArray files, missing;
+    if (auto* a = v.getArray())
+        for (const auto& x : *a)
+        {
+            const juce::File f (x.getProperty ("path", "").toString());
+            if (isWeaveSound (f))
+                files.add (f.getFullPathName());
+            else
+                missing.add (x.getProperty ("name", "").toString());
+        }
+    if (! files.isEmpty())
+        weaveAdd (files);
+    if (! missing.isEmpty())
+        later ([this, missing] { if (onMessage) onMessage ("WEAVE : introuvable : "_fr + missing.joinIntoString (", ")); });
+}
+
 void ReplikantProcessor::drumClearSound (int track)
 {
     if (track < 0 || track >= drum::numTracks)
@@ -2483,6 +2709,8 @@ void ReplikantProcessor::drumClearSound (int track)
 void ReplikantProcessor::drumTick()
 {
     const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
+    // (WEAVE's sounds let go: the audio reads its pointers at each block, two seconds is plenty)
+    weaveKept.erase (std::remove_if (weaveKept.begin(), weaveKept.end(), [now] (const KeptWeave& k) { return now - k.retiredAt > 2.0; }), weaveKept.end());
     if ((int) player.get (snd::engine) == snd::drum)
         drumReady();
     if (! drum.allocated())

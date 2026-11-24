@@ -453,6 +453,97 @@ static void drumAsAHost()
     wav.deleteFile();
 }
 
+// (0.4.20) WEAVE through the processor: three sounds dropped (each a tone of its own, a bar long), read in the
+// background, heard with the transport (the beat's on the beat), silent when it stops; the project keeps them
+static void weaveAsAHost()
+{
+    const double rate = 48000.0;
+    const int block = 480;
+    TestHead head;
+    auto proc = std::make_unique<ReplikantProcessor>();
+    proc->setPlayHead (&head);
+    proc->setRateAndBufferSizeDetails (rate, block);
+    proc->prepareToPlay (rate, block);
+    proc->setSoundParam (snd::engine, (float) snd::weave);
+    proc->setSoundParam (snd::fModel, 0.0f);
+    proc->setSoundParam (snd::rvOn, 0.0f);
+    proc->setSoundParam (snd::chOn, 0.0f);
+    proc->setSoundParam (snd::wvMove, 0.0f);       // (the beat's sound held through)
+    const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("replik8-weave-test");
+    dir.deleteRecursively();
+    dir.createDirectory();
+    juce::StringArray files;
+    for (int k = 0; k < 3; ++k)
+    {
+        const auto f = dir.getChildFile ("tone" + juce::String (k) + ".wav");
+        juce::WavAudioFormat fmt;
+        std::unique_ptr<juce::OutputStream> os (f.createOutputStream().release());
+        std::unique_ptr<juce::AudioFormatWriter> w (fmt.createWriterFor (os.get(), 48000.0, 1, 24, {}, 0));
+        if (w != nullptr)
+            os.release();
+        juce::AudioBuffer<float> b (1, 96000);
+        for (int i = 0; i < 96000; ++i)
+            b.setSample (0, i, 0.3f * (float) std::sin (6.283185307 * (300.0 + 200.0 * k) * i / 48000.0));
+        if (w != nullptr)
+            w->writeFromAudioSampleBuffer (b, 0, 96000);
+        files.add (f.getFullPathName());
+    }
+    proc->weaveAdd (files);
+    CHECK (waitFor ([&] { return proc->weaveCount() == 3; }, 10.0), "three sounds woven (%d)", proc->weaveCount());
+    const int chans = juce::jmax (proc->getTotalNumInputChannels(), proc->getTotalNumOutputChannels());
+    juce::AudioBuffer<float> buf (chans, block);
+    std::vector<float> out;
+    auto play = [&] (double seconds)
+    {
+        out.clear();
+        for (int pos = 0; pos < (int) (seconds * rate); pos += block)
+        {
+            buf.clear();
+            juce::MidiBuffer midi;
+            proc->processBlock (buf, midi);
+            if (head.playing)
+                head.ppq += block / rate * head.bpm / 60.0;
+            for (int i = 0; i < block; ++i)
+                out.push_back (buf.getSample (0, i));
+        }
+    };
+    auto pitch = [&] (int from, int len)
+    {
+        int ups = 0;
+        for (int i = from + 1; i < from + len; ++i)
+            ups += out[(size_t) i - 1] < 0.0f && out[(size_t) i] >= 0.0f;
+        return ups * rate / len;
+    };
+    head.playing = true;
+    head.ppq = 0.0;
+    play (2.0);
+    const double hz = pitch (4800, 38400);
+    CHECK (std::abs (hz - 300.0) < 8.0, "BEAT's sound (the first) heard: %.1f Hz", hz);
+    proc->setSoundParam (snd::wvBeat, 3.0f);
+    play (1.0);
+    const double hz3 = pitch (9600, 28800);
+    CHECK (std::abs (hz3 - 700.0) < 10.0, "BEAT on the third: %.1f Hz", hz3);
+    head.playing = false;
+    play (1.0);
+    double tail = 0.0;
+    for (int i = 24000; i < 48000; ++i)
+        tail = juce::jmax (tail, (double) std::abs (out[(size_t) i]));
+    CHECK (tail < 1.0e-4, "the transport stopped: silent (%.5f)", tail);
+    // the project, read back: its sounds in their order
+    juce::MemoryBlock state;
+    proc->getStateInformation (state);
+    proc.reset();
+    auto again = std::make_unique<ReplikantProcessor>();
+    again->setRateAndBufferSizeDetails (rate, block);
+    again->prepareToPlay (rate, block);
+    again->setStateInformation (state.getData(), (int) state.getSize());
+    CHECK (waitFor ([&] { return again->weaveCount() == 3; }, 10.0), "its sounds back (%d)", again->weaveCount());
+    CHECK (again->weaveName (2) == "tone2" && (int) again->player.get (snd::engine) == snd::weave, "in their order, WEAVE playing");
+    again->weaveRemove (0);
+    CHECK (again->weaveCount() == 2 && again->weaveName (0) == "tone1", "one taken away");
+    dir.deleteRecursively();
+}
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI gui;
@@ -674,6 +765,7 @@ int main()
     }
     radioAsAHost();
     drumAsAHost();
+    weaveAsAHost();
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }
