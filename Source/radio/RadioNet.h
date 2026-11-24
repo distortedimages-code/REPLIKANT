@@ -41,6 +41,7 @@ public:
         int state = radio::none;
         juce::String msg, title;           // why it failed / what it says; the station's title now
         int rate = 0, kbps = 0, users = -1, usersMax = -1;
+        juce::String seekMsg;              // (0.4.18) what a SEEK is doing, or what it found (empty: no seek)
     };
 
     explicit RadioNet (radio::Bank& b);
@@ -55,6 +56,11 @@ public:
     void   search (int id, const juce::var& q);
     void   receivers (int id, bool fresh);
     std::vector<juce::var> takeAnswers();
+    // (0.4.18) SEEK: the next clean signal up (+1) or down (-1) the band from a shortwave receiver's frequency, found
+    // on the receiver's own panorama (its waterfall, read beside the sound, then let go); the frequency set there, the
+    // seek ends. 0 stops it; so does a new frequency or another receiver tuned meanwhile
+    void   seek (int rx, int dir);
+    int    seeking (int rx) const;         // the way it goes (0: not seeking)
     // the project: the four receivers' sources
     juce::var toVar() const;
     void   fromVar (const juce::var&);
@@ -67,9 +73,11 @@ public:
 private:
     struct Rx;
     struct Watch;
+    struct Seek;
     radio::Bank& bank;
     std::unique_ptr<Rx> rx[radio::numRx];
     std::unique_ptr<Watch> sup;            // (ends the sessions that should end: a blocking HTTPS read among them)
+    std::unique_ptr<Seek> seeker;          // (0.4.18) reads a receiver's panorama for SEEK, one seek at a time
     std::atomic<int> ver { 0 };
     std::unique_ptr<juce::ThreadPool> pool;
     juce::CriticalSection ansLock;
@@ -82,5 +90,6 @@ private:
     void   countClick (const juce::String& uuid);
     friend struct Rx;
     friend struct Watch;
+    friend struct Seek;
     JUCE_DECLARE_NON_COPYABLE (RadioNet)
 };

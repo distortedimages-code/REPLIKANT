@@ -6,6 +6,7 @@
 #include "../Source/radio/RadioCore.h"
 #include "../Source/radio/RadioDec.h"
 #include "../Source/radio/RadioSlicer.h"
+#include "../Source/radio/RadioSeek.h"
 
 #include <chrono>
 #include <cmath>
@@ -878,6 +879,96 @@ static void testCut()
     CHECK (rests == 15 && e->cutShown[0].load() >= 0, "DENSITY 0: the first step alone (%d rests)", rests);
 }
 
+// (0.4.18) SEEK: the next clean signal in a receiver's panorama (made up here: a floor, its noise, carriers, sidebands,
+// a receiver's birdie, two stations on top of each other, a voice in a sideband, a morse carrier)
+static void testSeek()
+{
+    std::mt19937 rng (7);
+    std::normal_distribution<float> jitter (0.0f, 1.0f);
+    auto addPow = [] (float a, float b) { return 10.0f * std::log10 (std::pow (10.0f, a / 10.0f) + std::pow (10.0f, b / 10.0f)); };
+    struct Sig { double khz; float carrier, sides, width; };       // a carrier's level over the floor, its sidebands', how wide
+    auto make = [&] (double start, int zoom, float floorDb, float peakOver, const std::vector<Sig>& sigs)
+    {
+        radio::Panorama p;
+        p.startKhz = start;
+        p.binKhz = 30000.0 / (double) (1 << zoom) / 1024.0;
+        p.avg.resize (1024);
+        p.peak.resize (1024);
+        for (int i = 0; i < 1024; ++i)
+        {
+            const double f = p.khzAt (i);
+            float a = floorDb + 0.7f * jitter (rng), pk = floorDb + peakOver + 1.5f * jitter (rng);
+            for (const auto& s : sigs)
+            {
+                const double d = std::abs (f - s.khz) / p.binKhz;
+                if (s.carrier > 0.0f && d < 2.0)
+                {
+                    const float c = floorDb + s.carrier - 6.0f * (float) (d * d);
+                    a = addPow (a, c);
+                    pk = addPow (pk, c + 1.0f);
+                }
+                const double off = (f - s.khz);
+                if (s.sides > 0.0f && std::abs (off) >= 0.4 && std::abs (off) <= s.width && (s.carrier > 0.0f || off > 0.0))
+                {
+                    a = addPow (a, floorDb + s.sides - 6.0f);
+                    pk = addPow (pk, floorDb + s.sides);
+                }
+            }
+            p.avg[(size_t) i] = a;
+            p.peak[(size_t) i] = pk;
+        }
+        return p;
+    };
+    // AM, over the 31 m band (zoom 5: 937 kHz, a bin 0.92 kHz)
+    const auto am = make (9000.0, 5, -110.0f, 4.0f, {
+        { 9420.0, 35.0f, 12.0f, 4.5f },        // the one heard
+        { 9500.0, 32.0f, 10.0f, 4.5f },        // the next one up
+        { 9580.0, 40.0f, 15.0f, 4.5f },
+        { 9640.0, 12.0f, 4.0f, 4.5f },         // too weak
+        { 9655.0, 30.0f, 10.0f, 4.5f },        // two on top of each other: they beat
+        { 9660.0, 30.0f, 10.0f, 4.5f },
+        { 9700.0, 25.0f, 0.0f, 0.0f },         // a bare carrier: the receiver's own birdie
+        { 9750.0, 28.0f, 8.0f, 4.5f },
+        { 9313.0, 30.0f, 10.0f, 4.5f } });     // off the grid
+    auto up = [&] (const radio::Panorama& p, double from, radio::Demod d) { return radio::nextSignal (p, from, 1, d); };
+    auto dn = [&] (const radio::Panorama& p, double from, radio::Demod d) { return radio::nextSignal (p, from, -1, d); };
+    auto f = up (am, 9420.0, radio::Demod::am);
+    CHECK (std::abs (f.khz - 9500.0) < 0.01 && f.snr > 25.0f, "AM: up from 9420, the next station on the grid (%.2f, %.1f dB)", f.khz, f.snr);
+    f = up (am, 9500.0, radio::Demod::am);
+    CHECK (std::abs (f.khz - 9580.0) < 0.01, "AM: up again (%.2f)", f.khz);
+    f = up (am, 9580.0, radio::Demod::am);
+    CHECK (std::abs (f.khz - 9750.0) < 0.01, "AM: the weak one, the two beating, the birdie passed by (%.2f)", f.khz);
+    f = dn (am, 9500.0, radio::Demod::am);
+    CHECK (std::abs (f.khz - 9420.0) < 0.01, "AM: down (%.2f)", f.khz);
+    f = dn (am, 9420.0, radio::Demod::am);
+    CHECK (std::abs (f.khz - 9313.0) < 0.7, "AM: down, off the grid, where it is (%.2f)", f.khz);
+    f = up (am, 9750.0, radio::Demod::am);
+    CHECK (f.khz == 0.0, "AM: nothing further up in this stretch (%.2f)", f.khz);
+    f = up (am, 9418.0, radio::Demod::am);
+    CHECK (std::abs (f.khz - 9500.0) < 0.01, "AM: a little off the station heard: still the next one (%.2f)", f.khz);
+
+    // USB, in the 40 m band (zoom 6: 469 kHz, a bin 0.46 kHz): voices, the dial 1.5 kHz under their middle
+    const auto ssb = make (7000.0, 6, -115.0f, 5.0f, {
+        { 7150.0, 0.0f, 16.0f, 2.7f },
+        { 7200.0, 0.0f, 13.0f, 2.7f },
+        { 7180.0, 30.0f, 0.0f, 0.0f },         // a morse carrier: not a voice
+        { 7260.0, 0.0f, 5.0f, 2.7f } });       // too weak
+    f = up (ssb, 7100.0, radio::Demod::usb);
+    CHECK (std::abs (f.khz - 7150.0) <= 0.6, "USB: the next voice up (%.2f, %.1f dB)", f.khz, f.snr);
+    f = up (ssb, 7150.0, radio::Demod::usb);
+    CHECK (std::abs (f.khz - 7200.0) <= 0.6, "USB: the next one, the morse carrier passed by (%.2f)", f.khz);
+    f = up (ssb, 7200.0, radio::Demod::usb);
+    CHECK (f.khz == 0.0, "USB: no voice loud enough further up (%.2f)", f.khz);
+
+    // CW (zoom 7: 234 kHz, a bin 0.23 kHz): a narrow carrier, the dial 500 Hz under it
+    const auto cw = make (7000.0, 7, -118.0f, 4.0f, { { 7010.0, 25.0f, 0.0f, 0.0f }, { 7020.0, 9.0f, 0.0f, 0.0f } });
+    f = up (cw, 7005.0, radio::Demod::cw);
+    CHECK (std::abs (f.khz - 7009.5) <= 0.15, "CW: the carrier, the dial 500 Hz under it (%.2f)", f.khz);
+    f = up (cw, 7009.5, radio::Demod::cw);
+    CHECK (f.khz == 0.0, "CW: the weak one left (%.2f)", f.khz);
+    CHECK (radio::seekZoom (radio::Demod::am) == 5 && radio::seekZoom (radio::Demod::cw) == 7, "the zooms");
+}
+
 int main()
 {
     testDecoder();
@@ -889,6 +980,7 @@ int main()
     testPads();
     testStorm();
     testCpu();
+    testSeek();
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

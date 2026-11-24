@@ -1254,7 +1254,9 @@ private:
             {
                 const auto st = proc().radioNet().getStatus (rx);
                 sub = radioStateText (st.state);
-                if (st.title.isNotEmpty())
+                if (st.seekMsg.isNotEmpty())
+                    sub << " · "_fr << st.seekMsg;
+                else if (st.title.isNotEmpty())
                     sub << " · "_fr << st.title;
                 else if (st.msg.isNotEmpty())
                     sub << " · "_fr << st.msg;
@@ -4582,6 +4584,23 @@ void Machine::buildPages()
         md.shown = shortwave;
         md.tip = "AM : la radiodiffusion. USB, LSB : la bande latérale (les radioamateurs au-dessus et au-dessous de 10 MHz). CW : le morse."_fr;
         tb.ctls.push_back (md);
+        // (0.4.18) SEEK: the next clean signal up or down, read on the receiver's panorama; its lamp lit while it looks
+        auto sk = choiceCtl ("Seek", { "down", "stop", "up" },
+                             [this, rxNow]
+                             {
+                                 const int d = proc.hasRadioNet() ? proc.radioNet().seeking (rxNow()) : 0;
+                                 return d < 0 ? 0 : d > 0 ? 2 : 1;
+                             },
+                             [this, rxNow] (int i)
+                             {
+                                 if (proc.radioNet().getSource (rxNow()).kind != 2)
+                                     return;
+                                 proc.radioNet().seek (rxNow(), i == 0 ? -1 : i == 2 ? 1 : 0);
+                             });
+        sk.look = Ctl::Look::buttons;
+        sk.shown = shortwave;
+        sk.tip = "Cherche le prochain signal propre vers le haut (UP) ou le bas (DOWN) de la bande, d'après le panorama du récepteur, et s'y accorde. En AM : une station nette, sans voisine qui la gêne ; en USB et LSB : une voix ; en CW : du morse. STOP l'interrompt (tourner le potard aussi). L'écran dit où il en est."_fr;
+        tb.ctls.push_back (sk);
         tb.ctls.push_back (sep (S (snd::rdLevel)));
         tb.ctls.push_back (S (snd::rdMorph));
         v.push_back ({ "tune", "tune", { tb } });
@@ -4706,7 +4725,7 @@ void Machine::buildPages()
         deco ("play", "freeze", { { 0, 1, "stretch" }, { 2, 6, "spectral", Picto::spectrum } }, {}, {}, Picto::none, samplerMode);
         deco ("loop", "loop", { { 1, 3, "loop", Picto::loop } }, {}, {}, Picto::none, samplerMode);
         // RADIO: the receiver (its RX, tuned, demodulated), what comes out; the air
-        deco ("tune", "tune", { { 1, 3, "receiver", Picto::antenna }, { 4, 5, "output" } }, { 1, 2 }, {}, Picto::none, radioMode);
+        deco ("tune", "tune", { { 1, 4, "receiver", Picto::antenna }, { 5, 6, "output" } }, { 1, 2 }, {}, Picto::none, radioMode);
         deco ("air", "air", { { 0, 1, "band" }, { 2, 3, "fading" } }, {}, {}, Picto::none, radioMode);
         deco ("pads", "pads", { { 0, 1, "pads", Picto::pads } }, {}, {}, Picto::none, radioMode);
         // DRUM: the hit's envelope, its layers; its sweep, its FM; its filter and the filter's envelope
@@ -5284,6 +5303,9 @@ void Machine::placeEncoders()
         encoders[i]->setBounds ((int) x, encArea.getY(), (int) w, encArea.getHeight());
         x += w;
     }
+    // (0.4.18) the whole row painted again: the liserets, their names above it, the separators and the arrows go with
+    // the controls (a control shown or hidden, a switch narrower: only the moved ones were painted again)
+    repaint (encArea.expanded (6, 12));
 }
 
 // (0.4.16) the silkscreen printed on the desk, over the row of controls: the liserets round what goes together, their

@@ -1,5 +1,6 @@
 #include "RadioNet.h"
 #include "RadioDec.h"
+#include "RadioSeek.h"
 #include "../ui/Text.h"
 
 namespace
@@ -364,6 +365,30 @@ struct RadioNet::Rx : juce::Thread
         { const juce::ScopedLock sl (lock); if (st.rate == rate && st.kbps == kbps) return; st.rate = rate; st.kbps = kbps; }
         ++net.ver;
     }
+    // (0.4.18) SEEK: the way asked (0: none) and a new number at each ask (a stop too); the shortwave session's stamp
+    // (the panorama's connection is paired with it, as the receiver's own page pairs its two); what the seek says
+    std::atomic<int> seekWant { 0 }, seekSerial { 0 };
+    std::atomic<juce::int64> sndTs { 0 }, seekMsgAt { 0 };
+    void setSeekMsg (const juce::String& m)
+    {
+        seekMsgAt = nowMs();
+        { const juce::ScopedLock sl (lock); if (st.seekMsg == m) return; st.seekMsg = m; }
+        ++net.ver;
+    }
+    // the frequency a seek found, unless the source changed meanwhile (the SND session tunes it over its connection)
+    bool retune (int v0, double khz)
+    {
+        {
+            const juce::ScopedLock sl (lock);
+            if (srcVer != v0 || src.kind != 2) return false;
+            src.khz = khz; ++srcVer;
+            st.msg.clear();
+        }
+        usedAt = nowMs();
+        notify();
+        ++net.ver;
+        return true;
+    }
     bool changed (int v) { const juce::ScopedLock sl (lock); return srcVer != v; }
     Source current (int* v = nullptr) { const juce::ScopedLock sl (lock); if (v) *v = srcVer; return src; }
     bool used() const { return (net.bank.use.load() >> k & 1) != 0 || nowMs() - usedAt.load() < net.standbyMs; }
@@ -604,12 +629,14 @@ struct RadioNet::Rx : juce::Thread
         juce::String host = s.host; int port = s.port;
         Sock k2; k2.abort = &abort;
         bool up = false;
+        juce::int64 stamp = 0;
         for (int hop = 0; hop < 4 && ! up; ++hop)
         {
             k2.s.close(); k2.pre.clear(); k2.preAt = 0;
             if (! k2.connect (host, port, 8000)) { lastErr = shouldEnd (v) ? juce::String() : "récepteur injoignable"_fr; return shouldEnd (v) ? R_CHANGED : R_RETRY; }
             juce::uint8 key[16]; juce::Random r; for (auto& b : key) b = (juce::uint8) r.nextInt (256);
-            const auto ts = juce::String ((juce::int64) (juce::Time::currentTimeMillis() / 1000) & 0x7fffffff);
+            stamp = (juce::int64) (juce::Time::currentTimeMillis() / 1000) & 0x7fffffff;
+            const auto ts = juce::String (stamp);
             Url u; u.host = host; u.port = port; u.path = "/" + ts + "/SND"; u.ok = true;
             HttpResp hr; juce::String err;
             if (! httpExchange (k2, u, "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: " + juce::Base64::toBase64 (key, 16)
@@ -630,6 +657,8 @@ struct RadioNet::Rx : juce::Thread
         if (! up) { lastErr = "récepteur injoignable"_fr; return R_RETRY; }
         Ws ws { k2, juce::Random() };
         setIo (nullptr);
+        sndTs = stamp;
+        struct Unstamp { std::atomic<juce::int64>& t; ~Unstamp() { t = 0; } } unstamp { sndTs };
         ws.text ("SET auth t=kiwi p=");
         setState (radio::buffering, "");
         double rate = 0.0, foff = 0.0;
@@ -769,6 +798,215 @@ struct RadioNet::Watch : juce::Thread
     }
 };
 
+// ------------------------------------------------------------------ SEEK: a receiver's panorama read (0.4.18)
+// A second WebSocket on the receiver, its waterfall (W/F), paired with the sound's session (the same stamp, as its own
+// page opens the two): the lines asked uncompressed, as fast as it sends them, over a span chosen for the mode
+// (radio::seekZoom), from just behind the frequency heard onwards. A few of them read (their mean, their loudest),
+// radio::nextSignal looks in them for the next clean signal; none, the next stretch (overlapping the last by 30 kHz),
+// round the band once at most, a dozen stretches at most. Found: the frequency set (the sound's session tunes it over
+// its own connection, MORPH between the two), the panorama let go. Its packets: "W/F" and a byte, the first bin's
+// place (a 32-bit count at the finest zoom's resolution), the zoom (and flags: 0x10000, compressed), a sequence
+// number, then 1024 bins (a byte each: 255 at 0 dBm, a dB a step down)
+struct RadioNet::Seek : juce::Thread
+{
+    RadioNet& net;
+    explicit Seek (RadioNet& n) : juce::Thread ("REPLIK8 radio seek"), net (n) {}
+
+    void run() override
+    {
+        while (! threadShouldExit())
+        {
+            for (int k = 0; k < radio::numRx && ! threadShouldExit(); ++k)
+            {
+                auto& r = *net.rx[k];
+                const int serial = r.seekSerial.load();
+                const int dir = r.seekWant.load();
+                if (dir != 0)
+                {
+                    seekOn (r, dir, serial);
+                    if (r.seekSerial.load() == serial) { r.seekWant = 0; ++net.ver; }
+                }
+                // what it found, said a while
+                else if (r.seekMsgAt.load() > 0 && nowMs() - r.seekMsgAt.load() > 8000)
+                {
+                    r.setSeekMsg ({});
+                    r.seekMsgAt = 0;
+                }
+            }
+            wait (100);
+        }
+    }
+
+    static radio::Demod demodOf (const juce::String& m)
+    {
+        return m == "usb" ? radio::Demod::usb : m == "lsb" ? radio::Demod::lsb : m == "cw" ? radio::Demod::cw : radio::Demod::am;
+    }
+    static juce::String khzText (double khz) { return juce::String (khz, std::abs (khz - std::round (khz)) < 0.05 ? 0 : 1) + " kHz"; }
+
+    void seekOn (Rx& r, int dir, int serial)
+    {
+        int v0; const Source s = r.current (&v0);
+        std::atomic<bool> stop { false };
+        auto wanted = [&] { return ! threadShouldExit() && r.seekSerial.load() == serial && ! r.changed (v0); };
+        if (s.kind != 2)
+        {
+            r.setSeekMsg ("seek : rien à chercher sur une station"_fr);
+            return;
+        }
+        const auto arrow = dir > 0 ? juce::String ("up") : juce::String ("down");
+        r.setSeekMsg ("seek " + arrow + " : lecture de la bande"_fr);
+        // the connection (through the receivers' relays' redirections, as the sound's)
+        juce::String host = s.host; int port = s.port;
+        Sock k2; k2.abort = &stop;
+        bool up = false;
+        juce::String why = "seek : le récepteur ne répond pas"_fr;
+        for (int hop = 0; hop < 4 && ! up && wanted(); ++hop)
+        {
+            k2.s.close(); k2.pre.clear(); k2.preAt = 0;
+            if (! k2.connect (host, port, 6000)) break;
+            juce::uint8 key[16]; juce::Random rr; for (auto& b : key) b = (juce::uint8) rr.nextInt (256);
+            const juce::int64 paired = r.sndTs.load();
+            const auto ts = juce::String (paired > 0 ? paired : (juce::int64) (juce::Time::currentTimeMillis() / 1000) & 0x7fffffff);
+            Url u; u.host = host; u.port = port; u.path = "/" + ts + "/W/F"; u.ok = true;
+            HttpResp hr; juce::String err;
+            if (! httpExchange (k2, u, "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: " + juce::Base64::toBase64 (key, 16)
+                                       + "\r\nSec-WebSocket-Version: 13\r\n", hr, 6000, err))
+                break;
+            if (hr.status == 101) { up = true; break; }
+            if (hr.status >= 300 && hr.status < 400 && hr.location.isNotEmpty())
+            {
+                const auto nu = parseUrl (hr.location);
+                if (! nu.ok) break;
+                host = nu.host; port = nu.port;
+                continue;
+            }
+            break;
+        }
+        if (! up)
+        {
+            if (wanted()) r.setSeekMsg (why);
+            return;
+        }
+        Rx::Ws ws { k2, juce::Random() };
+        ws.text ("SET auth t=kiwi p=");
+        const auto dm = demodOf (s.mode);
+        const int zoom = radio::seekZoom (dm), need = radio::seekLines (dm), most = radio::seekWindows (dm);
+        double bw = 30000.0, version = 0.0;          // kHz; the receiver's version (its "SET zoom=" changed at 1.329)
+        int vmaj = -1, vmin = -1;
+        bool setup = false, asked = false, wrapped = false, found = false;
+        double from = s.khz, start = 0.0, span = 0.0;
+        int windows = 0, lines = 0;
+        std::vector<float> sum (1024), top (1024);
+        juce::int64 lastKeep = nowMs(), askedAt = 0;
+        const juce::int64 began = nowMs();
+        std::vector<juce::uint8> m;
+        auto place = [&] (bool first)
+        {
+            // the next stretch: from 15 kHz behind the frequency heard, then on (overlapping by 30 kHz); round the band
+            // once at its end
+            span = bw / (double) (1 << zoom);
+            double want;
+            if (first) want = dir > 0 ? from - 15.0 : from + 15.0 - span;
+            else want = dir > 0 ? start + span - 30.0 : start - span + 30.0;
+            const double hi = juce::jmax (0.0, bw - span);
+            if (! first && (dir > 0 ? start >= hi - 0.01 : start <= 0.01))
+            {
+                if (wrapped) return false;
+                wrapped = true;
+                want = dir > 0 ? 0.0 : hi;
+                from = dir > 0 ? -100.0 : bw + 100.0;
+            }
+            start = juce::jlimit (0.0, hi, want);
+            const double cf = start + span * 0.5;
+            if (version > 0.0 && version < 1.329)
+                ws.text ("SET zoom=" + juce::String (zoom) + " start=" + juce::String (juce::roundToInt (start / bw * 1024.0 * (double) (1 << 14))));
+            else
+                ws.text ("SET zoom=" + juce::String (zoom) + " cf=" + juce::String (cf, 3));
+            ++windows; lines = 0; askedAt = nowMs();
+            std::fill (sum.begin(), sum.end(), 0.0f);
+            std::fill (top.begin(), top.end(), -300.0f);
+            r.setSeekMsg ("seek " + arrow + " : "_fr + juce::String (cf / 1000.0, 2) + " MHz");
+            return true;
+        };
+        for (;;)
+        {
+            if (! wanted()) break;
+            if (nowMs() - began > 20000) { r.setSeekMsg ("seek : rien de propre trouvé"_fr); break; }
+            if (nowMs() - lastKeep >= 1000) { ws.text ("SET keepalive"); lastKeep = nowMs(); }
+            if (asked && nowMs() - askedAt > 6000) { r.setSeekMsg ("seek : le récepteur ne montre pas sa bande"_fr); break; }
+            if (! setup && nowMs() - began > 8000) { r.setSeekMsg (why); break; }
+            const int got = ws.recv (m, 200);
+            if (got < 0) { r.setSeekMsg ("seek : le récepteur a fermé son panorama"_fr); break; }
+            if (got == 0 || m.size() < 3) continue;
+            const juce::String tag ((const char*) m.data(), 3);
+            if (tag == "MSG")
+            {
+                const auto body = juce::String::fromUTF8 ((const char*) m.data() + 4, juce::jmax (0, (int) m.size() - 4));
+                bool fatal = false, go = false;
+                for (const auto& kv : juce::StringArray::fromTokens (body, " ", ""))
+                {
+                    const auto key = kv.upToFirstOccurrenceOf ("=", false, false), val = kv.fromFirstOccurrenceOf ("=", false, false);
+                    if (key == "too_busy" || (key == "badp" && val != "0") || key == "down") { r.setSeekMsg ("seek : le récepteur refuse son panorama"_fr); fatal = true; }
+                    if (key == "bandwidth" && val.getDoubleValue() > 1.0e6) bw = val.getDoubleValue() / 1000.0;
+                    if (key == "version_maj") vmaj = val.getIntValue();
+                    if (key == "version_min") vmin = val.getIntValue();
+                    if (key == "wf_chans" && val.getIntValue() == 0) { r.setSeekMsg ("seek : ce récepteur ne montre pas sa bande"_fr); fatal = true; }
+                    if (key == "wf_setup") go = true;
+                }
+                if (vmaj >= 0 && vmin >= 0) version = vmaj + vmin / 1000.0;
+                if (fatal) break;
+                if (go && ! setup)
+                {
+                    setup = true;
+                    ws.text ("SET maxdb=0 mindb=-100");
+                    ws.text ("SET wf_comp=0");
+                    ws.text ("SET interp=10");              // (each bin the loudest of what it covers: a carrier never lost between two)
+                    ws.text ("SET wf_speed=4");
+                    ws.text ("SET keepalive"); lastKeep = nowMs();
+                    asked = place (true);
+                }
+                continue;
+            }
+            if (tag != "W/F" || ! asked || m.size() < 16 + 1024) continue;
+            auto u32 = [&m] (int at) { return (juce::uint32) m[(size_t) at] | (juce::uint32) m[(size_t) at + 1] << 8 | (juce::uint32) m[(size_t) at + 2] << 16 | (juce::uint32) m[(size_t) at + 3] << 24; };
+            const auto xbin = u32 (4), fz = u32 (8);
+            if ((fz & 0x10000) != 0 || (int) (fz & 0xffff) != zoom) continue;
+            const double lineStart = (double) xbin * bw / (1024.0 * (double) (1 << 14));
+            if (std::abs (lineStart - start) > span / 1024.0 * 1.5) continue;        // (a line of the stretch before)
+            for (int i = 0; i < 1024; ++i)
+            {
+                const float db = (float) m[(size_t) (16 + i)] - 256.0f;
+                sum[(size_t) i] += db;
+                top[(size_t) i] = juce::jmax (top[(size_t) i], db);
+            }
+            if (++lines < need) continue;
+            radio::Panorama p;
+            p.startKhz = lineStart;
+            p.binKhz = span / 1024.0;
+            p.avg.resize (1024);
+            for (int i = 0; i < 1024; ++i) p.avg[(size_t) i] = sum[(size_t) i] / (float) lines;
+            p.peak = top;
+            const auto f = radio::nextSignal (p, from, dir, dm);
+            if (f.khz > 0.0)
+            {
+                const double khz = juce::jlimit (10.0, 30000.0, std::round (f.khz * 10.0) / 10.0);
+                if (r.retune (v0, khz))
+                {
+                    found = true;
+                    r.setSeekMsg ("seek : "_fr + khzText (khz) + " (+" + juce::String (juce::roundToInt (f.snr)) + " dB)");
+                }
+                break;
+            }
+            if (windows >= most || ! place (false)) { r.setSeekMsg ("seek : rien de propre trouvé"_fr); break; }
+        }
+        if (k2.s.isConnected()) { const juce::uint8 code[2] = { 0x03, 0xe9 }; ws.send (8, code, 2); }   // (going away)
+        k2.s.close();
+        // (stopped by a frequency tuned meanwhile: nothing more to say)
+        if (! found && r.seekSerial.load() == serial && r.changed (v0))
+            r.setSeekMsg ({});
+    }
+};
+
 // ------------------------------------------------------------------ RadioNet
 RadioNet::RadioNet (radio::Bank& b) : bank (b)
 {
@@ -777,9 +1015,13 @@ RadioNet::RadioNet (radio::Bank& b) : bank (b)
     pool = std::make_unique<juce::ThreadPool> (2);
     sup = std::make_unique<Watch> (*this);
     sup->startThread();
+    seeker = std::make_unique<Seek> (*this);
+    seeker->startThread();
 }
 RadioNet::~RadioNet()
 {
+    seeker->signalThreadShouldExit();
+    seeker->stopThread (8000);
     sup->signalThreadShouldExit();
     for (auto& r : rx) { r->signalThreadShouldExit(); r->abort = true; r->cancelIo(); r->notify(); }
     for (auto& r : rx) r->stopThread (4000);
@@ -810,6 +1052,19 @@ RadioNet::Status RadioNet::getStatus (int k) const
     const juce::ScopedLock sl (rx[k]->lock);
     return rx[k]->st;
 }
+
+void RadioNet::seek (int k, int dir)
+{
+    if (k < 0 || k >= radio::numRx) return;
+    auto& r = *rx[k];
+    r.seekWant = juce::jlimit (-1, 1, dir);
+    ++r.seekSerial;
+    if (dir == 0) r.setSeekMsg ({});
+    r.usedAt = nowMs();
+    seeker->notify();
+    ++ver;
+}
+int RadioNet::seeking (int k) const { return k < 0 || k >= radio::numRx ? 0 : rx[k]->seekWant.load(); }
 
 void RadioNet::answer (const juce::var& v) { const juce::ScopedLock sl (ansLock); answers.push_back (v); ++ver; }
 std::vector<juce::var> RadioNet::takeAnswers() { const juce::ScopedLock sl (ansLock); std::vector<juce::var> a; a.swap (answers); return a; }

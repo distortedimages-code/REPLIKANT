@@ -676,6 +676,12 @@ int main (int argc, char** argv)
         set (snd::rdRx, 1.0f);
         realtime (5.0);
         shoot ("37-radio-ondes-courtes.png");
+        // (0.4.18) SEEK: the next clean station up, read on the receiver's waterfall (the stand-in's band)
+        net.seek (1, 1);
+        for (int i = 0; i < 200 && net.seeking (1) != 0; ++i)
+            realtime (0.05);
+        realtime (1.5);
+        shoot ("80-radio-seek.png");
         set (snd::rdRx, 0.0f);
         set (snd::rdFade, 0.0f);
         set (snd::rdCrackle, 0.0f);

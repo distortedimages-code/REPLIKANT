@@ -5,7 +5,7 @@ if(APPLE)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Universal binary")
 endif()
 
-project(REPLIKANT VERSION 0.4.17 LANGUAGES C CXX)
+project(REPLIKANT VERSION 0.4.18 LANGUAGES C CXX)
 
 # GitHub repository whose releases the plug-in checks for updates (public releases).
 set(RK_UPDATE_REPO "distortedimages-code/REPLIKANT" CACHE STRING "owner/repo checked for updates (empty = no update check)")
@@ -61,6 +61,7 @@ add_library(rk_core STATIC
     Source/radio/RadioCore.cpp
     Source/radio/RadioDec.cpp
     Source/radio/RadioSlicer.cpp
+    Source/radio/RadioSeek.cpp
     # DRUM: eight tracks, their voices and their sequencer
     Source/drum/DrumCore.cpp
     Source/drum/DrumTables.cpp)

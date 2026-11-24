@@ -8,14 +8,17 @@
   /stats                             what was asked (clicks, receivers' connections, frequencies)
   ws://127.0.0.1:PORT+1/<ts>/SND      a shortwave receiver: its WebSocket, IMA ADPCM at 12001.135 Hz, its tone 500 Hz
                                       under 10 MHz, 900 Hz above (the frequency comes with SET mod)
+  ws://127.0.0.1:PORT+1/<ts>/W/F      (0.4.18) its waterfall: 1024 bins a line, 23 lines a second, over the span asked
+                                      (SET zoom= cf=): a floor, carriers with their sidebands, a weak one, two beating,
+                                      a birdie (see BAND)
   ws://127.0.0.1:PORT+2/...           a receiver with every channel taken (too_busy)
 Usage: radio_mock.py PORT MP3FILE   (RADIO_MOCK_SHOWCASE=1: more stations and receivers, all made up, for the screenshots)
 """
-import base64, hashlib, json, math, os, socket, struct, sys, threading, time
+import base64, hashlib, json, math, os, random, socket, struct, sys, threading, time
 
 PORT = int(sys.argv[1])
 MP3 = open(sys.argv[2], 'rb').read()
-STATS = {'clicks': [], 'ws': 0, 'busy': 0, 'mods': [], 'streams': 0}
+STATS = {'clicks': [], 'ws': 0, 'busy': 0, 'mods': [], 'streams': 0, 'wf': 0, 'zooms': [], 'paths': []}
 LOCK = threading.Lock()
 
 def stat(k, v=None):
@@ -200,9 +203,51 @@ class Enc:
         s.i = max(0, min(88, s.i + IDX[c]))
         return c
 
+# (0.4.18) the band the waterfall shows: (kHz, carrier dB over the floor, sidebands dB over it)
+BAND = [(9420, 35, 12), (9500, 32, 10), (9580, 40, 15), (9640, 12, 4), (9655, 30, 10), (9660, 30, 10), (9700, 25, 0), (9750, 28, 8)]
+def waterfall(conn):
+    stat('wf')
+    conn.settimeout(0.01)
+    buf = bytearray()
+    for m in ['center_freq=15000000 bandwidth=30000000 adc_clk_nom=66666600', 'kiwi_up=1 rx_chan=0',
+              'wf_fft_size=1024 wf_fps=23 wf_fps_max=23 zoom_max=14 rx_chans=4 wf_chans=4 wf_chans_real=4 wf_cal=-13 wf_setup']:
+        ws_send(conn, ('MSG ' + m).encode())
+    zoom, start, seq, last = None, 0.0, 0, 0.0
+    hz = 30e6 / (1024 << 14)
+    while True:
+        r = ws_recv(conn, buf)
+        if r is not None:
+            op, p = r
+            if op == 8: return
+            t = p.decode('latin-1')
+            if t.startswith('SET zoom='):
+                z = int(t.split('zoom=')[1].split()[0]); cf = float(t.split('cf=')[1].split()[0])
+                span = 30000.0 / (1 << z)
+                zoom, start = z, min(max(cf - span / 2, 0.0), 30000.0 - span)
+                stat('zooms', [z, cf])
+            continue
+        if zoom is None or time.time() - last < 1 / 23: continue
+        last = time.time()
+        span = 30000.0 / (1 << zoom); bw = span / 1024
+        line = bytearray()
+        for i in range(1024):
+            f = start + (i + 0.5) * bw
+            p = 10 ** ((-110 + random.gauss(0, 2)) / 10)
+            for fc, car, sides in BAND:
+                d = abs(f - fc)
+                if d < bw * 2: p += 10 ** ((-110 + car - 6 * (d / bw) ** 2) / 10)
+                if sides and 0.4 <= d <= 4.5: p += 10 ** ((-110 + sides - 6 + random.gauss(0, 3)) / 10)
+            db = max(-200.0, min(0.0, 10 * math.log10(p)))
+            line.append((int(db) - 1) & 0xff)
+        xbin = int(round(start * 1000 / hz))
+        ws_send(conn, b'W/F ' + struct.pack('<III', xbin, zoom, seq) + bytes(line))
+        seq += 1
+
 def kiwi(conn):
     path = ws_accept(conn)
     if path is None: return
+    stat('paths', path)
+    if path.endswith('/W/F'): return waterfall(conn)
     stat('ws')
     conn.settimeout(0.01)
     buf = bytearray(); rate = 12001.135

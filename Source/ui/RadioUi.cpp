@@ -1028,6 +1028,16 @@ void RadioTuner::timerCallback()
         lastVersion = net.version();
         list.repaint();
         repaint (status.toNearestInt());
+        // (0.4.18) the frequency tuned elsewhere (the big knob, SEEK): the tuner's own figures follow, unless they're
+        // being typed
+        const auto s = source();
+        if (s.kind == 2 && ! freq.hasKeyboardFocus (true) && (std::abs (s.khz - swKhz) > 0.001 || s.mode != swMode))
+        {
+            swKhz = s.khz;
+            swMode = s.mode;
+            freq.setText (kbText (swKhz) + " khz", false);
+            repaint();
+        }
     }
 }
 

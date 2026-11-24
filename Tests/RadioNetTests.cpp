@@ -263,6 +263,55 @@ int main()
         check ("SW: a small turn, no break", stayed && st["mods"].size() == 3 && std::abs ((double) st["mods"][2] - 11852.5) < 0.01,
                juce::JSON::toString (st, true));
     }
+    // (0.4.18) SEEK: the next clean station up and down, read on the receiver's waterfall (paired with the sound's
+    // session, let go after each seek), the sound tuned over its own connection
+    {
+        auto w2 = w;
+        w2.khz = 9420.0;
+        net->setSource (1, w2);
+        run (0.3, false);
+        waitState (1, radio::live, 6);
+        auto seekTo = [&] (int way, double secs)
+        {
+            net->seek (1, way);
+            const double until = juce::Time::getMillisecondCounterHiRes() + secs * 1000.0;
+            run (0.1, false);
+            while (juce::Time::getMillisecondCounterHiRes() < until && net->seeking (1) != 0)
+                run (0.05, false);
+            return net->getSource (1).khz;
+        };
+        double got = seekTo (1, 12);
+        check ("SEEK: up from 9420, the next clean station", std::abs (got - 9500.0) < 0.01, juce::String (got) + " · " + net->getStatus (1).seekMsg);
+        got = seekTo (1, 12);
+        check ("SEEK: up again", std::abs (got - 9580.0) < 0.01, juce::String (got) + " · " + net->getStatus (1).seekMsg);
+        got = seekTo (1, 12);
+        check ("SEEK: the weak one, the two beating, the birdie passed by", std::abs (got - 9750.0) < 0.01, juce::String (got) + " · " + net->getStatus (1).seekMsg);
+        got = seekTo (-1, 12);
+        check ("SEEK: down", std::abs (got - 9580.0) < 0.01, juce::String (got) + " · " + net->getStatus (1).seekMsg);
+        check ("SEEK: what it found, said", net->getStatus (1).seekMsg.contains ("9580"), net->getStatus (1).seekMsg);
+        // stopped at once: nothing tuned
+        net->seek (1, 1);
+        run (0.05, false);
+        net->seek (1, 0);
+        run (1.5, false);
+        check ("SEEK: stopped", net->seeking (1) == 0 && std::abs (net->getSource (1).khz - 9580.0) < 0.01, juce::String (net->getSource (1).khz));
+        const auto st = stats();
+        juce::String snd, wf;
+        if (auto* a = st["paths"].getArray())
+            for (auto& p : *a)
+            {
+                const auto t = p.toString();
+                if (t.endsWith ("/SND")) snd = t.upToLastOccurrenceOf ("/SND", false, false);
+                if (t.endsWith ("/W/F")) wf = t.upToLastOccurrenceOf ("/W/F", false, false);
+            }
+        check ("SEEK: the panorama paired with the sound's session", snd.isNotEmpty() && wf == snd && (int) st["wf"] >= 4, snd + " / " + wf + " · " + juce::String ((int) st["wf"]));
+        const auto* mods = st["mods"].getArray();
+        check ("SEEK: the sound tuned over its own connection", (int) st["ws"] == 1 && mods != nullptr && std::abs ((double) mods->getLast() - 9580.0) < 0.01,
+               juce::JSON::toString (st["mods"], true));
+        net->setSource (1, w);
+        run (0.3, false);
+        check ("SEEK: ... and back where it was", waitState (1, radio::live, 6), net->getStatus (1).msg);
+    }
     // the same receiver on RX 4: refused
     net->setSource (3, w);
     check ("SW: never two connections on one receiver", waitState (3, radio::busy, 3), net->getStatus (3).msg);
