@@ -632,6 +632,14 @@ int main (int argc, char** argv)
     view->setCaptureKind (te::Machine::resampleKind);
     run (10);
     shoot ("21-reechantillonner.png");
+    // (0.4.24) to the DRUM: its sensitivity in place of the note
+    proc.resampleOptions.dest = ReplikantProcessor::ResampleOptions::toDrum;
+    view->setCaptureKind (te::Machine::resampleKind);
+    run (6);
+    shoot ("21b-reechantillonner-drum.png");
+    proc.resampleOptions.dest = ReplikantProcessor::ResampleOptions::toSampler;
+    view->setCaptureKind (te::Machine::resampleKind);
+    run (4);
     set (snd::rvOn, 1.0f);
     set (snd::chOn, 1.0f);
     proc.resampleOptions.length = 0;

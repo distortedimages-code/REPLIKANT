@@ -1274,7 +1274,9 @@ private:
             if (m.captureKind == Machine::resampleKind)
             {
                 tag = proc().player.resampleState() == Player::Resample::recording ? "resampling" : "resample";
-                sub = "ce qui sort des effets, injecté dans le sampler"_fr;
+                sub = proc().resampleOptions.dest == ReplikantProcessor::ResampleOptions::toDrum ? "ce qui sort des effets, découpé sur une piste de la drum"_fr
+                    : proc().resampleOptions.dest == ReplikantProcessor::ResampleOptions::toWeave ? "ce qui sort des effets, ajouté à weave"_fr
+                    : "ce qui sort des effets, injecté dans le sampler"_fr;
             }
         }
         else if (m.mode == Machine::synthMode)
@@ -2809,7 +2811,10 @@ private:
             case Player::Resample::idle:
                 head = bars > 0 ? juce::String (bars) + (bars > 1 ? " mesures" : " mesure") : juce::String ("libre");
                 line = (bars > 0 && o.synced ? juce::String ("sur la mesure suivante quand le transport joue") : juce::String ("dès que tu lances"_fr))
-                       + " · rejoué sur "_fr + lower (rk::noteName (o.root)) + (o.resetFx ? " · effets à zéro ensuite"_fr : " · effets gardés"_fr);
+                       + (o.dest == ReplikantProcessor::ResampleOptions::toDrum ? " · découpé sur une piste de la drum"_fr
+                          : o.dest == ReplikantProcessor::ResampleOptions::toWeave ? " · ajouté à weave"_fr
+                          : " · rejoué sur "_fr + lower (rk::noteName (o.root)))
+                       + (o.resetFx ? " · effets à zéro ensuite"_fr : " · effets gardés"_fr);
                 break;
             case Player::Resample::armed:     head = "en attente de la mesure"; line = "lance le transport, ou annule"; break;
             case Player::Resample::recording: head = juce::String (pl.resampleSeconds(), 2) + " s"; line = "ce qui sort des effets, avant le volume"; break;
@@ -3645,9 +3650,19 @@ private:
         }
         else if (viz == "resample")
         {
-            // the way the sound goes: the effects, recorded, into the sampler, looped
-            const Picto steps[4] = { Picto::chain, Picto::record, Picto::cassette, Picto::loop };
-            const char* names[4] = { "effets", "enregistré", "sampler", "en boucle" };
+            // the way the sound goes: the effects, recorded, then into the sampler (looped), the DRUM (cut at its
+            // attacks onto a track) or WEAVE (one more sound)
+            const int dest = p.resampleOptions.dest;
+            const Picto steps[4] = { Picto::chain, Picto::record,
+                                     dest == ReplikantProcessor::ResampleOptions::toDrum ? Picto::slice
+                                         : dest == ReplikantProcessor::ResampleOptions::toWeave ? Picto::weave : Picto::cassette,
+                                     dest == ReplikantProcessor::ResampleOptions::toDrum ? Picto::pads
+                                         : dest == ReplikantProcessor::ResampleOptions::toWeave ? Picto::loop : Picto::loop };
+            const char* toDrum[4] = { "effets", "enregistré", "découpé", "piste drum" };
+            const char* toWeave[4] = { "effets", "enregistré", "weave", "dans la trame" };
+            const char* toSampler[4] = { "effets", "enregistré", "sampler", "en boucle" };
+            const char* const* names = dest == ReplikantProcessor::ResampleOptions::toDrum ? toDrum
+                                     : dest == ReplikantProcessor::ResampleOptions::toWeave ? toWeave : toSampler;
             const float w = r.getWidth() / 4.0f;
             for (int i = 0; i < 4; ++i)
             {
@@ -4609,7 +4624,7 @@ public:
         layout();
         const char* names[3] = { "notes", "cycles", "rééchantillonner" };
         const char* tips[3] = { "un multisample, joué dans le sampler", "une banque de cycles pour les oscillateurs du synthé",
-                                "ce qui sort des effets, injecté dans le sampler sans coupure" };
+                                "ce qui sort des effets, vers le sampler, la drum ou weave" };
         const int kind = m.captureKind;
         for (int i = 0; i < 3; ++i)
         {
@@ -5980,6 +5995,9 @@ void Machine::buildResamplePages()
         c.changed = [this] { proc.settingsChanged(); };
         return c;
     };
+    // (0.4.24) where it goes
+    b.ctls.push_back (keep (choiceCtl ("To", { "sampler", "drum", "weave" }, [&o] { return o.dest; }, [&o] (int v) { o.dest = v; }), idle));
+    b.ctls.back().tip = "Où va le rééchantillon. SAMPLER : un instrument en boucle, joué au clavier. DRUM : découpé sur ses attaques, sur une piste libre de la boîte à rythmes, chaque tranche sur le pas où elle tombait (la piste le rejoue tel quel, ses tranches deviennent les tiennes). WEAVE : un son de plus dans la trame."_fr;
     b.ctls.push_back (keep (choiceCtl ("Length", { "1 bar", "2 bars", "4 bars", "8 bars", "free" },
                                         [&o] { return o.length; }, [&o] (int v) { o.length = v; }), idle));
     b.ctls.back().tip = "Combien enregistrer : des mesures au tempo (la boucle tombe juste), ou libre jusqu'à ce que tu arrêtes (une minute au plus)."_fr;
@@ -5989,6 +6007,11 @@ void Machine::buildResamplePages()
     b.ctls.push_back (keep (numberCtl ("Note", 0.0, 127.0, 1.0, [&o] { return (double) o.root; }, [&o] (double v) { o.root = (int) v; },
                                        [] (double v) { return lower (rk::noteName ((int) v)); }), [] { return true; }));
     b.ctls.back().tip = "La touche qui rejoue le son tel qu'il a été enregistré (les autres le transposent)."_fr;
+    b.ctls.back().shown = [&o] { return o.dest == ReplikantProcessor::ResampleOptions::toSampler; };
+    b.ctls.push_back (keep (numberCtl ("Sens", 0.0, 100.0, 1.0, [&o] { return (double) o.sens * 100.0; }, [&o] (double v) { o.sens = (float) v / 100.0f; },
+                                       [] (double v) { return juce::String (juce::roundToInt (v)) + " %"; }), [] { return true; }));
+    b.ctls.back().tip = "DRUM : la sensibilité de la découpe. Plus haut, plus d'attaques deviennent des tranches (16 au plus) ; plus bas, seulement les coups francs."_fr;
+    b.ctls.back().shown = [&o] { return o.dest == ReplikantProcessor::ResampleOptions::toDrum; };
     b.ctls.push_back (keep (choiceCtl ("Effects", { "reset", "kept" }, [&o] { return o.resetFx ? 0 : 1; },
                                         [&o] (int v) { o.resetFx = v == 0; }), [] { return true; }));
     b.ctls.back().tip = "À ZÉRO : une fois injecté, le filtre, le drive, les effets et WTF?! sont coupés, pour ne pas traiter le son deux fois."_fr;

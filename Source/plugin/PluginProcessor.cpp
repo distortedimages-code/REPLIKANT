@@ -1006,6 +1006,30 @@ void ReplikantProcessor::injectResample (rk::Channels audio)
 {
     if (audio.empty() || audio[0].size() < 64)
         return;
+    if (audio.size() < 2)
+        audio.push_back (audio[0]);
+    // (0.4.24) to the DRUM or to WEAVE: the loop let go as they take over, the effects as asked
+    if (resampleOptions.dest != ResampleOptions::toSampler)
+    {
+        const int length = (int) audio[0].size();
+        juce::String said;
+        if (resampleOptions.dest == ResampleOptions::toDrum)
+            resampleToDrum (std::move (audio), said);
+        else
+            resampleToWeave (std::move (audio), said);
+        if (resampleOptions.resetFx)
+            for (int id : { (int) snd::fModel, (int) snd::dModel, (int) snd::spOn, (int) snd::piOn, (int) snd::chOn, (int) snd::crOn,
+                            (int) snd::rvOn, (int) snd::ecOn, (int) snd::cpOn, (int) snd::wtf })
+                setSoundParam (id, 0.0f);
+        player.stopResample();
+        releaseNeutralIn = 2;
+        settingsChanged();
+        if (onMessage)
+            onMessage (said + " · "_fr + juce::String ((double) length / sampleRate, 2) + " s"
+                       + (resampleOptions.resetFx ? juce::String (", effets à zéro"_fr) : juce::String()));
+        sendChangeMessage();
+        return;
+    }
     const int length = (int) audio[0].size();
     rk::Loop loop;
     loop.start = 0;
@@ -1056,6 +1080,156 @@ void ReplikantProcessor::injectResample (rk::Channels audio)
                    + (resampleOptions.resetFx ? juce::String (", effets à zéro"_fr) : juce::String()) + also
                    + ". Joue une note pour reprendre la main."_fr);
     sendChangeMessage();
+}
+
+static void soundAsIs (drum::Track& tk);    // (below: a track's sound played as it is)
+
+// (0.4.24) the take onto the DRUM: cut at its attacks (as the radio's takes, 16 slices at most), on the first track with
+// no trig in the pattern playing (none: the track shown, its steps cleared); whole bars at the tempo, each slice on the
+// step where it fell (the track plays the take back as it was, its slices now its own); otherwise one a step, in order
+void ReplikantProcessor::resampleToDrum (rk::Channels audio, juce::String& said)
+{
+    drumReady();
+    auto a = std::make_shared<radio::Take::Audio>();
+    a->sampleRate = sampleRate;
+    a->l = std::move (audio[0]);
+    a->r = std::move (audio[1]);
+    const int n = (int) a->l.size();
+    auto cuts = radio::slice (a->l.data(), a->r.data(), n, sampleRate, 16, resampleOptions.sens);
+    // the loop's start (its downbeat, most often): nothing before it to rise from, so no attack is found there; a
+    // slice from 0 when it isn't silent before the first one (the weakest other let go past sixteen)
+    {
+        const int first = cuts.empty() ? n : cuts.front().start;
+        double e = 0.0;
+        for (int i = 0; i < first; ++i)
+            e += (double) a->l[(size_t) i] * a->l[(size_t) i] + (double) a->r[(size_t) i] * a->r[(size_t) i];
+        if (first > (int) (0.005 * sampleRate) && first > 0 && e / (2.0 * first) > 1.0e-6)
+        {
+            radio::Slice head;
+            head.start = 0;
+            head.end = first;
+            head.strength = cuts.empty() ? 1.0f : cuts.front().strength;
+            cuts.insert (cuts.begin(), head);
+            if (cuts.size() > 16)
+            {
+                size_t weak = 1;
+                for (size_t k = 2; k < cuts.size(); ++k)
+                    if (cuts[k].strength < cuts[weak].strength)
+                        weak = k;
+                if (weak > 0)
+                    cuts[weak - 1].end = cuts[weak].end;
+                cuts.erase (cuts.begin() + (long) weak);
+            }
+        }
+    }
+    auto& pat = drum.pattern (drum.playingPattern());
+    int track = -1;
+    for (int t = 0; t < drum::numTracks && track < 0; ++t)
+    {
+        bool empty = true;
+        for (int s = 0; s < drum::numSteps; ++s)
+            empty = empty && pat.tr[t].trig[s] == 0;
+        if (empty)
+            track = t;
+    }
+    const bool over = track < 0;
+    if (over)
+        track = juce::jlimit (0, drum::numTracks - 1, drumTrack.load());
+    auto& tk = pat.tr[track];
+    for (int s = 0; s < drum::numSteps; ++s)
+    {
+        tk.trig[s] = 0;
+        tk.rat[s] = 1;
+        tk.lock[s][drum::pSlice] = NAN;
+    }
+    const auto base = instrumentName.isNotEmpty() ? instrumentName : juce::String ("Son");
+    const auto name = base + " rééch."_fr;
+    const int count = (int) cuts.size();
+    std::vector<int> at ((size_t) count, -1);
+    // whole bars at the tempo: the steps where the attacks fell
+    const int bars = ResampleOptions::barsOf (resampleOptions.length);
+    const double expect = bars * 240.0 / juce::jmax (20.0, (double) player.get (snd::tempo)) * sampleRate;
+    const int steps = bars * drum::pageSteps;
+    bool timed = false;
+    if (bars > 0 && steps <= drum::numSteps && std::abs ((double) n - expect) < expect * 0.03)
+    {
+        timed = true;
+        const double stepLen = (double) n / (double) steps;
+        for (int k = 0; k < count; ++k)
+        {
+            const int s = juce::jlimit (0, steps - 1, (int) std::lround ((double) cuts[(size_t) k].start / stepLen));
+            if (tk.trig[s] == 0)
+            {
+                tk.trig[s] = 1;
+                tk.lock[s][drum::pSlice] = (float) k;
+                at[(size_t) k] = s;
+            }
+        }
+        tk.len = (uint8_t) steps;
+    }
+    else
+    {
+        const int m = juce::jmin (drum::numSteps, count);
+        for (int k = 0; k < m; ++k)
+        {
+            tk.trig[k] = 1;
+            tk.lock[k][drum::pSlice] = (float) k;
+        }
+        tk.len = (uint8_t) juce::jmax (1, m);
+    }
+    useDrumSound (track, a, std::move (cuts), name, {}, 0, n);
+    tk.p[drum::pSource] = drum::slices;
+    soundAsIs (tk);
+    drumTrack = track;
+    setSoundParam (snd::engine, (float) snd::drum);
+    lastResample = name;
+    said = "Rééchantillon sur la piste "_fr + juce::String (track + 1) + (over ? " (pas de piste libre : elle est remplacée)"_fr : juce::String())
+           + " : "_fr + juce::String (count) + " tranches"_fr + (timed ? ", chacune sur le pas où elle tombait"_fr : juce::String (", une par pas"_fr));
+}
+
+void ReplikantProcessor::resampleToWeave (rk::Channels audio, juce::String& said)
+{
+    auto a = std::make_shared<weave::Audio>();
+    a->sampleRate = sampleRate;
+    a->l = std::move (audio[0]);
+    a->r = std::move (audio[1]);
+    const auto base = instrumentName.isNotEmpty() ? instrumentName : juce::String ("Son");
+    const auto name = base + " rééch."_fr;
+    if (! weaveAddAudio (a, name))
+    {
+        said = "WEAVE est plein (seize sons) : le rééchantillon n'y est pas"_fr;
+        return;
+    }
+    setSoundParam (snd::engine, (float) snd::weave);
+    lastResample = name;
+    said = "Rééchantillon tissé dans WEAVE, son "_fr + juce::String (weaveCount());
+}
+
+bool ReplikantProcessor::weaveAddAudio (std::shared_ptr<weave::Audio> a, const juce::String& name)
+{
+    if (a == nullptr || a->l.size() < 64 || weaveCount() >= weave::maxThreads)
+        return false;
+    WeaveSlot sl;
+    sl.audio = a;
+    sl.name = name;
+    weaveSlots.push_back (sl);
+    weavePublish();
+    // (kept as a WAV beside the instruments: the project finds it again)
+    const auto stem = juce::File::createLegalFileName (name).trim();
+    const auto file = instrumentsRoot().getChildFile ("Weave").getNonexistentChildFile (stem.isNotEmpty() ? stem : juce::String ("weave"), ".wav", false);
+    radioPool->addJob ([this, a, file]
+    {
+        if (! file.getParentDirectory().createDirectory().wasOk()
+            || ! rk::writeWav (file.getFullPathName().toStdString(), { a->l, a->r }, a->sampleRate, 24, {}))
+            return;
+        later ([this, a, file]
+        {
+            for (auto& sl : weaveSlots)
+                if (sl.audio.get() == a.get())
+                    sl.path = file.getFullPathName();
+        });
+    });
+    return true;
 }
 
 void ReplikantProcessor::setSoundParam (int id, float value)
@@ -1724,6 +1898,8 @@ void ReplikantProcessor::getStateInformation (juce::MemoryBlock& dest)
     xml.setAttribute ("rsSynced", resampleOptions.synced);
     xml.setAttribute ("rsRoot", resampleOptions.root);
     xml.setAttribute ("rsResetFx", resampleOptions.resetFx);
+    xml.setAttribute ("rsDest", resampleOptions.dest);
+    xml.setAttribute ("rsSens", resampleOptions.sens);
     if (auto ins = getInstrument(); ins != nullptr && ins->folder.isDirectory())
         xml.setAttribute ("instrument", ins->folder.getFullPathName());
     if (auto st = params.copyState().createXml())
@@ -1777,6 +1953,8 @@ void ReplikantProcessor::setStateInformation (const void* data, int size)
     resampleOptions.synced = xml->getBoolAttribute ("rsSynced", resampleOptions.synced);
     resampleOptions.root = juce::jlimit (0, 127, xml->getIntAttribute ("rsRoot", resampleOptions.root));
     resampleOptions.resetFx = xml->getBoolAttribute ("rsResetFx", resampleOptions.resetFx);
+    resampleOptions.dest = juce::jlimit (0, 2, xml->getIntAttribute ("rsDest", resampleOptions.dest));
+    resampleOptions.sens = (float) juce::jlimit (0.0, 1.0, xml->getDoubleAttribute ("rsSens", resampleOptions.sens));
     if (auto* st = xml->getChildByName (params.state.getType()))
     {
         params.replaceState (juce::ValueTree::fromXml (*st));

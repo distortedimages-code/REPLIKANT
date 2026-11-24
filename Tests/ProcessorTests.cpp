@@ -544,6 +544,53 @@ static void weaveAsAHost()
     dir.deleteRecursively();
 }
 
+// (0.4.24) a resample sent to the DRUM: a bar at 120 with hits on known sixteenths, cut at its attacks onto a free
+// track, each slice on the step it fell on; then to WEAVE
+static void resampleElsewhere()
+{
+    const double rate = 48000.0;
+    auto proc = std::make_unique<ReplikantProcessor>();
+    proc->setRateAndBufferSizeDetails (rate, 480);
+    proc->prepareToPlay (rate, 480);
+    proc->setSoundParam (snd::tempo, 120.0f);
+    proc->resampleOptions.length = 0;               // one bar
+    proc->resampleOptions.dest = ReplikantProcessor::ResampleOptions::toDrum;
+    proc->resampleOptions.sens = 0.5f;
+    const int n = 96000, step = n / 16;
+    const int hits[] = { 0, 4, 6, 10, 12, 14 };
+    rk::Channels take (2, std::vector<float> ((size_t) n, 0.0f));
+    juce::Random rnd (5);
+    for (int h : hits)
+        for (int i = 0; i < 2400; ++i)
+        {
+            const float v = (rnd.nextFloat() * 2.0f - 1.0f) * 0.8f * std::exp (-(float) i / 300.0f);
+            take[0][(size_t) (h * step + 30 + i)] = v;
+            take[1][(size_t) (h * step + 30 + i)] = v;
+        }
+    proc->injectResample (take);
+    const int t = proc->drumTrack.load();
+    const auto snd = proc->drumSound (t);
+    CHECK ((int) proc->player.get (snd::engine) == snd::drum, "the DRUM playing");
+    CHECK (snd != nullptr && snd->slices.size() == 6, "six slices (%d)", snd != nullptr ? (int) snd->slices.size() : -1);
+    const auto& tk = proc->drum.pattern (proc->drum.playingPattern()).tr[t];
+    juce::String got;
+    bool right = true;
+    int k = 0;
+    for (int s = 0; s < 16; ++s)
+        if (tk.trig[s] != 0)
+        {
+            got << s << " ";
+            right = right && k < 6 && s == hits[k] && (int) tk.lock[s][drum::pSlice] == k;
+            ++k;
+        }
+    CHECK (right && k == 6 && tk.len == 16, "each slice on its step, in order: %s", got.toRawUTF8());
+    CHECK ((int) tk.p[drum::pSource] == drum::slices, "the track plays its slices");
+    // to WEAVE: one more sound
+    proc->resampleOptions.dest = ReplikantProcessor::ResampleOptions::toWeave;
+    proc->injectResample (take);
+    CHECK (proc->weaveCount() == 1 && (int) proc->player.get (snd::engine) == snd::weave, "to WEAVE: its sound (%d)", proc->weaveCount());
+}
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI gui;
@@ -766,6 +813,7 @@ int main()
     radioAsAHost();
     drumAsAHost();
     weaveAsAHost();
+    resampleElsewhere();
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

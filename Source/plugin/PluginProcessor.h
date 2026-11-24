@@ -174,11 +174,18 @@ public:
         bool synced = true;          // from the next bar when the transport plays
         int root = 60;               // the key it is played on as recorded
         bool resetFx = true;         // filter, drive, effects and WTF?! to zero
+        // (0.4.24) where it goes: the SAMPLER (a looped instrument), the DRUM (cut at its attacks onto a track, each
+        // slice on the step where it fell), WEAVE (one more sound); the DRUM's cut: how readily an attack is one
+        enum { toSampler = 0, toDrum, toWeave };
+        int dest = toSampler;
+        float sens = 0.5f;
         static int barsOf (int length)    { const int b[] = { 1, 2, 4, 8, 0 }; return b[juce::jlimit (0, 4, length)]; }
     } resampleOptions;
     bool startResample (juce::String& whyNot);
     void stopResample()                              { player.stopResample(); }
     juce::String lastResample;                       // the instrument it made last
+    // the take, once recorded, where the options send it (public: the tests hand one in)
+    void injectResample (rk::Channels);
 
     // RADIO (radio/RadioCore.h): the receivers, the listening and its air, what was heard, the takes and their pads.
     // The network (RadioNet) is made the first time it's needed (the tab opened, a project with receivers tuned).
@@ -214,6 +221,7 @@ public:
     juce::String weaveName (int i) const;
     std::shared_ptr<const weave::Audio> weaveAudio (int i) const;
     void weaveAdd (const juce::StringArray& files);   // after the ones there (a folder: its sounds)
+    bool weaveAddAudio (std::shared_ptr<weave::Audio>, const juce::String& name);  // a sound made here (kept as a WAV)
     void weaveRemove (int i);
     void weaveMove (int from, int to);
     std::atomic<int> weaveLoading { 0 };             // files being read
@@ -262,7 +270,8 @@ private:
     void scenesFromVar (const juce::var&);
     void saveGlobalSettings();
     void resampleTick();                           // the recording ready: the instrument made, the sound matched
-    void injectResample (rk::Channels);
+    void resampleToDrum (rk::Channels, juce::String& said);
+    void resampleToWeave (rk::Channels, juce::String& said);
     int releaseNeutralIn = 0;
     static juce::AudioProcessorValueTreeState::ParameterLayout layout();
 

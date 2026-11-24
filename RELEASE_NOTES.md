@@ -1,3 +1,11 @@
+**REPLIK8 0.4.24** : le rééchantillon peut partir vers la DRUM (découpé sur ses attaques) ou vers WEAVE.
+
+- **RÉÉCHANTILLONNER → TO** : SAMPLER (comme avant, un instrument en boucle joué au clavier), DRUM ou WEAVE
+  - **DRUM** : le rééchantillon est découpé sur ses attaques, comme les prises de la radio (16 tranches au plus ; SENS règle la sensibilité de la découpe). Il va sur la première piste sans pas du motif en cours (s'il n'y en a pas, sur la piste affichée, dont les pas sont remplacés). Quand il fait des mesures entières au tempo, chaque tranche est posée sur le pas où elle tombait : la piste rejoue la boucle telle quelle, et ses tranches deviennent les tiennes, à déplacer, verrouiller, répéter. Sinon, une tranche par pas, dans l'ordre. Le début de la boucle a toujours sa tranche, même sans attaque nette
+  - **WEAVE** : le rééchantillon devient un son de plus dans la trame
+  - Dans les deux cas, la boucle de passation s'efface quand la DRUM ou WEAVE prend le relais, les effets sont remis à zéro si EFFECTS le demande, et le son est gardé avec le projet
+- L'écran du rééchantillonnage montre le chemin du son selon la destination (effets → enregistré → découpé → piste drum, par exemple)
+
 **REPLIK8 0.4.23** : les phrases des schémas de WEAVE ne sont plus coupées (la 0.4.22, qui n'avait pas pu être construite).
 
 - **Les schémas de WEAVE** : la phrase sous chaque dessin passe sur deux lignes quand il le faut, au lieu d'être coupée. Sans son chargé, la mention « exemple : 4 sons » est dans un coin du dessin plutôt que devant la phrase

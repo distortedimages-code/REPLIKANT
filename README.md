@@ -4,6 +4,13 @@
 
 **Page de téléchargement** : https://distortedimages-code.github.io/REPLIKANT/
 
+## La version 0.4.24 : le rééchantillon vers la DRUM et WEAVE
+
+- **`ResampleOptions::dest`** (`toSampler`, `toDrum`, `toWeave`) et **`sens`**, gardés dans l'état (`rsDest`, `rsSens`). `injectResample` (public, les tests lui donnent une prise) : hors SAMPLER, `resampleToDrum` ou `resampleToWeave`, les effets à zéro si demandé, `player.stopResample()` (la boucle de passation s'efface en 30 ms), `releaseNeutralIn = 2`.
+- **`resampleToDrum`** : `radio::slice` (16, `sens`) ; une tranche ajoutée en 0 quand la première attaque trouvée est à plus de 5 ms et que ce qui la précède n'est pas silencieux (au-delà de 16, la plus faible fusionnée dans la précédente). La piste : la première sans pas dans le motif joué, sinon `drumTrack` (ses pas, répétitions et verrous de SLICE vidés). Mesures entières (longueur à 3 % de `barres × 240 / tempo`, 64 pas au plus) : chaque tranche sur le pas le plus proche de son début (le premier arrivé garde le pas), `len = 16 × barres` ; sinon une par pas. `useDrumSound` (le WAV écrit dans `Drums/`), source SLICES, `soundAsIs`, moteur DRUM.
+- **`resampleToWeave`** / **`weaveAddAudio`** : un son de plus (16 au plus), son WAV écrit dans `Weave/` en arrière-plan, puis son chemin noté ; moteur WEAVE.
+- **Fenêtre** : TO en tête de la page RÉÉCHANTILLONNER, NOTE seulement pour le SAMPLER, SENS seulement pour la DRUM ; le schéma du chemin et les sous-titres suivent la destination. **Test** : `ProcessorTests::resampleElsewhere` (une mesure à 120, des coups sur les pas 0, 4, 6, 10, 12, 14 : six tranches sur ces pas, dans l'ordre ; puis WEAVE). Capture `21b`.
+
 ## La version 0.4.22 : les légendes entières
 
 - **`paintWeaveViz`** : la légende sur 26 px, en `drawFittedText` sur deux lignes au plus, sans réduire la police ; sans son, « exemple : 4 sons » en haut à droite du dessin. Capture `81-weave-vide-seed`.
