@@ -122,6 +122,16 @@ int plan (const Settings& st, int count, int64_t cycle, int force, Step* out)
     if (force >= 0 && force < count)
         for (int s = 0; s < total; ++s)
             out[s].thread = (int8_t) force;
+    // how long each step's sound has been playing (RESTART reads it from there); the pattern coming round again, the
+    // run at its end goes on into its start
+    for (int s = 0; s < total; ++s)
+        out[s].age = (int16_t) (s > 0 && out[s].thread == out[s - 1].thread ? out[s - 1].age + 1 : 0);
+    if (total > 1 && out[0].thread == out[total - 1].thread && out[total - 1].age < total - 1)
+    {
+        const int carry = out[total - 1].age + 1;
+        for (int s = 0; s < total && out[s].thread == out[0].thread && out[s].age == s; ++s)
+            out[s].age = (int16_t) (out[s].age + carry);
+    }
     return total;
 }
 
@@ -337,7 +347,9 @@ void Engine::render (float* L, float* R, int n, const Clock& ck, const Settings&
                 double l2 = std::fmod (stepPos - (double) S, seg);
                 if (sp.reverse)
                     l2 = seg - l2;
-                const double srcPpq = ((double) (S + sp.shift) + l2) * 4.0 / (double) grid;
+                // (RESTART: from where the sound started; a moment before its start read from its start)
+                const double srcPpq = st.restart ? ((double) (sp.age + sp.shift >= 0 ? sp.age + sp.shift : sp.age) + l2) * 4.0 / (double) grid
+                                                 : ((double) (S + sp.shift) + l2) * 4.0 / (double) grid;
                 const Audio& au = *a[sp.thread];
                 const double spanPpq = 4.0 * spanBars (st, (double) au.frames() / au.sampleRate, bpm);
                 double u = srcPpq / spanPpq;

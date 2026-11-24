@@ -179,7 +179,7 @@ static std::shared_ptr<Audio> sine (double hz, double seconds, double amp = 0.5,
     return a;
 }
 
-static void testReading()
+static void testReading (bool restart = false)
 {
     // eight sounds a bar long each at 120: the head on the right sound, at the right moment, mid-step
     std::vector<std::shared_ptr<Audio>> keep;
@@ -200,6 +200,7 @@ static void testReading()
     st.seed = 5;
     st.xfadeMs = 1.0f;
     st.bars = 2;
+    st.restart = restart;
     const int bar = 96000, total = 3 * bar;          // three bars: a pass and a half
     std::vector<float> L ((size_t) total, 0.0f), R ((size_t) total, 0.0f);
     Clock ck;
@@ -230,15 +231,33 @@ static void testReading()
         double local = (double) (segLen / 2) / stepLen;
         if (sp.reverse)
             local = 1.0 / sp.ratchet - local;
-        double u = ((double) (s + sp.shift) + local) / 16.0;
+        double u = restart ? ((double) (sp.age + sp.shift >= 0 ? sp.age + sp.shift : sp.age) + local) / 16.0 : ((double) (s + sp.shift) + local) / 16.0;
         u -= std::floor (u);
         const float where = v - (float) (k + 1) * 10.0f;
         if (std::abs (where - (float) u) > 0.002f)
             ++wrongPlace;
         ++tested;
     }
-    CHECK (wrongSound == 0, "each step on its sound (%d wrong)", wrongSound);
-    CHECK (wrongPlace == 0 && tested == 48, "each step at its moment (%d wrong of %d)", wrongPlace, tested);
+    CHECK (wrongSound == 0, "%s: each step on its sound (%d wrong)", restart ? "RESTART" : "SYNC", wrongSound);
+    CHECK (wrongPlace == 0 && tested == 48, "%s: each step at its moment (%d wrong of %d)", restart ? "RESTART" : "SYNC", wrongPlace, tested);
+    if (restart)
+    {
+        // the head coming to a sound: its start
+        int fresh = 0, atStart = 0;
+        for (int s = 1; s < 32; ++s)
+            if (p[(size_t) s].thread != p[(size_t) s - 1].thread && p[(size_t) s].shift <= 0 && ! p[(size_t) s].reverse)
+            {
+                ++fresh;
+                const float v = L[(size_t) (s * stepLen + 200)];
+                atStart += (v - std::floor (v / 10.0f) * 10.0f) < 0.01f;
+            }
+        CHECK (fresh > 3 && atStart == fresh, "RESTART: a sound the head comes to, from its start (%d of %d)", atStart, fresh);
+        // the ages: 0 where the sound changes, counting on while it stays
+        bool ages = true;
+        for (int s = 1; s < 32; ++s)
+            ages = ages && (p[(size_t) s].thread != p[(size_t) s - 1].thread ? p[(size_t) s].age == 0 : p[(size_t) s].age == p[(size_t) s - 1].age + 1);
+        CHECK (ages, "the steps' ages");
+    }
 }
 
 static float worstJump (const std::vector<float>& x, int from = 1)
@@ -421,6 +440,7 @@ int main()
     testStyles();
     testSpans();
     testReading();
+    testReading (true);
     testNoClicks();
     testFit();
     testKeys();

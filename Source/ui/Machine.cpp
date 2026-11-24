@@ -1731,6 +1731,609 @@ private:
         text (g, words, box.withTrimmedLeft (6.0f), mono (10.5f), c, juce::Justification::centredLeft);
     }
 
+    //------------------------------------------------------------------ (0.4.21) WEAVE: what a setting does
+    // On the screen's right, for the setting touched, a small drawing of what it does to the weave, with its value and
+    // the sounds as they are now (four made-up ones if none yet), and a line saying it plainly.
+    static juce::String fr2 (double v, int dec = 2) { return juce::String (v, dec).replace (".", ","); }
+
+    void weaveWave (juce::Graphics& g, juce::Rectangle<float> a, float cycles, juce::Colour c, float decay = 2.5f, bool backwards = false,
+                    float thick = 1.3f, bool windowed = false, float phase = 0.0f)
+    {
+        juce::Path w;
+        const int pts = juce::jmax (8, (int) a.getWidth());
+        for (int i = 0; i <= pts; ++i)
+        {
+            const float x = (float) i / (float) pts, t = backwards ? 1.0f - x : x;
+            const float win = windowed ? std::pow (std::sin (x * juce::MathConstants<float>::pi), 2.0f) : 1.0f;
+            const float y = std::sin ((t * cycles + phase) * juce::MathConstants<float>::twoPi) * std::exp (-t * decay) * win;
+            const juce::Point<float> pt (a.getX() + x * a.getWidth(), a.getCentreY() - y * a.getHeight() * 0.45f);
+            if (i == 0)
+                w.startNewSubPath (pt);
+            else
+                w.lineTo (pt);
+        }
+        g.setColour (c);
+        g.strokePath (w, juce::PathStrokeType (thick));
+    }
+
+    void paintWeaveViz (juce::Graphics& g, juce::Rectangle<float> r)
+    {
+        auto& p = proc();
+        const int n = p.weaveCount();
+        const int count = n > 0 ? n : 4;                       // (none yet: drawn as if four)
+        const auto st = p.weaveSettings (true);
+        const auto* fc = m.focus;
+        const int id = fc != nullptr ? fc->param : -1;
+        const bool drawKey = fc != nullptr && fc->param < 0 && fc->name.equalsIgnoreCase ("draw");
+        const int64_t cyc = juce::jmax ((int64_t) 0, p.weave.shownCycle.load());
+        std::array<weave::Step, weave::maxSteps> pat {};
+        const int total = weave::plan (st, count, cyc, -1, pat.data());
+        const int grid = juce::jmax (8, st.grid), perBeat = grid / 4;
+        const double bpm = juce::jmax (20.0, (double) P (p, snd::tempo));
+        const auto dim = col::screenDim, ln = col::screenLine, ink = col::screenText, hot = col::sOrange;
+        auto caption = r.removeFromBottom (14.0f);
+        r.removeFromBottom (6.0f);
+        juce::String cap;
+        auto small = [] { return mono (9.5f); };
+
+        // a row of steps: each its sound's ink (as lit as `lit` says), the fixed ones underlined, the accidents marked
+        auto row = [&] (juce::Rectangle<float> a, const weave::Step* s, int cnt, auto&& lit, bool marks)
+        {
+            const float cw = a.getWidth() / (float) cnt;
+            for (int i = 0; i < cnt; ++i)
+            {
+                auto c = juce::Rectangle<float> (a.getX() + cw * (float) i, a.getY(), cw, a.getHeight()).reduced (cw > 6.0f ? 1.0f : 0.35f, 0.0f);
+                const float al = lit (i);
+                auto body = c.withTrimmedBottom (4.0f);
+                if (s[i].thread >= 0)
+                {
+                    const auto tc = threadColour (s[i].thread).withAlpha (al);
+                    const int rep = marks ? juce::jmax (1, (int) s[i].ratchet) : 1;
+                    const float w = body.getWidth() / (float) rep;
+                    g.setColour (tc);
+                    for (int k = 0; k < rep; ++k)
+                        g.fillRoundedRectangle (body.withX (body.getX() + w * (float) k).withWidth (w).reduced (rep > 1 ? 0.5f : 0.0f, 0.0f), 1.5f);
+                    if (marks && s[i].reverse)
+                    {
+                        juce::Path tri;
+                        const float ts = juce::jmin (4.0f, body.getWidth() * 0.3f), tx = body.getRight() - 1.5f, ty = body.getCentreY();
+                        tri.addTriangle (tx, ty - ts, tx, ty + ts, tx - ts * 1.3f, ty);
+                        g.setColour (col::screen.withAlpha (0.85f * al));
+                        g.fillPath (tri);
+                    }
+                    if (marks && s[i].shift != 0)
+                    {
+                        g.setColour (col::screen.withAlpha (0.9f * al));
+                        g.fillEllipse (body.getCentreX() - 1.6f, body.getY() + 2.0f, 3.2f, 3.2f);
+                    }
+                }
+                g.setColour (s[i].fixed ? hot.withAlpha (juce::jmax (0.3f, al)) : ln);
+                g.fillRect (c.getX(), c.getBottom() - 2.0f, c.getWidth(), s[i].fixed ? 2.0f : 1.0f);
+            }
+        };
+        auto all = [] (int) { return 0.9f; };
+        // the head going from sound to sound: a lane each, its path through them
+        auto lanes = [&] (juce::Rectangle<float> a, const weave::Step* s, int cnt)
+        {
+            const float lh = a.getHeight() / (float) count, cw = a.getWidth() / (float) cnt;
+            for (int t = 0; t < count; ++t)
+            {
+                g.setColour (threadColour (t).withAlpha (0.22f));
+                g.fillRect (a.getX(), a.getY() + lh * ((float) t + 0.5f), a.getWidth(), 1.0f);
+            }
+            for (int i = 0; i < cnt; i += perBeat)
+            {
+                g.setColour (ln.withAlpha (i % grid == 0 ? 0.9f : 0.45f));
+                g.fillRect (a.getX() + cw * (float) i, a.getY(), 1.0f, a.getHeight());
+            }
+            for (int i = 0; i < cnt; ++i)
+            {
+                if (s[i].thread < 0)
+                    continue;
+                const float y = a.getY() + lh * ((float) s[i].thread + 0.5f), x = a.getX() + cw * (float) i;
+                const auto tc = threadColour (s[i].thread);
+                g.setColour (tc);
+                g.fillRect (x, y - 1.25f, cw, 2.5f);
+                if (i > 0 && s[i - 1].thread >= 0 && s[i - 1].thread != s[i].thread)
+                {
+                    const float y0 = a.getY() + lh * ((float) s[i - 1].thread + 0.5f);
+                    g.setColour (tc.withAlpha (0.55f));
+                    g.fillRect (x - 0.6f, juce::jmin (y0, y), 1.2f, std::abs (y - y0));
+                    g.setColour (tc);
+                    g.fillEllipse (x - 2.5f, y - 2.5f, 5.0f, 5.0f);
+                }
+                if (s[i].fixed)
+                {
+                    g.setColour (hot);
+                    g.fillEllipse (x - 2.0f, y - 2.0f, 4.0f, 4.0f);
+                }
+            }
+        };
+        auto changes = [] (const weave::Step* s, int from, int to)
+        {
+            int c = 0;
+            for (int i = juce::jmax (1, from); i < to; ++i)
+                c += s[i].thread != s[i - 1].thread;
+            return c;
+        };
+        auto soundWord = [&] (int t)
+        {
+            juce::String w = "le son "_fr + juce::String (t + 1);
+            if (n > 0 && t < n)
+                w << " (" << p.weaveName (t) << ")";
+            return w;
+        };
+
+        switch (drawKey ? snd::wvSeed : id)
+        {
+            case snd::wvBeat:
+            case snd::wvBack:
+            {
+                // one bar: the steps that come back to their sound lit, an arrow down to each from its sound
+                const bool back = id == snd::wvBack;
+                auto top = r.removeFromTop (18.0f);
+                auto arrows = r.removeFromTop (16.0f);
+                auto cells = r.removeFromTop (juce::jmin (34.0f, r.getHeight() - 12.0f));
+                auto nums = r.removeFromTop (12.0f);
+                row (cells, pat.data(), grid, [&] (int i)
+                {
+                    const bool b2 = (i / perBeat) % 2 == 1;
+                    return ! pat[(size_t) i].fixed ? 0.16f : (back ? (b2 ? 1.0f : 0.4f) : (b2 && st.back >= 0 && st.back < count ? 0.4f : 1.0f));
+                }, false);
+                const float cw = cells.getWidth() / (float) grid;
+                for (int b = 0; b < 4; ++b)
+                {
+                    const int i = b * perBeat;
+                    const float x = cells.getX() + cw * ((float) i + 0.5f);
+                    text (g, juce::String (b + 1), juce::Rectangle<float> (x - 10.0f, nums.getY(), 20.0f, nums.getHeight()), small(), dim, juce::Justification::centred);
+                    if (! pat[(size_t) i].fixed)
+                        continue;
+                    const bool mine = back ? b % 2 == 1 : ! (b % 2 == 1 && st.back >= 0 && st.back < count);
+                    g.setColour (threadColour (pat[(size_t) i].thread).withAlpha (mine ? 1.0f : 0.35f));
+                    g.drawArrow ({ x, arrows.getY(), x, arrows.getBottom() - 1.0f }, 1.2f, 6.0f, 5.0f);
+                }
+                const int t = back ? st.back : st.beat;
+                if (t >= 0 && t < count)
+                {
+                    auto chip = top.removeFromLeft (20.0f).reduced (0.0f, 1.0f);
+                    g.setColour (threadColour (t));
+                    g.fillRoundedRectangle (chip, 3.0f);
+                    text (g, juce::String (t + 1), chip, mono (10.0f, 700), col::screen, juce::Justification::centred);
+                    text (g, n > 0 && t < n ? p.weaveName (t) : juce::String(), top.withTrimmedLeft (6.0f), mono (10.5f), ink, juce::Justification::centredLeft, true);
+                    cap = back ? "les temps 2 et 4 reviennent au son "_fr + juce::String (t + 1) : "chaque temps revient au son "_fr + juce::String (t + 1);
+                }
+                else
+                {
+                    text (g, "off", top, mono (10.5f), dim);
+                    cap = back ? "off : les temps 2 et 4 prennent le son de beat"_fr : "off : aucun temps fixe, la tête circule librement"_fr;
+                }
+                break;
+            }
+            case snd::wvMove:
+            {
+                // three weaves, MOVE at 0, as set, at full: the more, the more the head changes sound between the beats
+                const float hh = juce::jmin (26.0f, r.getHeight() / 3.0f);
+                const float vals[3] = { 0.0f, st.move, 1.0f };
+                for (int k = 0; k < 3; ++k)
+                {
+                    auto lineA = r.removeFromTop (hh);
+                    auto lab = lineA.removeFromLeft (38.0f);
+                    auto s2 = st;
+                    s2.move = vals[k];
+                    std::array<weave::Step, weave::maxSteps> q {};
+                    weave::plan (s2, count, cyc, -1, q.data());
+                    const bool now = k == 1;
+                    text (g, juce::String (juce::roundToInt (vals[k] * 100.0f)) + " %", lab, small(), now ? ink : dim);
+                    row (lineA.reduced (0.0f, 2.0f), q.data(), grid, [now] (int) { return now ? 1.0f : 0.3f; }, false);
+                }
+                const int ch = changes (pat.data(), 0, grid);
+                cap = juce::String (ch) + (ch > 1 ? " changements de son sur la mesure"_fr : " changement de son sur la mesure"_fr);
+                break;
+            }
+            case snd::wvStyle:
+            {
+                // the head's path through the sounds, one bar; EUCLID, its changes round a circle
+                auto a = r;
+                if (st.style == weave::styleEuclid)
+                {
+                    auto ring = a.removeFromRight (a.getHeight()).reduced (6.0f);
+                    const int hits = (int) std::lround (st.move * (float) grid);
+                    g.setColour (ln);
+                    g.drawEllipse (ring, 1.0f);
+                    for (int i = 0; i < grid; ++i)
+                    {
+                        const float ang = juce::MathConstants<float>::twoPi * (float) i / (float) grid - juce::MathConstants<float>::halfPi;
+                        const auto pt = ring.getCentre() + juce::Point<float> (std::cos (ang), std::sin (ang)) * ring.getWidth() * 0.5f;
+                        const bool hit = i > 0 && pat[(size_t) i].thread != pat[(size_t) i - 1].thread;
+                        g.setColour (hit ? hot : ln);
+                        const float d = hit ? 6.0f : 3.0f;
+                        g.fillEllipse (pt.x - d * 0.5f, pt.y - d * 0.5f, d, d);
+                    }
+                    text (g, juce::String (hits), ring, mono (13.0f, 600), ink, juce::Justification::centred);
+                    a.removeFromRight (8.0f);
+                }
+                lanes (a, pat.data(), grid);
+                const char* words[4] = { "random : la tête saute vers n'importe quel autre son",
+                                         "walk : la tête passe au son suivant, dans l'ordre",
+                                         "euclid : des changements répartis régulièrement",
+                                         "call : la 2e moitié de chaque temps répond avec un autre son" };
+                cap = juce::String::fromUTF8 (words[juce::jlimit (0, 3, st.style)]);
+                if (st.move <= 0.0f && st.style != weave::styleCall)
+                    cap = "move à 0 : la tête reste sur le son du temps"_fr;
+                break;
+            }
+            case snd::wvLength:
+            {
+                // four bars: the weave over its length, then again (the copies pale), the loop back
+                auto loop = r.removeFromTop (18.0f);
+                auto a = r.withHeight (juce::jmin (36.0f, r.getHeight()));
+                const int bars = total / grid;
+                const float barW = a.getWidth() / 4.0f;
+                for (int k = 0; k < 4 / bars; ++k)
+                {
+                    auto part = a.withX (a.getX() + barW * (float) (bars * k)).withWidth (barW * (float) bars);
+                    row (part, pat.data(), total, [k] (int) { return k == 0 ? 1.0f : 0.22f; }, false);
+                }
+                for (int b = 1; b < 4; ++b)
+                {
+                    g.setColour (ln.withAlpha (b % bars == 0 ? 1.0f : 0.4f));
+                    g.fillRect (a.getX() + barW * (float) b - 0.5f, a.getY() - 3.0f, 1.0f, a.getHeight() + 6.0f);
+                }
+                // the arrow going back to the start
+                const float x1 = a.getX() + 4.0f, x2 = a.getX() + barW * (float) bars - 4.0f, y = loop.getBottom() - 2.0f;
+                juce::Path arc;
+                arc.startNewSubPath (x2, y);
+                arc.quadraticTo ((x1 + x2) * 0.5f, loop.getY() - 6.0f, x1, y);
+                g.setColour (hot);
+                g.strokePath (arc, juce::PathStrokeType (1.3f));
+                g.drawArrow ({ x1 + 6.0f, y - 4.0f, x1, y }, 1.3f, 6.0f, 5.0f);
+                cap = "la trame fait "_fr + juce::String (bars) + (bars > 1 ? " mesures, puis recommence"_fr : " mesure, puis recommence"_fr);
+                break;
+            }
+            case snd::wvSeed:
+            {
+                // the weave before, this one, the next: each number its own
+                const float hh = juce::jmin (26.0f, r.getHeight() / 3.0f);
+                const int sd = (int) st.seed;
+                for (int k = -1; k <= 1; ++k)
+                {
+                    auto lineA = r.removeFromTop (hh);
+                    auto lab = lineA.removeFromLeft (44.0f);
+                    auto s2 = st;
+                    s2.seed = (uint32_t) (sd + k < 1 ? 999 : (sd + k > 999 ? 1 : sd + k));
+                    std::array<weave::Step, weave::maxSteps> q {};
+                    const int tq = weave::plan (s2, count, cyc, -1, q.data());
+                    const bool now = k == 0;
+                    text (g, drawKey ? juce::String (k < 0 ? "back" : (k == 0 ? "now" : "new")) : juce::String ((int) s2.seed), lab, small(), now ? ink : dim);
+                    row (lineA.reduced (0.0f, 2.0f), q.data(), tq, [now] (int) { return now ? 1.0f : 0.28f; }, false);
+                }
+                cap = drawKey ? "new tire une autre trame, back revient à celle d'avant"_fr
+                              : "seed "_fr + juce::String (sd) + " : les mêmes réglages, toujours la même trame"_fr;
+                break;
+            }
+            case snd::wvTime:
+            {
+                // above, the moments of the sounds; below, the steps; each step's line from the moment it reads
+                auto src = r.removeFromTop (14.0f);
+                auto links = r.removeFromTop (juce::jmax (20.0f, r.getHeight() - 30.0f));
+                auto cells = r.removeFromTop (26.0f);
+                const float cw = src.getWidth() / (float) grid;
+                for (int i = 0; i < grid; ++i)
+                {
+                    g.setColour (ln.withAlpha (i % perBeat == 0 ? 0.9f : 0.5f));
+                    g.fillRect (src.getX() + cw * (float) i + 1.0f, src.getCentreY() - 1.0f, cw - 2.0f, 2.0f);
+                }
+                int moved = 0;
+                for (int i = 0; i < grid; ++i)
+                {
+                    const auto& sp = pat[(size_t) i];
+                    const float xb = cells.getX() + cw * ((float) i + 0.5f);
+                    const float xt = src.getX() + cw * ((float) ((i + sp.shift + grid) % grid) + 0.5f);
+                    juce::Path l;
+                    l.startNewSubPath (xt, src.getBottom());
+                    l.cubicTo (xt, links.getCentreY(), xb, links.getCentreY(), xb, links.getBottom());
+                    g.setColour (sp.shift != 0 ? hot : ln.withAlpha (0.8f));
+                    g.strokePath (l, juce::PathStrokeType (sp.shift != 0 ? 1.4f : 1.0f));
+                    moved += sp.shift != 0;
+                }
+                row (cells, pat.data(), grid, [&] (int i) { return pat[(size_t) i].shift != 0 ? 1.0f : 0.3f; }, true);
+                cap = juce::String (moved) + " pas sur "_fr + juce::String (grid) + " lisent un autre moment de leur son"_fr;
+                break;
+            }
+            case snd::wvStutter:
+            case snd::wvReverse:
+            {
+                // the bar, the steps concerned lit; beside, one of them as it sounds
+                const bool rev = id == snd::wvReverse;
+                auto zoom = r.removeFromRight (juce::jmin (110.0f, r.getWidth() * 0.34f));
+                r.removeFromRight (10.0f);
+                auto cells = r.withSizeKeepingCentre (r.getWidth(), juce::jmin (34.0f, r.getHeight()));
+                int hit = -1, cnt = 0;
+                for (int i = 0; i < grid; ++i)
+                {
+                    const bool on = rev ? pat[(size_t) i].reverse : pat[(size_t) i].ratchet > 1;
+                    if (on && hit < 0)
+                        hit = i;
+                    cnt += on;
+                }
+                row (cells, pat.data(), grid, [&] (int i) { return (rev ? pat[(size_t) i].reverse : pat[(size_t) i].ratchet > 1) ? 1.0f : 0.25f; }, true);
+                auto box = zoom.withSizeKeepingCentre (zoom.getWidth(), juce::jmin (zoom.getHeight(), 70.0f));
+                g.setColour (ln);
+                g.drawRoundedRectangle (box, 6.0f, 1.0f);
+                const auto tc = threadColour (hit >= 0 ? pat[(size_t) hit].thread : 0);
+                auto wv = box.reduced (8.0f, 10.0f);
+                if (rev)
+                {
+                    weaveWave (g, wv, 5.0f, tc, 3.0f, true);
+                    g.setColour (hot);
+                    g.drawArrow ({ wv.getRight(), box.getBottom() - 5.0f, wv.getX(), box.getBottom() - 5.0f }, 1.2f, 6.0f, 5.0f);
+                    cap = juce::String (cnt) + " pas sur "_fr + juce::String (grid) + " lus à l'envers"_fr;
+                }
+                else
+                {
+                    const int rep = hit >= 0 ? juce::jmax (2, (int) pat[(size_t) hit].ratchet) : 3;
+                    const float w = wv.getWidth() / (float) rep;
+                    for (int k = 0; k < rep; ++k)
+                    {
+                        weaveWave (g, wv.withX (wv.getX() + w * (float) k).withWidth (w - 3.0f), 2.5f, tc.withAlpha (k == 0 ? 1.0f : 0.7f), 3.0f);
+                        if (k > 0)
+                        {
+                            g.setColour (hot.withAlpha (0.6f));
+                            g.fillRect (wv.getX() + w * (float) k - 1.5f, wv.getY(), 1.0f, wv.getHeight());
+                        }
+                    }
+                    text (g, "x" + juce::String (rep), box.removeFromTop (14.0f).withTrimmedRight (6.0f), small(), hot, juce::Justification::centredRight);
+                    cap = juce::String (cnt) + " pas sur "_fr + juce::String (grid) + " coupés en répétitions (2, 3 ou 4)"_fr;
+                }
+                break;
+            }
+            case snd::wvMutate:
+            {
+                // four passes of the weave: what changes from one to the next, outlined
+                const float hh = juce::jmin (20.0f, r.getHeight() / 4.0f);
+                std::array<weave::Step, weave::maxSteps> prev {};
+                for (int k = 0; k < 4; ++k)
+                {
+                    auto lineA = r.removeFromTop (hh);
+                    auto lab = lineA.removeFromLeft (26.0f);
+                    std::array<weave::Step, weave::maxSteps> q {};
+                    const int tq = weave::plan (st, count, cyc + k, -1, q.data());
+                    text (g, juce::String (k + 1), lab, small(), dim);
+                    auto cells = lineA.reduced (0.0f, 1.5f);
+                    row (cells, q.data(), tq, [k] (int) { return k == 0 ? 1.0f : 0.75f; }, false);
+                    if (k > 0)
+                    {
+                        const float cw = cells.getWidth() / (float) tq;
+                        g.setColour (hot);
+                        for (int i = 0; i < tq; ++i)
+                            if (q[(size_t) i].thread != prev[(size_t) i].thread || q[(size_t) i].shift != prev[(size_t) i].shift)
+                                g.drawRect (juce::Rectangle<float> (cells.getX() + cw * (float) i, cells.getY() - 1.0f, cw, cells.getHeight() - 2.0f), 1.2f);
+                    }
+                    prev = q;
+                }
+                cap = st.mutate <= 0.0f ? "mutate à 0 : la trame revient identique à chaque passage"_fr
+                                        : "à chaque passage, environ "_fr + juce::String (juce::roundToInt (st.mutate * 100.0f)) + " % des pas retirés"_fr;
+                break;
+            }
+            case snd::wvFit:
+            case snd::wvGrain:
+            {
+                // the sound as it is, above; below, fitted to its span: TAPE stretches it (its waves wider: lower),
+                // STRETCH keeps its waves and lays them in grains
+                const int t = 0;
+                const auto a = p.weaveAudio (t);
+                const double secs = a != nullptr && a->sampleRate > 0.0 ? a->frames() / a->sampleRate : 1.5;
+                const double span = weave::spanBars (st, secs, bpm) * 240.0 / bpm;
+                const double ratio = secs / span;
+                const bool stretch = st.fit == weave::fitStretch;
+                auto top = r.removeFromTop (r.getHeight() * 0.5f).reduced (0.0f, 4.0f);
+                auto bot = r.reduced (0.0f, 4.0f);
+                auto labT = top.removeFromLeft (46.0f), labB = bot.removeFromLeft (46.0f);
+                text (g, "son", labT, small(), dim);
+                text (g, stretch ? "stretch" : "tape", labB, small(), ink);
+                const auto tc = threadColour (t);
+                const float wTop = (float) juce::jlimit (0.2, 1.0, ratio) * top.getWidth();
+                const float cycles = 9.0f;
+                weaveWave (g, top.withWidth (wTop), cycles * (float) juce::jmin (1.0, ratio), tc.withAlpha (0.6f), 0.0f);
+                if (! stretch)
+                    weaveWave (g, bot, cycles * (float) juce::jmin (1.0, ratio), tc, 0.0f);
+                else
+                {
+                    // grains: the same waves (the same pitch), each rising and falling, overlapping by half; the
+                    // drawing shows 300 ms
+                    const float gw = juce::jlimit (16.0f, bot.getWidth() * 0.5f, bot.getWidth() * st.grainMs / 300.0f);
+                    const float density = cycles * (float) juce::jmin (1.0, ratio) / wTop;    // (cycles a pixel, as above)
+                    int k = 0;
+                    for (float x = bot.getX() - gw * 0.5f; x < bot.getRight() - 2.0f; x += gw * 0.5f, ++k)
+                    {
+                        auto gr = juce::Rectangle<float> (x, bot.getY(), gw, bot.getHeight());
+                        g.saveState();
+                        g.reduceClipRegion (bot.toNearestInt());
+                        weaveWave (g, gr, density * gw, (k % 2 == 0 ? tc : hot).withAlpha (id == snd::wvGrain ? 1.0f : 0.85f), 0.0f, false, 1.2f, true,
+                                   0.37f * (float) k);
+                        g.restoreState();
+                    }
+                }
+                const double semis = 12.0 * std::log2 (juce::jmax (0.01, ratio));
+                const juce::String who = n > 0 ? "le son 1 "_fr : "un son "_fr;
+                if (id == snd::wvGrain)
+                    cap = "des grains de "_fr + juce::String (juce::roundToInt (st.grainMs)) + " ms, deux à la fois (sur 300 ms)"_fr + (stretch ? juce::String() : " (en stretch)"_fr);
+                else if (stretch)
+                    cap = who + "étiré à x"_fr + fr2 (1.0 / ratio) + ", sa hauteur gardée"_fr;
+                else
+                    cap = who + "lu à x"_fr + fr2 (ratio) + (std::abs (semis) < 0.05 ? juce::String (", à sa hauteur"_fr)
+                                                     : ", " + fr2 (std::abs (semis), 1) + (semis < 0 ? " demi-tons plus bas"_fr : " demi-tons plus haut"_fr));
+                break;
+            }
+            case snd::wvSpan:
+            {
+                // each sound: its length (pale) and the span it is fitted to (its ink), on one ruler of bars
+                const int shown = juce::jmin (count, 5);
+                double most = 1.0;
+                std::vector<std::pair<double, double>> len;
+                for (int t = 0; t < shown; ++t)
+                {
+                    const auto a = p.weaveAudio (t);
+                    const double secs = a != nullptr && a->sampleRate > 0.0 ? a->frames() / a->sampleRate : 0.6 + 1.1 * t;
+                    const double bars = weave::spanBars (st, secs, bpm), real = secs / (240.0 / bpm);
+                    len.push_back ({ real, bars });
+                    most = juce::jmax (most, bars, real);
+                }
+                const float hh = juce::jmin (18.0f, r.getHeight() / (float) juce::jmax (shown, 3));
+                auto ruler = r.removeFromBottom (12.0f);
+                auto lab = 26.0f;
+                const float w0 = r.getX() + lab, ww = r.getWidth() - lab - 56.0f;
+                for (int b = 0; b <= (int) std::ceil (most); b += juce::jmax (1, (int) std::ceil (most) / 8))
+                {
+                    const float x = w0 + ww * (float) (b / most);
+                    g.setColour (ln);
+                    g.fillRect (x, r.getY(), 1.0f, r.getHeight() + 2.0f);
+                    text (g, juce::String (b), juce::Rectangle<float> (x - 8.0f, ruler.getY(), 16.0f, 12.0f), small(), dim, juce::Justification::centred);
+                }
+                for (int t = 0; t < shown; ++t)
+                {
+                    auto lineA = r.removeFromTop (hh);
+                    const auto tc = threadColour (t);
+                    auto chip = lineA.removeFromLeft (18.0f).reduced (0.0f, 2.0f);
+                    g.setColour (tc);
+                    g.fillRoundedRectangle (chip, 2.5f);
+                    text (g, juce::String (t + 1), chip, mono (9.0f, 700), col::screen, juce::Justification::centred);
+                    const float y = lineA.getCentreY();
+                    g.setColour (tc.withAlpha (0.3f));
+                    g.fillRect (w0, y - 4.0f, ww * (float) (len[(size_t) t].first / most), 8.0f);
+                    g.setColour (tc);
+                    g.fillRect (w0, y - 1.5f, ww * (float) (len[(size_t) t].second / most), 3.0f);
+                    const double bars = len[(size_t) t].second;
+                    text (g, bars < 1.0 ? (bars < 0.5 ? juce::String ("1/4") : juce::String ("1/2")) : juce::String ((int) bars) + (bars > 1.0 ? " bars" : " bar"),
+                          juce::Rectangle<float> (w0 + ww + 6.0f, lineA.getY(), 50.0f, lineA.getHeight()), small(), dim);
+                }
+                cap = st.span == 0 ? "auto : chaque son calé sur la longueur la plus proche de sa durée"_fr
+                                   : "tous les sons calés sur "_fr + juce::String (snd::text (snd::wvSpan, P (p, snd::wvSpan))).toLowerCase();
+                break;
+            }
+            case snd::wvStart:
+            {
+                // where in its sound the head reads, along the bar: SYNC climbs on through the changes of sound,
+                // RESTART starts again from the bottom at each
+                auto a = r.reduced (0.0f, 2.0f);
+                auto lab = a.removeFromLeft (34.0f);
+                text (g, juce::String ("fin"), lab.removeFromTop (12.0f), small(), dim);
+                text (g, "début"_fr, lab.removeFromBottom (12.0f), small(), dim);
+                g.setColour (ln);
+                g.fillRect (a.getX(), a.getBottom(), a.getWidth(), 1.0f);
+                g.fillRect (a.getX(), a.getY(), 1.0f, a.getHeight());
+                const float cw = a.getWidth() / (float) grid;
+                // (the other way, pale: to compare)
+                for (int i = 0; i < grid; ++i)
+                {
+                    const double from = st.restart ? (double) i : (double) pat[(size_t) i].age;
+                    g.setColour (dim.withAlpha (0.35f));
+                    g.drawLine (a.getX() + cw * (float) i, a.getBottom() - a.getHeight() * (float) (from / (double) grid),
+                                a.getX() + cw * (float) (i + 1), a.getBottom() - a.getHeight() * (float) ((from + 1.0) / (double) grid), 1.0f);
+                }
+                for (int i = 0; i < grid; ++i)
+                {
+                    const auto& sp = pat[(size_t) i];
+                    if (sp.thread < 0)
+                        continue;
+                    const double from = st.restart ? (double) sp.age : (double) i;
+                    const float y0 = a.getBottom() - a.getHeight() * (float) (from / (double) grid);
+                    const float y1 = a.getBottom() - a.getHeight() * (float) ((from + 1.0) / (double) grid);
+                    const float x0 = a.getX() + cw * (float) i;
+                    g.setColour (threadColour (sp.thread));
+                    g.drawLine (x0, y0, x0 + cw, y1, 2.0f);
+                    if (i > 0 && sp.thread != pat[(size_t) i - 1].thread)
+                    {
+                        g.setColour (threadColour (sp.thread).withAlpha (0.5f));
+                        g.fillEllipse (x0 - 2.5f, y0 - 2.5f, 5.0f, 5.0f);
+                    }
+                }
+                cap = st.restart ? "restart : chaque son repris à son début quand la tête y arrive"_fr
+                                 : "sync : chaque son pris là où en est le morceau, le groove continue"_fr;
+                break;
+            }
+            case snd::wvGrid:
+            {
+                // one bar cut in steps: the beats taller; a step's length at the tempo
+                auto a = r.withSizeKeepingCentre (r.getWidth(), juce::jmin (44.0f, r.getHeight()));
+                auto nums = a.removeFromBottom (12.0f);
+                const float cw = a.getWidth() / (float) grid;
+                for (int i = 0; i <= grid; ++i)
+                {
+                    const bool beat = i % perBeat == 0;
+                    const float h = beat ? a.getHeight() : a.getHeight() * 0.45f;
+                    g.setColour (beat ? ink : dim);
+                    g.fillRect (a.getX() + cw * (float) i - 0.5f, a.getBottom() - h, 1.0f, h);
+                    if (beat && i < grid)
+                        text (g, juce::String (i / perBeat + 1), juce::Rectangle<float> (a.getX() + cw * (float) i + 2.0f, nums.getY(), 20.0f, 12.0f), small(), dim);
+                }
+                g.setColour (hot.withAlpha (0.35f));
+                g.fillRect (a.getX() + 0.5f, a.getBottom() - a.getHeight() * 0.45f, cw - 1.0f, a.getHeight() * 0.45f);
+                const double stepMs = 240000.0 / bpm / (double) grid;
+                cap = juce::String (grid) + " pas par mesure : un pas dure "_fr + juce::String (juce::roundToInt (stepMs)) + " ms"_fr;
+                break;
+            }
+            case snd::wvXfade:
+            {
+                // a jump from one sound to the next, over a step: one fading out as the other comes in
+                auto a = r.reduced (0.0f, 4.0f);
+                const double stepMs = 240000.0 / bpm / (double) grid;
+                const float mid = a.getCentreX();
+                const float half = juce::jmax (1.5f, a.getWidth() * 0.5f * (float) (st.xfadeMs / stepMs));
+                juce::Path out, in2;
+                for (int i = 0; i <= 64; ++i)
+                {
+                    const float x = a.getX() + a.getWidth() * (float) i / 64.0f;
+                    const float t = juce::jlimit (0.0f, 1.0f, (x - (mid - half)) / (2.0f * half));
+                    const float go = std::cos (t * juce::MathConstants<float>::halfPi), gi = std::sin (t * juce::MathConstants<float>::halfPi);
+                    const juce::Point<float> po (x, a.getBottom() - go * a.getHeight()), pi2 (x, a.getBottom() - gi * a.getHeight());
+                    if (i == 0) { out.startNewSubPath (po); in2.startNewSubPath (pi2); } else { out.lineTo (po); in2.lineTo (pi2); }
+                }
+                g.setColour (threadColour (0));
+                g.strokePath (out, juce::PathStrokeType (1.6f));
+                g.setColour (threadColour (1));
+                g.strokePath (in2, juce::PathStrokeType (1.6f));
+                g.setColour (ln);
+                g.fillRect (mid - 0.5f, a.getY(), 1.0f, a.getHeight());
+                cap = fr2 (st.xfadeMs, st.xfadeMs < 10.0f ? 1 : 0) + " ms de fondu à chaque saut (un pas dure "_fr
+                      + juce::String (juce::roundToInt (stepMs)) + " ms)"_fr;
+                break;
+            }
+            case snd::wvLevel:
+            {
+                // WEAVE's level now, on a scale of dB, and where LEVEL sits
+                auto a = r.withSizeKeepingCentre (r.getWidth(), 16.0f);
+                auto scale = a.withY (a.getBottom() + 4.0f).withHeight (12.0f);
+                auto dbx = [&] (float db) { return a.getX() + a.getWidth() * juce::jlimit (0.0f, 1.0f, (db + 48.0f) / 60.0f); };
+                g.setColour (ln);
+                g.fillRoundedRectangle (a, 3.0f);
+                const float lv = juce::Decibels::gainToDecibels (p.weave.shownLevel.load(), -90.0f);
+                g.setColour (hot);
+                g.fillRoundedRectangle (a.withRight (dbx (lv)), 3.0f);
+                const float set = (float) P (p, snd::wvLevel);
+                g.setColour (ink);
+                g.fillRect (dbx (set) - 1.0f, a.getY() - 4.0f, 2.0f, a.getHeight() + 8.0f);
+                for (int db : { -48, -36, -24, -12, 0, 12 })
+                    text (g, juce::String (db), juce::Rectangle<float> (dbx ((float) db) - 12.0f, scale.getY(), 24.0f, 12.0f), small(), dim, juce::Justification::centred);
+                cap = "weave à "_fr + (set > 0.0f ? "+" : "") + fr2 (set, 1) + " db, avant le filtre"_fr;
+                break;
+            }
+            default:
+            {
+                // nothing touched: the head's path through the sounds, the whole weave
+                lanes (r, pat.data(), total);
+                const int ch = changes (pat.data(), 0, total);
+                cap = juce::String (ch) + " changements de son sur "_fr + juce::String (total / grid) + (total > grid ? " mesures"_fr : " mesure"_fr)
+                      + " · touche un réglage pour voir son effet"_fr;
+                break;
+            }
+        }
+        if (n == 0)
+            cap = "(quatre sons pour l'exemple) "_fr + cap;
+        text (g, cap, caption, mono (9.5f), dim, juce::Justification::centredLeft);
+        juce::ignoreUnused (all, soundWord);
+    }
+
     void paintWeave (juce::Graphics& g, juce::Rectangle<float> r)
     {
         auto& p = proc();
@@ -2244,6 +2847,28 @@ private:
         g.setColour (col::screenLine);
         g.drawRoundedRectangle (r, 10.0f, 1.0f);
         auto in = r.reduced (14.0f, 12.0f);
+        // (0.4.21) WEAVE's own pages: the value smaller, room for the drawing of what it does
+        const bool weaveViz = m.mode == Machine::weaveMode && ! m.capture && m.pageIndex() >= 0
+                              && m.pageIndex() < (int) m.pagesShown().size() && m.pagesShown()[(size_t) m.pageIndex()].viz == "weave";
+        if (weaveViz)
+        {
+            auto head = in.removeFromTop (40.0f);
+            if (m.focus != nullptr)
+            {
+                text (g, m.focus->name, head.removeFromTop (14.0f), mono (10.5f), col::screenDim);
+                text (g, Encoder::valueText (*m.focus, m.arm), head, grotesk (22.0f, 300), col::screenText);
+            }
+            else
+            {
+                text (g, "weave", head.removeFromTop (14.0f), mono (10.5f), col::screenDim);
+                text (g, "la trame", head, grotesk (22.0f, 300), col::screenText);
+            }
+            in.removeFromTop (6.0f);
+            paintWeaveViz (g, in);
+            stepsMod = -1;
+            fxShown = false;
+            return;
+        }
         if (m.focus != nullptr)
         {
             auto head = in.removeFromTop (60.0f);
@@ -4995,8 +5620,8 @@ void Machine::buildPages()
         v.push_back ({ "weave", "weave", { { "rules", { S (snd::wvBeat), S (snd::wvBack), sep (S (snd::wvMove)), S (snd::wvStyle),
                                                          sep (S (snd::wvLength)), sep (S (snd::wvSeed)), draw } },
                                            { "accidents", { S (snd::wvTime), S (snd::wvStutter), S (snd::wvReverse), sep (S (snd::wvMutate)) } } } });
-        v.push_back ({ "threads", "weave", { { "fit", { S (snd::wvFit), S (snd::wvSpan), S (snd::wvGrain, nullptr, stretchOn), sep (S (snd::wvGrid)),
-                                                          S (snd::wvXfade), sep (S (snd::wvLevel)) } } } });
+        v.push_back ({ "threads", "weave", { { "fit", { S (snd::wvFit), S (snd::wvSpan), S (snd::wvGrain, nullptr, stretchOn), sep (S (snd::wvStart)),
+                                                          sep (S (snd::wvGrid)), S (snd::wvXfade), sep (S (snd::wvLevel)) } } } });
         auto fp = filterPage();
         fp.banks.erase (fp.banks.begin() + 1);          // (no notes: no filter envelope)
         v.push_back (fp);
@@ -5019,6 +5644,7 @@ void Machine::buildPages()
         tip (v, snd::wvGrid, "Le pas de la trame : la croche, la double, la triple croche."_fr);
         tip (v, snd::wvXfade, "Le fondu à chaque saut d'un son à l'autre : court, ça claque net ; long, ça glisse."_fr);
         tip (v, snd::wvLevel, "Le niveau de WEAVE, avant le filtre."_fr);
+        tip (v, snd::wvStart, "SYNC : quand la tête arrive sur un son, elle le prend là où en est le morceau (le groove continue d'une boucle à l'autre). RESTART : elle le reprend à son début, à chaque fois (des attaques, plus percussif)."_fr);
     }
     // (0.4.13) STRETCH, its second bank
     {
@@ -5083,7 +5709,7 @@ void Machine::buildPages()
         // WEAVE: what comes back, what moves between; its accidents; how the sounds are fitted, where it goes
         deco ("weave", "rules", { { 0, 1, "fixed", Picto::weave }, { 2, 3, "between" }, { 4, 6, "pattern" } }, {}, {}, Picto::none, weaveMode);
         deco ("weave", "accidents", { { 0, 2, "accidents" } }, {}, {}, Picto::none, weaveMode);
-        deco ("threads", "fit", { { 0, 2, "fit" }, { 3, 4, "steps" } }, {}, "to filter", Picto::filterBox, weaveMode);
+        deco ("threads", "fit", { { 0, 2, "fit" }, { 4, 5, "steps" } }, {}, "to filter", Picto::filterBox, weaveMode);
     }
 
     // SPECTRE's, on every mode's effects (and the filter's CUBE)

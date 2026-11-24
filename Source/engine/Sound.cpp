@@ -293,6 +293,7 @@ namespace
         { "wvXfade",   "Xfade",                       K::log,     0.5f, 40, 4, 1, nullptr, true, "ms" },
         { "wvGrain",   "Grain",                       K::log,     20, 200, 70, 1, nullptr, true, "ms" },
         { "wvLevel",   "Level",                       K::linear,  -24, 12, 0, 1, nullptr, true, "dB" },
+        { "wvStart",   "Start",                       K::choice,  0, 1, 0, 1, "SYNC|RESTART", false, "" },
     };
 
     std::string fmt (const char* f, double v)
@@ -512,7 +513,7 @@ std::string longName (int id)
     if (id == rdDensity || id == rdVary || id == rdMorph) return "Radio " + name;
     if (in (elEngine, elWidth))    return "Stretch " + name;
     if (in (muteA, muteOrb))       return "Mixer " + name;
-    if (in (wvBeat, wvLevel))      return "Weave " + name;
+    if (in (wvBeat, wvStart))      return "Weave " + name;
     if (in (lmOn, lmDrive))        return id == lmOn ? std::string ("Output Limit") : "Limit " + name;
     if (in (rdTake, rdPads))       return "Radio " + name;
     if (in (rdPadTune, rdPadLevel)) return "Radio Pads " + name;

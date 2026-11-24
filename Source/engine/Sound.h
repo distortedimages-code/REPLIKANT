@@ -105,6 +105,7 @@ namespace snd
         // pattern (LENGTH, SEED); how the sounds are fitted (FIT, SPAN, GRID, XFADE, GRAIN) and its level
         wvBeat, wvBack, wvMove, wvStyle, wvTime, wvStutter, wvReverse, wvMutate, wvLength, wvSeed,
         wvFit, wvSpan, wvGrid, wvXfade, wvGrain, wvLevel,
+        wvStart,                    // (0.4.21) SYNC: a sound read where the song is in it; RESTART: from its start
         count
     };
 

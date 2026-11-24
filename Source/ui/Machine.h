@@ -60,6 +60,7 @@ namespace te
         int modeShown() const                      { return mode; }
         bool captureShown() const                  { return capture; }
         void touch (const Ctl&);                   // the screen's readout follows
+        auto& pagesNow() { return pagesShown(); } // (the pages shown: the screenshots go through them)
         void setKeyStyle (int style);              // CLASSIC, PADS, FLAT
         void setArmedMod (int mod);                // a mod armed (-1: none), as its key does
         void openAssistant();                      // CAPTURE's assistant, over the screen and the encoders (0.4.8)

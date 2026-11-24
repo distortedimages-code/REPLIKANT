@@ -2655,6 +2655,7 @@ weave::Settings ReplikantProcessor::weaveSettings (bool modulated) const
     st.xfadeMs = V (snd::wvXfade);
     st.grainMs = V (snd::wvGrain);
     st.gain = juce::Decibels::decibelsToGain (V (snd::wvLevel));
+    st.restart = V (snd::wvStart) > 0.5f;
     return st;
 }
 

@@ -85,6 +85,122 @@ int main (int argc, char** argv)
     };
     auto shoot = [&] (const char* name) { save (*ed, dir.getChildFile (name)); };
 
+    // (0.4.20) WEAVE's shots (RK_SNAP_WEAVE: these alone)
+    auto weaveShots = [&]
+    {
+        // (0.4.20) WEAVE: empty (where to drop them), ten sounds dragged over it, then woven and playing; its fit
+        {
+            set (snd::fModel, 0.0f);
+            set (snd::rvOn, 0.0f);
+            set (snd::chOn, 0.0f);
+            view->showMode (te::Machine::weaveMode);
+            view->showPage (0);
+            run (20);
+            shoot ("81-weave-vide.png");
+            // ten sounds made here: loops of a bar or two at 120, textures, a tone
+            auto wdir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("rk-weave-shots");
+            wdir.deleteRecursively();
+            wdir.createDirectory();
+            const char* names[10] = { "break-amen-ish", "kick-loop", "snare-roll", "hats-16", "bass-line", "pad-air", "chord-stabs", "noise-sweep", "vox-tone", "glitch-bits" };
+            const double lens[10] = { 2.0, 2.0, 1.0, 2.0, 4.0, 7.5, 2.0, 3.8, 1.9, 0.5 };
+            juce::StringArray files;
+            juce::Random rnd (11);
+            for (int k = 0; k < 10; ++k)
+            {
+                const int frames = (int) (lens[k] * 48000.0);
+                std::vector<float> l ((size_t) frames), r ((size_t) frames);
+                for (int i = 0; i < frames; ++i)
+                {
+                    const double t = i / 48000.0, beat = std::fmod (t, 0.5), sixteenth = std::fmod (t, 0.125);
+                    double v = 0.0;
+                    switch (k)
+                    {
+                        case 0: v = std::exp (-beat * 18.0) * std::sin (6.28318 * 60.0 * beat) + (rnd.nextFloat() - 0.5) * std::exp (-std::fmod (t + 0.25, 0.5) * 25.0); break;
+                        case 1: v = std::exp (-beat * 14.0) * std::sin (6.28318 * (50.0 + 80.0 * std::exp (-beat * 30.0)) * beat); break;
+                        case 2: v = (rnd.nextFloat() - 0.5) * std::exp (-sixteenth * 30.0) * (0.3 + t); break;
+                        case 3: v = (rnd.nextFloat() - 0.5) * 0.6 * std::exp (-sixteenth * 60.0); break;
+                        case 4: v = 0.6 * std::sin (6.28318 * (55.0 * (1 + (int) (t * 2) % 3)) * t) * std::exp (-beat * 3.0); break;
+                        case 5: v = 0.25 * (std::sin (6.28318 * 220.0 * t) + std::sin (6.28318 * 277.0 * t) + std::sin (6.28318 * 330.0 * t)) * (0.5 + 0.5 * std::sin (t)); break;
+                        case 6: v = std::exp (-beat * 9.0) * 0.4 * (std::sin (6.28318 * 311.0 * t) + std::sin (6.28318 * 392.0 * t)); break;
+                        case 7: v = (rnd.nextFloat() - 0.5) * 0.5 * (t / lens[k]); break;
+                        case 8: v = 0.4 * std::sin (6.28318 * 180.0 * t + 3.0 * std::sin (6.28318 * 5.0 * t)) * (0.6 + 0.4 * std::sin (6.28318 * 2.0 * t)); break;
+                        default: v = (rnd.nextFloat() < 0.02f ? 0.8 : 0.0) + 0.3 * std::sin (6.28318 * 1200.0 * t) * (sixteenth < 0.03 ? 1.0 : 0.0); break;
+                    }
+                    l[(size_t) i] = (float) juce::jlimit (-0.95, 0.95, v);
+                    r[(size_t) i] = (float) juce::jlimit (-0.95, 0.95, v * (0.8 + 0.2 * std::sin (t * 3.0 + k)));
+                }
+                const auto f = wdir.getChildFile (juce::String (names[k]) + ".wav");
+                rk::writeWav (f.getFullPathName().toStdString(), { l, r }, 48000.0, 24, {});
+                files.add (f.getFullPathName());
+            }
+            view->fileDragEnter (files, 400, 300);
+            run (4);
+            shoot ("82-weave-glisser.png");
+            view->fileDragExit (files);
+            proc.weaveAdd (files);
+            for (int i = 0; i < 300 && proc.weaveCount() < 10; ++i)
+                pump (20);
+            set (snd::wvBack, 5.0f);
+            set (snd::wvMove, 0.62f);
+            set (snd::wvTime, 0.3f);
+            set (snd::wvStutter, 0.25f);
+            set (snd::wvReverse, 0.15f);
+            set (snd::wvLength, 1.0f);
+            set (snd::wvSeed, 7.0f);
+            proc.setClockRunning (true);
+            run (300);
+            shoot ("83-weave.png");
+            view->showPage (1);
+            run (60);
+            shoot ("84-weave-fit.png");
+            // (0.4.21) each setting touched: its drawing on the screen's right
+            for (int pg = 0; pg < 2; ++pg)
+            {
+                view->showPage (pg);
+                const auto& page = view->pagesNow()[(size_t) pg];
+                for (int b = 0; b < (int) page.banks.size(); ++b)
+                {
+                    view->showBank (b);
+                    for (const auto& c : view->pagesNow()[(size_t) pg].banks[(size_t) b].ctls)
+                    {
+                        if (c.shown && ! c.shown())
+                            continue;
+                        view->touch (c);
+                        run (3);
+                        shoot (("85-weave-viz-" + c.name.toLowerCase() + ".png").toRawUTF8());
+                    }
+                }
+            }
+            // STRETCH, its grains; RESTART
+            set (snd::wvFit, 1.0f);
+            set (snd::wvStart, 1.0f);
+            run (10);
+            view->showPage (1);
+            view->showBank (0);
+            for (const auto& c : view->pagesNow()[1].banks[0].ctls)
+                if (c.param == snd::wvFit || c.param == snd::wvGrain || c.param == snd::wvStart)
+                {
+                    view->touch (c);
+                    run (3);
+                    shoot (("86-weave-viz-" + c.name.toLowerCase() + ".png").toRawUTF8());
+                }
+            set (snd::wvFit, 0.0f);
+            set (snd::wvStart, 0.0f);
+            proc.setClockRunning (false);
+            run (40);
+            std::printf ("weave: %d sounds\n", proc.weaveCount());
+        }
+    };
+    if (std::getenv ("RK_SNAP_WEAVE") != nullptr)
+    {
+        pump (300);
+        weaveShots();
+        ed.reset();
+        pump (100);
+        return 0;
+    }
+
+
     // the synth, a chord held, a few things moving
     pump (300);
     shoot ("0-start.png");
@@ -801,75 +917,7 @@ int main (int argc, char** argv)
         run (40);
     }
 
-    // (0.4.20) WEAVE: empty (where to drop them), ten sounds dragged over it, then woven and playing; its fit
-    {
-        set (snd::fModel, 0.0f);
-        set (snd::rvOn, 0.0f);
-        set (snd::chOn, 0.0f);
-        view->showMode (te::Machine::weaveMode);
-        view->showPage (0);
-        run (20);
-        shoot ("81-weave-vide.png");
-        // ten sounds made here: loops of a bar or two at 120, textures, a tone
-        auto wdir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("rk-weave-shots");
-        wdir.deleteRecursively();
-        wdir.createDirectory();
-        const char* names[10] = { "break-amen-ish", "kick-loop", "snare-roll", "hats-16", "bass-line", "pad-air", "chord-stabs", "noise-sweep", "vox-tone", "glitch-bits" };
-        const double lens[10] = { 2.0, 2.0, 1.0, 2.0, 4.0, 7.5, 2.0, 3.8, 1.9, 0.5 };
-        juce::StringArray files;
-        juce::Random rnd (11);
-        for (int k = 0; k < 10; ++k)
-        {
-            const int frames = (int) (lens[k] * 48000.0);
-            std::vector<float> l ((size_t) frames), r ((size_t) frames);
-            for (int i = 0; i < frames; ++i)
-            {
-                const double t = i / 48000.0, beat = std::fmod (t, 0.5), sixteenth = std::fmod (t, 0.125);
-                double v = 0.0;
-                switch (k)
-                {
-                    case 0: v = std::exp (-beat * 18.0) * std::sin (6.28318 * 60.0 * beat) + (rnd.nextFloat() - 0.5) * std::exp (-std::fmod (t + 0.25, 0.5) * 25.0); break;
-                    case 1: v = std::exp (-beat * 14.0) * std::sin (6.28318 * (50.0 + 80.0 * std::exp (-beat * 30.0)) * beat); break;
-                    case 2: v = (rnd.nextFloat() - 0.5) * std::exp (-sixteenth * 30.0) * (0.3 + t); break;
-                    case 3: v = (rnd.nextFloat() - 0.5) * 0.6 * std::exp (-sixteenth * 60.0); break;
-                    case 4: v = 0.6 * std::sin (6.28318 * (55.0 * (1 + (int) (t * 2) % 3)) * t) * std::exp (-beat * 3.0); break;
-                    case 5: v = 0.25 * (std::sin (6.28318 * 220.0 * t) + std::sin (6.28318 * 277.0 * t) + std::sin (6.28318 * 330.0 * t)) * (0.5 + 0.5 * std::sin (t)); break;
-                    case 6: v = std::exp (-beat * 9.0) * 0.4 * (std::sin (6.28318 * 311.0 * t) + std::sin (6.28318 * 392.0 * t)); break;
-                    case 7: v = (rnd.nextFloat() - 0.5) * 0.5 * (t / lens[k]); break;
-                    case 8: v = 0.4 * std::sin (6.28318 * 180.0 * t + 3.0 * std::sin (6.28318 * 5.0 * t)) * (0.6 + 0.4 * std::sin (6.28318 * 2.0 * t)); break;
-                    default: v = (rnd.nextFloat() < 0.02f ? 0.8 : 0.0) + 0.3 * std::sin (6.28318 * 1200.0 * t) * (sixteenth < 0.03 ? 1.0 : 0.0); break;
-                }
-                l[(size_t) i] = (float) juce::jlimit (-0.95, 0.95, v);
-                r[(size_t) i] = (float) juce::jlimit (-0.95, 0.95, v * (0.8 + 0.2 * std::sin (t * 3.0 + k)));
-            }
-            const auto f = wdir.getChildFile (juce::String (names[k]) + ".wav");
-            rk::writeWav (f.getFullPathName().toStdString(), { l, r }, 48000.0, 24, {});
-            files.add (f.getFullPathName());
-        }
-        view->fileDragEnter (files, 400, 300);
-        run (4);
-        shoot ("82-weave-glisser.png");
-        view->fileDragExit (files);
-        proc.weaveAdd (files);
-        for (int i = 0; i < 300 && proc.weaveCount() < 10; ++i)
-            pump (20);
-        set (snd::wvBack, 5.0f);
-        set (snd::wvMove, 0.62f);
-        set (snd::wvTime, 0.3f);
-        set (snd::wvStutter, 0.25f);
-        set (snd::wvReverse, 0.15f);
-        set (snd::wvLength, 1.0f);
-        set (snd::wvSeed, 7.0f);
-        proc.setClockRunning (true);
-        run (300);
-        shoot ("83-weave.png");
-        view->showPage (1);
-        run (60);
-        shoot ("84-weave-fit.png");
-        proc.setClockRunning (false);
-        run (40);
-        std::printf ("weave: %d sounds\n", proc.weaveCount());
-    }
+    weaveShots();
 
     // the project keeps the sound: settings, routes, steps, scenes
     {

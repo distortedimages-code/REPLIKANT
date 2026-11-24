@@ -18,6 +18,7 @@
 // The beats and the backbeats keep their sound clean (no TIME, STUTTER, REVERSE): they hold the weave together.
 // Every jump of the head (a new step, a repeat, a sound's end looping) is crossfaded (XFADE, equal power). TAPE reads
 // a sound at the speed its span asks (its pitch follows, like a tape); STRETCH keeps its pitch, in grains (GRAIN).
+// START: SYNC reads the sound the head comes to where the song is in it; RESTART takes it again from its start.
 //
 // Audio thread: render. The sounds are the owner's (setThread: a pointer kept alive until the next block at least).
 #pragma once
@@ -55,6 +56,8 @@ namespace weave
         int fit = fitTape;
         int span = 0;                       // the bars a sound is fitted to: 0 AUTO, 1..7: 1/4, 1/2, 1, 2, 4, 8, 16
         float xfadeMs = 4.0f, grainMs = 60.0f, gain = 1.0f;
+        bool restart = false;               // (START) RESTART: a sound taken again from its start each time the head
+                                            // comes to it (SYNC: where the song is in it)
     };
 
     // a step of the weave: its sound, the step whose moment it reads (that many steps away), its repeats, backwards;
@@ -65,6 +68,7 @@ namespace weave
         int8_t shift = 0;
         uint8_t ratchet = 1;
         bool reverse = false, fixed = false;
+        int16_t age = 0;                    // the steps its sound has been playing for (0: the head just came to it)
     };
 
     // the steps of the pattern's pass `cycle` (bars * grid of them, returned) for `count` sounds; force >= 0: every

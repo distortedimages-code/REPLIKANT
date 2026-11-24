@@ -1,3 +1,18 @@
+**REPLIK8 0.4.21** : WEAVE peut reprendre chaque son à son début, et chaque réglage se dessine sur l'écran.
+
+- **START** (WEAVE, page THREADS) : SYNC, comme avant (la tête prend un son là où en est le morceau, le groove continue d'une boucle à l'autre), ou RESTART (elle le reprend à son début chaque fois qu'elle y arrive : des attaques, plus percussif). En RESTART, un décalage de TIME qui tomberait avant le début du son repart de son attaque
+- **Chaque réglage dessiné** : sur WEAVE, la partie droite de l'écran montre ce que fait le réglage que tu touches, avec sa valeur et tes sons, et une phrase dit l'effet en clair (« 12 changements de son sur la mesure », « le son 1 lu à x0,93, 1,3 demi-ton plus bas »…)
+  - BEAT et BACK : les temps qui reviennent à leur son, une flèche vers chacun
+  - MOVE : la trame à 0 %, à ta valeur, à 100 %
+  - STYLE : le chemin de la tête d'un son à l'autre ; en EUCLID, le cercle de ses changements
+  - LENGTH : la trame et sa reprise ; SEED et DRAW : la trame d'avant, celle-ci, la suivante
+  - TIME : chaque pas relié au moment qu'il lit ; STUTTER et REVERSE : les pas concernés, et l'un d'eux en gros
+  - MUTATE : quatre passages de suite, les changements entourés
+  - FIT et GRAIN : le son tel quel, puis calé (étiré en TAPE, en grains en STRETCH) ; SPAN : la durée de chaque son et sa longueur de calage
+  - START : où la tête lit dans le son au fil de la mesure, en SYNC et en RESTART (l'autre en pâle, pour comparer)
+  - GRID, XFADE (le fondu entre deux sons, à l'échelle d'un pas) et LEVEL
+  - Sans réglage touché : le chemin de la tête sur toute la trame
+
 **REPLIK8 0.4.20** : WEAVE tisse jusqu'à seize sons en rythme, et une icône montre où glisser un son.
 
 - **WEAVE** (touche SAMPLER, puis WEAVE en haut de l'écran) : glisse jusqu'à seize sons sur la fenêtre (des boucles, des textures, des voix…). Chacun est calé sur une longueur en mesures, la plus proche de sa durée, et lu là où en est le morceau. Une tête saute d'un son à l'autre en rythme, sans perdre le temps.
