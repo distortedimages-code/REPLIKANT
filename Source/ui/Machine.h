@@ -29,6 +29,7 @@ namespace te
         juce::Colour dot = juce::Colours::transparentBlack;
         Picto icon = Picto::none;                  // drawn before the label
         float fontSize = 12.5f;
+        bool selector = false;                     // (0.4.19) a mode selector: a liseret inside, the type in bold
         void paintButton (juce::Graphics&, bool over, bool down) override;
     };
 

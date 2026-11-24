@@ -1,3 +1,8 @@
+**REPLIK8 0.4.19** : les sélecteurs de mode se détachent.
+
+- **SYNTH, DRUM, SAMPLER, RADIO** : les quatre touches qui changent de mode ont maintenant un liseret doré gravé à l'intérieur (sombre sur la touche allumée), un texte en gras et des pictos plus épais. On les distingue d'un coup d'œil des autres touches du haut (CAPTURE, FILE, PACK). Chacune a la largeur de son nom, pour que le texte respire partout
+- **SEEK plus sûr** : en AM, il ne s'arrête plus parfois sur une porteuse nue (un parasite du récepteur, sans modulation autour) en la prenant pour une station
+
 **REPLIK8 0.4.18** : SEEK trouve la prochaine station propre, et la sérigraphie ne se coupe plus.
 
 - **SEEK** (RADIO, page TUNE, sur un récepteur ondes courtes) : trois boutons, DOWN, STOP et UP. UP cherche le prochain signal propre au-dessus de la fréquence écoutée, DOWN en dessous, et s'y accorde tout seul, en passant par le fondu MORPH. Il ne tourne pas le potard pas à pas : il lit la bande telle que le récepteur la voit, une tranche après l'autre, et choisit le signal le plus proche qui vaut le coup. En AM, une station nette : une porteuse bien au-dessus du bruit, avec sa modulation autour, sans voisine collée qui sifflerait avec elle, posée sur la grille des stations (tous les 5 kHz). En USB et LSB, une voix. En CW, du morse. Il fait le tour de la bande une fois au plus et abandonne au bout de 20 secondes s'il ne trouve rien. La ligne d'état de l'écran dit où il en est : la tranche qu'il lit, puis la fréquence trouvée et sa force au-dessus du bruit. STOP l'interrompt, tourner le potard aussi

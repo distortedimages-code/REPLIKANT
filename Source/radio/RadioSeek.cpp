@@ -108,17 +108,19 @@ Found nextSignal (const Panorama& p, double fromKhz, int dir, Demod d)
             const float snr = p.avg[(size_t) i] - fl[(size_t) i];
             if (snr < 15.0f)
                 continue;
-            double sb = 0.0;
-            int ns = 0;
+            // its sidebands: the median of the bins from 1.5 to 4.5 kHz each side (a bare carrier's skirt spills
+            // into the nearest of them: one bin a side, the median doesn't see it)
+            std::vector<float> sides;
             for (int j = std::max (0, i - bins (4.5)); j <= std::min (n - 1, i + bins (4.5)); ++j)
                 if (std::abs (j - i) * p.binKhz >= 1.5)
-                {
-                    sb += p.avg[(size_t) j] - fl[(size_t) j];
-                    ++ns;
-                }
-            if (ns > 0)
-                sb /= ns;
-            if (sb < 2.0 && snr < 30.0f)
+                    sides.push_back (p.avg[(size_t) j] - fl[(size_t) j]);
+            float sb = 0.0f;
+            if (! sides.empty())
+            {
+                std::nth_element (sides.begin(), sides.begin() + (long) (sides.size() / 2), sides.end());
+                sb = sides[sides.size() / 2];
+            }
+            if (sb < 2.0f && snr < 30.0f)
                 continue;                                  // (a bare carrier, a receiver's own birdie: not a station)
             bool alone = true;
             for (int j : tops)

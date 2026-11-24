@@ -119,16 +119,34 @@ void Key::paintButton (juce::Graphics& g, bool, bool down)
     if (down && isEnabled())
         t.translate (0.0f, 2.0f);
     const auto label = getButtonText();
-    const auto f = mono (fontSize, 500);
+    if (selector)
+    {
+        // (0.4.19) a liseret engraved inside the key, gold on the dark key, dark on the lit one
+        const auto in = t.reduced (3.5f, 3.5f);
+        if (st == KeyState::on)
+        {
+            g.setColour (col::keyOnInk.withAlpha (0.55f));
+            g.drawRoundedRectangle (in, 4.0f, 1.0f);
+        }
+        else
+        {
+            g.setColour (col::keyShadow.withAlpha (0.8f));
+            g.drawRoundedRectangle (in, 4.0f, 1.0f);
+            g.setColour (col::ink2.withAlpha (st == KeyState::off ? 0.3f : 0.7f));
+            g.drawRoundedRectangle (in.translated (0.0f, 1.0f), 4.0f, 1.0f);
+        }
+    }
+    const auto f = selector ? mono (fontSize + 1.0f, 600) : mono (fontSize, 500);
     if (icon != Picto::none)
     {
         const float side = juce::jmin (18.0f, t.getHeight() - 10.0f);
+        const float gap = selector ? 7.0f : 8.0f;
         const float tw = label.isEmpty() ? 0.0f : (float) juce::GlyphArrangement::getStringWidthInt (f, themed (label)) + 2.0f;
-        const float w = side + (label.isEmpty() ? 0.0f : 8.0f) + tw;
+        const float w = side + (label.isEmpty() ? 0.0f : gap) + tw;
         const float x = t.getCentreX() - w * 0.5f;
-        picto (g, icon, { x, t.getCentreY() - side * 0.5f, side, side }, keyInk (st), 1.4f);
+        picto (g, icon, { x, t.getCentreY() - side * 0.5f, side, side }, keyInk (st), selector ? 1.8f : 1.4f);
         if (label.isNotEmpty())
-            te::text (g, label, { x + side + 8.0f, t.getY(), tw + 4.0f, t.getHeight() }, f, keyInk (st));
+            te::text (g, label, { x + side + gap, t.getY(), tw + 4.0f, t.getHeight() }, f, keyInk (st));
     }
     else if (dot.getAlpha() > 0)
     {
@@ -3861,6 +3879,7 @@ Machine::Machine (ReplikantProcessor& p) : proc (p), updatePanel (p.updater)
         k.setButtonText (juce::String::fromUTF8 (modeNames[i]));
         k.look = [this, i] { return mode == i && ! capture ? KeyState::on : KeyState::normal; };
         k.onClick = [this, i] { showMode (i); };
+        k.selector = true;
         k.icon = i == synthMode ? Picto::sine : (i == drumMode ? Picto::drum : (i == samplerMode ? Picto::cassette : Picto::radio));
         addAndMakeVisible (k);
     }
@@ -5543,9 +5562,11 @@ void Machine::resized()
     auto h = header.reduced (16, 10);
     logo = h.removeFromLeft (200);
     h.removeFromLeft (2);
-    for (auto& k : modeKeys)
+    // (0.4.19) each selector as wide as its name needs, the four together as before (400)
+    const int modeWidth[numModes] = { 98, 92, 114, 96 };
+    for (int i = 0; i < numModes; ++i)
     {
-        k.setBounds (h.removeFromLeft (100));
+        modeKeys[i].setBounds (h.removeFromLeft (modeWidth[i]));
         h.removeFromLeft (6);
     }
     h.removeFromLeft (4);
