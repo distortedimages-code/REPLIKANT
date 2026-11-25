@@ -200,6 +200,93 @@ int main (int argc, char** argv)
             std::printf ("weave: %d sounds\n", proc.weaveCount());
         }
     };
+    // (labels: every mode's pages, banks, silkscreen and controls, printed: RK_SNAP_LABELS)
+    if (std::getenv ("RK_SNAP_LABELS") != nullptr)
+    {
+        pump (200);
+        const char* looks[] = { "knob", "toggle", "twoWay", "buttons", "ledList", "display", "tuning" };
+        auto dump = [&] (const juce::String& where)
+        {
+            const auto& pages = view->pagesNow();
+            for (const auto& pg : pages)
+            {
+                std::printf ("\n== %s / PAGE %s (viz %s)\n", where.toRawUTF8(), pg.name.toRawUTF8(), pg.viz.toRawUTF8());
+                for (const auto& b : pg.banks)
+                {
+                    juce::String fr;
+                    for (const auto& f : b.frames)
+                        fr << "[" << f.from << "-" << f.to << " " << f.label << "] ";
+                    juce::String ar;
+                    for (int a : b.arrows)
+                        ar << a << " ";
+                    std::printf ("  -- bank %s  frames: %s arrows: %s exit: %s\n", b.name.toRawUTF8(), fr.toRawUTF8(), ar.toRawUTF8(), b.exit.toRawUTF8());
+                    int i = 0;
+                    for (const auto& c : b.ctls)
+                    {
+                        juce::String mk;
+                        for (const auto& m : c.marks)
+                            mk << juce::String (m.at, 3) << ":" << m.label << " ";
+                        std::printf ("     %d %-14s %-8s %s  marks %s\n", i++, c.name.toRawUTF8(), looks[(int) c.look], c.options.joinIntoString ("|").toRawUTF8(),
+                                     mk.toRawUTF8());
+                    }
+                }
+            }
+        };
+        const char* modes[] = { "SYNTH", "DRUM", "SAMPLER", "RADIO", "WEAVE" };
+        for (int md = 0; md < 5; ++md)
+        {
+            view->showMode (md);
+            pump (30);
+            dump (modes[md]);
+        }
+        view->showMode (0);
+        for (int k = 0; k < 3; ++k)
+        {
+            view->setCaptureKind (k);
+            pump (30);
+            dump (juce::String ("CAPTURE ") + juce::String (k));
+        }
+        ed.reset();
+        pump (100);
+        return 0;
+    }
+    // (the desk: every bank of every mode, its controls and silkscreen, one shot each: RK_SNAP_DECK)
+    if (std::getenv ("RK_SNAP_DECK") != nullptr)
+    {
+        pump (200);
+        set (snd::pmSource, 1.0f);
+        set (snd::ecSync, 0.0f);
+        const char* modes[] = { "synth", "drum", "sampler", "radio", "weave" };
+        for (int md = 0; md < 5; ++md)
+        {
+            view->showMode (md);
+            pump (20);
+            const int np = (int) view->pagesNow().size();
+            for (int pg = 0; pg < np; ++pg)
+            {
+                view->showPage (pg);
+                const int nb = (int) view->pagesNow()[(size_t) pg].banks.size();
+                for (int b = 0; b < nb; ++b)
+                {
+                    view->showBank (b);
+                    run (4);
+                    const auto& page = view->pagesNow()[(size_t) pg];
+                    shoot ((juce::String ("deck-") + modes[md] + "-" + page.name + "-" + page.banks[(size_t) b].name + ".png").replaceCharacter (' ', '_').toRawUTF8());
+                }
+            }
+        }
+        view->showMode (0);
+        proc.resampleOptions.dest = ReplikantProcessor::ResampleOptions::toDrum;
+        view->showCapture (true);
+        view->setCaptureKind (te::Machine::resampleKind);
+        run (4);
+        shoot ("deck-capture-resample.png");
+        view->showCapture (false);
+        proc.resampleOptions.dest = ReplikantProcessor::ResampleOptions::toSampler;
+        ed.reset();
+        pump (100);
+        return 0;
+    }
     if (std::getenv ("RK_SNAP_WEAVE") != nullptr)
     {
         pump (300);

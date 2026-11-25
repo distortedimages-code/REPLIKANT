@@ -1,3 +1,20 @@
+**REPLIK8 0.4.25** : des noms de boutons plus clairs, et plus de liserés sur la façade.
+
+- **RÉÉCHANTILLONNER** : TO devient **DESTINATION**, SENS devient **SENSITIVITY**
+- **Des noms plus courts, quand le liseré dit déjà de quoi il s'agit** :
+  - DRUM, TONE : TYPE, CUTOFF, RESONANCE dans FILTER ; AMOUNT, ATTACK, DECAY dans FILTER ENV
+  - DRUM, PITCH : AMOUNT et TIME dans SWEEP ; DEPTH et RATIO dans FM
+  - DRUM, TRIG : RATE, COUNT, CURVE et FADE dans un nouveau liseré RETRIG
+  - DRUM, SOURCE (HIT) : COUNT et GAP dans STUTTER comme dans BURST
+  - SYNTH, FILTER ENV : AMOUNT entre dans le liseré ENVELOPE
+  - SAMPLER, LOOP : START et SIZE dans LOOP ; SAMPLER, PITCH : FINE, BEND, puis SOURCE, RATIO et DEPTH dans un liseré PHASE MOD
+  - COMP : GAIN dans INPUT
+  - RADIO, TAKE : LENGTH dans GRAB, SENSITIVITY et PADS dans SLICES
+  - WEAVE : BACK devient BACKBEAT, TIME devient SHIFT, et DRAW propose PREV et NEW (BACK prêtait à confusion avec BACKBEAT)
+- **De nouveaux liserés** : TABLE et PITCH sur les oscillateurs du synthé ; UNISON (COUNT, DETUNE, WIDTH) et PITCH (BEND, TRANSPOSE) sur VOICES ; VOICES sur l'effet PITCH, MOTION sur CHORUS, ROOM et MIX sur ESPACE, TAPE et HEADS sur ECHO
+- **Les graduations des boutons** : celles de la DRUM suivent la vraie course de chaque réglage (le GAP de BURST va de 2 à 50 ms, son COUNT de 1 à 8, SCAN TIME jusqu'à 4 s) au lieu d'une échelle toute faite, et deux chiffres ne se chevauchent plus au bas d'un bouton (SMOOTH du cube, par exemple)
+- Les noms dans les listes de modulation ne changent pas, tes projets non plus
+
 **REPLIK8 0.4.24** : le rééchantillon peut partir vers la DRUM (découpé sur ses attaques) ou vers WEAVE.
 
 - **RÉÉCHANTILLONNER → TO** : SAMPLER (comme avant, un instrument en boucle joué au clavier), DRUM ou WEAVE

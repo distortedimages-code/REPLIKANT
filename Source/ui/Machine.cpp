@@ -2014,10 +2014,10 @@ private:
                     std::array<weave::Step, weave::maxSteps> q {};
                     const int tq = weave::plan (s2, count, cyc, -1, q.data());
                     const bool now = k == 0;
-                    text (g, drawKey ? juce::String (k < 0 ? "back" : (k == 0 ? "now" : "new")) : juce::String ((int) s2.seed), lab, small(), now ? ink : dim);
+                    text (g, drawKey ? juce::String (k < 0 ? "prev" : (k == 0 ? "now" : "new")) : juce::String ((int) s2.seed), lab, small(), now ? ink : dim);
                     row (lineA.reduced (0.0f, 2.0f), q.data(), tq, [now] (int) { return now ? 1.0f : 0.28f; }, false);
                 }
-                cap = drawKey ? "new tire une autre trame, back revient à celle d'avant"_fr
+                cap = drawKey ? "new tire une autre trame, prev revient à celle d'avant"_fr
                               : "seed "_fr + juce::String (sd) + " : les mêmes réglages, toujours la même trame"_fr;
                 break;
             }
@@ -5009,7 +5009,7 @@ void Machine::buildPages()
                                           sep (S (snd::sep, nullptr, [this] { const int md = (int) P (proc, snd::fModel); return md == 2 || md == 4; })),
                                           sep (S (snd::sep, "Mix", [this] { return (int) P (proc, snd::fModel) == (int) dsp::FilterModel::wasp && (int) P (proc, snd::fType) == (int) dsp::FilterType::notch; })),
                                           disabledUnless (S (snd::fm, nullptr, notCube), fOn), sep (disabledUnless (S (snd::quality), fOn)) } });
-        pg.banks.push_back ({ "filter env", { S (snd::fEnv), sep (S (snd::fAttack)), S (snd::fDecay), S (snd::fSustain), S (snd::fRelease),
+        pg.banks.push_back ({ "filter env", { S (snd::fEnv, "Amount"), sep (S (snd::fAttack)), S (snd::fDecay), S (snd::fSustain), S (snd::fRelease),
                                                sep (S (snd::keyTrack)), S (snd::velCutoff) } });
         pg.banks.push_back ({ "drive", { S (snd::dModel), sep (S (snd::dAmt)), S (snd::dTone), sep (S (snd::dMix)) } });
         pg.banks.push_back ({ "cube", { disabledUnless (as (S (snd::fCube), Ctl::Look::display), isCube), sep (disabledUnless (S (snd::fSmooth), isCube)),
@@ -5198,7 +5198,7 @@ void Machine::buildPages()
         b.ctls.push_back (help);
         pg.banks.push_back (std::move (b));
         // COMP: at the end of the chain, before the volume
-        pg.banks.push_back ({ "comp", { S (snd::cpOn, "On"), sep (S (snd::cpIn)), S (snd::cpAmount), sep (S (snd::cpAttack)), S (snd::cpRelease),
+        pg.banks.push_back ({ "comp", { S (snd::cpOn, "On"), sep (S (snd::cpIn, "Gain")), S (snd::cpAmount), sep (S (snd::cpAttack)), S (snd::cpRelease),
                                         sep (S (snd::cpMix)), S (snd::cpLevel) } });
         pg.banks.push_back ({ "comp +", { as (S (snd::cpKey), Ctl::Look::display), sep (S (snd::cpGate)), sep (S (snd::cpDrive)) } });
         // LIMIT: the very last, after the volume
@@ -5228,7 +5228,7 @@ void Machine::buildPages()
         v.push_back (orbitePage());
         v.push_back (mixerPage (false));
         v.push_back ({ "voices", "voices", { { "voices", { S (snd::voiceMode), S (snd::voices, nullptr, [this] { return P (proc, snd::voiceMode) < 0.5f; }),
-                                                       S (snd::glide), sep (S (snd::unison)), S (snd::detune), S (snd::width), sep (S (snd::bend)), S (snd::transpose) } } } });
+                                                       S (snd::glide), sep (S (snd::unison, "Count")), S (snd::detune), S (snd::width), sep (S (snd::bend, "Bend")), S (snd::transpose) } } } });
         v.push_back (filterPage());
         v.push_back (amp (false));
         v.push_back (fxPage());
@@ -5265,8 +5265,8 @@ void Machine::buildPages()
         };
         auto& v = pages[drumMode];
         v.clear();
-        v.push_back ({ "trig", "dtrig", { { "trig", { D (drum::pVel), D (drum::pProb), D (drum::pMicro), sep (D (drum::pRetrig)), D (drum::pCount, nullptr, retrigOn),
-                                                       D (drum::pCurve, nullptr, retrigOn), D (drum::pRVel, nullptr, retrigOn) } } } });
+        v.push_back ({ "trig", "dtrig", { { "trig", { D (drum::pVel), D (drum::pProb), D (drum::pMicro), sep (D (drum::pRetrig, "Rate")), D (drum::pCount, nullptr, retrigOn),
+                                                       D (drum::pCurve, nullptr, retrigOn), D (drum::pRVel, "Fade", retrigOn) } } } });
         // (0.4.17) SOURCE: the source and its MODEL (a starting point), then the synth's two oscillators (a table each,
         // scanned after the hit) or the sound's playing; the hit's own (STUTTER, BURST)
         auto synthOnly = srcIs ({ drum::synth });
@@ -5310,18 +5310,18 @@ void Machine::buildPages()
                                   tipped (D (drum::pScanTime, "Time"), timeTip), sep (D (drum::pReverse)),
                                   sep (tipped (D (drum::pVelMod), "Un coup doux balaie moins : à fond, la vélocité ouvre le son."_fr)) } };
         playBank.when = soundOnly;
-        Bank hitBank { "hit", { tipped (D (drum::pStutter), "Le coup qui bégaie : sa chute de hauteur, ses balayages, son clic (et l'endroit lu d'un son) repartent, autant de fois, LENGTH à part ; le volume continue de tomber."_fr),
-                                tipped (D (drum::pStutLen), "L'écart entre deux reprises du bégaiement."_fr),
-                                sep (tipped (D (drum::pBurst), "Le clic et le bruit frappés plusieurs fois, GAP à part : un clap (4 coups, 9 ms)."_fr)),
-                                tipped (D (drum::pBurstGap), "L'écart entre les coups de BURST."_fr) } };
+        Bank hitBank { "hit", { tipped (D (drum::pStutter, "Count"), "Le coup qui bégaie : sa chute de hauteur, ses balayages, son clic (et l'endroit lu d'un son) repartent, autant de fois, GAP à part ; le volume continue de tomber."_fr),
+                                tipped (D (drum::pStutLen, "Gap"), "L'écart entre deux reprises du bégaiement."_fr),
+                                sep (tipped (D (drum::pBurst, "Count"), "Le clic et le bruit frappés plusieurs fois, GAP à part : un clap (4 coups, 9 ms)."_fr)),
+                                tipped (D (drum::pBurstGap, "Gap"), "L'écart entre les coups de BURST."_fr) } };
         v.push_back ({ "source", "dsrc", { srcBank, osc1, osc2, playBank, hitBank } });
-        v.push_back ({ "pitch", "dpitch", { { "pitch", { D (drum::pNote), D (drum::pTune), sep (D (drum::pSweep)), D (drum::pSweepTime),
-                                                           sep (D (drum::pPmod, nullptr, soundOnly)), D (drum::pRatio, nullptr, soundOnly) } } } });
+        v.push_back ({ "pitch", "dpitch", { { "pitch", { D (drum::pNote), D (drum::pTune), sep (D (drum::pSweep, "Amount")), D (drum::pSweepTime, "Time"),
+                                                           sep (D (drum::pPmod, "Depth", soundOnly)), D (drum::pRatio, nullptr, soundOnly) } } } });
         v.push_back ({ "amp", "damp", { { "amp", { D (drum::pAttack), D (drum::pDecay), sep (D (drum::pBody)), D (drum::pClick), D (drum::pNoise),
                                                     sep (D (drum::pLevel)), D (drum::pPan) } } } });
         auto fenvOn = [shownValue] { return std::abs (shownValue (drum::pFEnv)) > 0.005f; };
-        v.push_back ({ "tone", "dtone", { { "tone", { D (drum::pFilter), D (drum::pCutoff), D (drum::pReso), sep (D (drum::pFEnv)),
-                                                      D (drum::pFAttack, nullptr, fenvOn), D (drum::pFDecay, nullptr, fenvOn),
+        v.push_back ({ "tone", "dtone", { { "tone", { D (drum::pFilter, "Type"), D (drum::pCutoff), D (drum::pReso, "Resonance"), sep (D (drum::pFEnv, "Amount")),
+                                                      D (drum::pFAttack, "Attack", fenvOn), D (drum::pFDecay, "Decay", fenvOn),
                                                       sep (D (drum::pTone)), sep (D (drum::pDrive)) } } } });
         // SEQ: the track's length and speed, the pattern's length for a change, the swing
         {
@@ -5465,10 +5465,10 @@ void Machine::buildPages()
                                                           disabledUnless (S (snd::elHarm, nullptr, spectral), elastic),
                                                           disabledUnless (S (snd::elShimmer, nullptr, spectral), elastic),
                                                           disabledUnless (S (snd::elWidth, nullptr, spectral), elastic) } } } });
-        v.push_back ({ "loop", "loop", { { "loop", { S (snd::loops), sep (S (snd::loopStart)), S (snd::loopSize), S (snd::loopXfade), sep (S (snd::bits)) } } } });
-        v.push_back ({ "pitch", "pitch", { { "pitch", { S (snd::tune), S (snd::transpose), S (snd::fine), S (snd::glide), S (snd::bend), sep (S (snd::pmSource)),
-                                                            S (snd::pmRatio, nullptr, [this] { const int s = (int) P (proc, snd::pmSource); return s == 1 || s == 2; }),
-                                                            S (snd::pmIndex, nullptr, [this] { return (int) P (proc, snd::pmSource) != 0; }) } } } });
+        v.push_back ({ "loop", "loop", { { "loop", { S (snd::loops), sep (S (snd::loopStart, "Start")), S (snd::loopSize, "Size"), S (snd::loopXfade), sep (S (snd::bits)) } } } });
+        v.push_back ({ "pitch", "pitch", { { "pitch", { S (snd::tune), S (snd::transpose), S (snd::fine, "Fine"), S (snd::glide), S (snd::bend, "Bend"), sep (S (snd::pmSource, "Source")),
+                                                            S (snd::pmRatio, "Ratio", [this] { const int s = (int) P (proc, snd::pmSource); return s == 1 || s == 2; }),
+                                                            S (snd::pmIndex, "Depth", [this] { return (int) P (proc, snd::pmSource) != 0; }) } } } });
         v.push_back (orbitePage());
         v.push_back (mixerPage (true));
         v.push_back (filterPage());
@@ -5577,7 +5577,7 @@ void Machine::buildPages()
                                                               depthCtl, sep (S (snd::rdLevel)), rdMorphCtl } } } });
         v.push_back ({ "air", "air", { { "air", { S (snd::rdBand), S (snd::rdCentre), sep (S (snd::rdFade)), S (snd::rdRate),
                                                     sep (S (snd::rdCrackle)), sep (S (snd::rdDrive)) } } } });
-        v.push_back ({ "take", "take", { { "take", { S (snd::rdTake), sep (S (snd::rdSens)), S (snd::rdPads) } } } });
+        v.push_back ({ "take", "take", { { "take", { S (snd::rdTake, "Length"), sep (S (snd::rdSens)), S (snd::rdPads) } } } });
         v.push_back ({ "pads", "pads", { { "pads", { S (snd::rdPadTune), S (snd::rdPadDecay), sep (S (snd::rdChoke)), sep (S (snd::rdPadLevel)) } } } });
         v.push_back (filterPage());
         v.push_back (fxPage());
@@ -5632,17 +5632,17 @@ void Machine::buildPages()
         auto& v = pages[weaveMode];
         v.clear();
         auto stretchOn = [this] { return (int) P (proc, snd::wvFit) == 1; };
-        auto draw = choiceCtl ("Draw", { "back", "new" }, [] { return 1; },
+        auto draw = choiceCtl ("Draw", { "prev", "new" }, [] { return 1; },
                                [this] (int i)
                                {
                                    const int sd = (int) P (proc, snd::wvSeed) + (i == 0 ? -1 : 1);
                                    setSound (proc, snd::wvSeed, (float) (sd < 1 ? 999 : (sd > 999 ? 1 : sd)));
                                });
         draw.look = Ctl::Look::buttons;
-        draw.tip = "NEW : une autre trame, tirée des mêmes règles (la graine suivante). BACK : celle d'avant."_fr;
-        v.push_back ({ "weave", "weave", { { "rules", { S (snd::wvBeat), S (snd::wvBack), sep (S (snd::wvMove)), S (snd::wvStyle),
+        draw.tip = "NEW : une autre trame, tirée des mêmes règles (la graine suivante). PREV : celle d'avant."_fr;
+        v.push_back ({ "weave", "weave", { { "rules", { S (snd::wvBeat), S (snd::wvBack, "Backbeat"), sep (S (snd::wvMove)), S (snd::wvStyle),
                                                          sep (S (snd::wvLength)), sep (S (snd::wvSeed)), draw } },
-                                           { "accidents", { S (snd::wvTime), S (snd::wvStutter), S (snd::wvReverse), sep (S (snd::wvMutate)) } } } });
+                                           { "accidents", { S (snd::wvTime, "Shift"), S (snd::wvStutter), S (snd::wvReverse), sep (S (snd::wvMutate)) } } } });
         v.push_back ({ "threads", "weave", { { "fit", { S (snd::wvFit), S (snd::wvSpan), S (snd::wvGrain, nullptr, stretchOn), sep (S (snd::wvStart)),
                                                           sep (S (snd::wvGrid)), S (snd::wvXfade), sep (S (snd::wvLevel)) } } } });
         auto fp = filterPage();
@@ -5707,22 +5707,34 @@ void Machine::buildPages()
         deco ("orbite", "sat 1", { { 0, 2, "satellite 1" } });
         deco ("orbite", "sat 2", { { 0, 2, "satellite 2" }, { 4, 5, "sync" } });
         // the envelopes, the filter's tracking
-        deco ("filter", "filter env", { { 1, 4, "envelope", Picto::envelope }, { 5, 6, "tracking", Picto::keys } });
+        deco ("filter", "filter env", { { 0, 4, "envelope", Picto::envelope }, { 5, 6, "tracking", Picto::keys } });
+        // (0.4.25) the oscillators: their table, their pitch; the voices: the unison, the pitch
+        deco ("osc a", "osc a", { { 0, 1, "table", Picto::cycles }, { 2, 4, "pitch" } }, {}, {}, Picto::none, synthMode);
+        deco ("osc b", "osc b", { { 0, 1, "table", Picto::cycles }, { 2, 4, "pitch" } }, {}, {}, Picto::none, synthMode);
+        deco ("voices", "voices", { { 3, 5, "unison", Picto::voices }, { 6, 7, "pitch" } }, {}, {}, Picto::none, synthMode);
         deco ("env", "amp env", { { 0, 3, "envelope", Picto::envelope }, { 4, 5, "output" }, { 6, 7, "voices", Picto::voices } });
         deco ("filter", "drive", { { 1, 2, "drive" } });
         deco ("fx", "drive", { { 1, 2, "drive" } });
+        // (0.4.25) the effects: what moves, what they mix
+        deco ("fx", "pitch", { { 0, 2, "voices" } });
+        deco ("fx", "chorus", { { 1, 2, "motion" } });
+        deco ("fx", "espace", { { 0, 2, "room" }, { 5, 6, "mix" } });
+        deco ("fx", "echo", { { 0, 1, "tape" }, { 2, 3, "heads" } });
         // the end of the chain
         deco ("settings", "comp", { { 1, 2, "input" }, { 3, 4, "time" }, { 5, 6, "output" } });
         deco ("settings", "limit", { { 1, 2, "limiter" } });
         // SAMPLER: the stretch, its spectral engine, the loop
         deco ("play", "freeze", { { 0, 1, "stretch" }, { 2, 6, "spectral", Picto::spectrum } }, {}, {}, Picto::none, samplerMode);
         deco ("loop", "loop", { { 1, 3, "loop", Picto::loop } }, {}, {}, Picto::none, samplerMode);
+        deco ("pitch", "pitch", { { 5, 7, "phase mod" } }, {}, {}, Picto::none, samplerMode);
         // RADIO: the receiver (its RX, tuned, demodulated), what comes out; the air
         deco ("tune", "tune", { { 1, 4, "receiver", Picto::antenna }, { 5, 6, "output" } }, { 1, 2 }, {}, Picto::none, radioMode);
         deco ("air", "air", { { 0, 1, "band" }, { 2, 3, "fading" } }, {}, {}, Picto::none, radioMode);
         deco ("pads", "pads", { { 0, 1, "pads", Picto::pads } }, {}, {}, Picto::none, radioMode);
+        deco ("take", "take", { { 0, 0, "grab" }, { 1, 2, "slices" } }, {}, {}, Picto::none, radioMode);
         // DRUM: the hit's envelope, its layers; its sweep, its FM; its filter and the filter's envelope
         deco ("amp", "amp", { { 0, 1, "envelope", Picto::envelope }, { 2, 4, "layers" }, { 5, 6, "output" } }, {}, {}, Picto::none, drumMode);
+        deco ("trig", "trig", { { 3, 6, "retrig" } }, {}, {}, Picto::none, drumMode);
         deco ("pitch", "pitch", { { 2, 3, "sweep" }, { 4, 5, "fm" } }, {}, {}, Picto::none, drumMode);
         deco ("tone", "tone", { { 0, 2, "filter", Picto::filterBox }, { 3, 5, "filter env", Picto::envelope } }, {}, {}, Picto::none, drumMode);
         deco ("source", "osc 1", { { 0, 3, "table scan", Picto::cycles } }, {}, {}, Picto::none, drumMode);
@@ -5996,7 +6008,7 @@ void Machine::buildResamplePages()
         return c;
     };
     // (0.4.24) where it goes
-    b.ctls.push_back (keep (choiceCtl ("To", { "sampler", "drum", "weave" }, [&o] { return o.dest; }, [&o] (int v) { o.dest = v; }), idle));
+    b.ctls.push_back (keep (choiceCtl ("Destination", { "sampler", "drum", "weave" }, [&o] { return o.dest; }, [&o] (int v) { o.dest = v; }), idle));
     b.ctls.back().tip = "Où va le rééchantillon. SAMPLER : un instrument en boucle, joué au clavier. DRUM : découpé sur ses attaques, sur une piste libre de la boîte à rythmes, chaque tranche sur le pas où elle tombait (la piste le rejoue tel quel, ses tranches deviennent les tiennes). WEAVE : un son de plus dans la trame."_fr;
     b.ctls.push_back (keep (choiceCtl ("Length", { "1 bar", "2 bars", "4 bars", "8 bars", "free" },
                                         [&o] { return o.length; }, [&o] (int v) { o.length = v; }), idle));
@@ -6008,7 +6020,7 @@ void Machine::buildResamplePages()
                                        [] (double v) { return lower (rk::noteName ((int) v)); }), [] { return true; }));
     b.ctls.back().tip = "La touche qui rejoue le son tel qu'il a été enregistré (les autres le transposent)."_fr;
     b.ctls.back().shown = [&o] { return o.dest == ReplikantProcessor::ResampleOptions::toSampler; };
-    b.ctls.push_back (keep (numberCtl ("Sens", 0.0, 100.0, 1.0, [&o] { return (double) o.sens * 100.0; }, [&o] (double v) { o.sens = (float) v / 100.0f; },
+    b.ctls.push_back (keep (numberCtl ("Sensitivity", 0.0, 100.0, 1.0, [&o] { return (double) o.sens * 100.0; }, [&o] (double v) { o.sens = (float) v / 100.0f; },
                                        [] (double v) { return juce::String (juce::roundToInt (v)) + " %"; }), [] { return true; }));
     b.ctls.back().tip = "DRUM : la sensibilité de la découpe. Plus haut, plus d'attaques deviennent des tranches (16 au plus) ; plus bas, seulement les coups francs."_fr;
     b.ctls.back().shown = [&o] { return o.dest == ReplikantProcessor::ResampleOptions::toDrum; };

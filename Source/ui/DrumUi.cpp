@@ -30,6 +30,20 @@ namespace
         const std::string u = d.unit;
         auto at = [param] (double v) { return drum::toNorm (param, (float) v); };
         auto add = [&c] (float t, const juce::String& l) { c.marks.push_back ({ juce::jlimit (0.0f, 1.0f, t), l }); };
+        // round values printed between the ends, where they fall well inside and apart from each other
+        auto between = [&] (std::initializer_list<std::pair<double, const char*>> vs, float apart)
+        {
+            float last = -1.0f;
+            for (const auto& [v, l] : vs)
+            {
+                const float t = at (v);
+                if (v > d.lo && v < d.hi && t >= 0.2f && t <= 0.8f && (last < 0.0f || t - last >= apart))
+                {
+                    add (t, l);
+                    last = t;
+                }
+            }
+        };
         c.ticks = 11;
         if (d.kind == drum::Kind::choice || d.kind == drum::Kind::toggle)
         {
@@ -45,7 +59,20 @@ namespace
         }
         if (u == "note")       { add (0.0f, "C0"); add (at (36), "C1"); add (at (60), "C3"); add (at (84), "C5"); add (1.0f, "C6"); c.ticks = 7; }
         else if (u == "st")    { add (0.0f, juce::String ((int) d.lo)); add (at (0), "0"); add (1.0f, "+" + juce::String ((int) d.hi)); c.ticks = d.hi > 30 ? 13 : 9; }
-        else if (u == "s")     { add (0.0f, "5MS"); add (at (0.05), "50"); add (at (0.5), "1/2S"); add (1.0f, "2S"); }
+        else if (u == "s")
+        {
+            // (0.4.25) the ends as they are (a short gap is not 5 ms to 2 s), the round values between that fit
+            auto secs = [] (double v)
+            {
+                if (v >= 1.0)                    return juce::String ((int) std::lround (v)) + "S";
+                if (std::abs (v - 0.5) < 1.0e-4)  return juce::String ("1/2S");
+                if (std::abs (v - 0.25) < 1.0e-4) return juce::String ("1/4S");
+                return juce::String ((int) std::lround (v * 1000.0)) + "MS";
+            };
+            add (0.0f, secs (d.lo));
+            between ({ { 0.01, "10" }, { 0.05, "50" }, { 0.1, "100" }, { 0.5, "1/2S" }, { 1.0, "1S" } }, 0.3f);
+            add (1.0f, secs (d.hi));
+        }
         else if (u == "x")     { add (0.0f, "1/4"); add (at (1), "1"); add (at (4), "4"); add (1.0f, "16"); c.ticks = 9; }
         else if (u == "Hz")    { add (0.0f, "20"); add (at (100), "100"); add (at (1000), "1K"); add (at (10000), "10K"); add (1.0f, "OPEN"); }
         else if (u == "atk")   { add (0.0f, "0"); add (at (0.5), "50"); add (1.0f, "200"); }
@@ -54,7 +81,13 @@ namespace
         else if (u == "fenv")  { add (0.0f, "-6"); add (0.5f, "0"); add (1.0f, "+6"); c.ticks = 13; }
         else if (u == "micro") { add (0.0f, "-1/2"); add (0.5f, "0"); add (1.0f, "+1/2"); c.ticks = 9; }
         else if (u == "crv")   { add (0.0f, "-"); add (0.5f, "EVEN"); add (1.0f, "+"); c.ticks = 9; }
-        else if (u == "hits")  { add (0.0f, "1"); add (at (4), "4"); add (at (8), "8"); add (1.0f, "16"); c.ticks = 16; }
+        else if (u == "hits")
+        {
+            add (0.0f, juce::String ((int) d.lo));
+            between ({ { 4.0, "4" }, { 8.0, "8" } }, 0.25f);
+            add (1.0f, juce::String ((int) d.hi));
+            c.ticks = (int) std::lround (d.hi - d.lo) + 1;
+        }
         else if (u == "slice") { add (0.0f, "1"); add (at (7), "8"); add (1.0f, "16"); c.ticks = 16; }
         else                   { add (0.0f, "0"); add (0.5f, "5"); add (1.0f, "10"); }
     }

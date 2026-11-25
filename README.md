@@ -4,12 +4,19 @@
 
 **Page de téléchargement** : https://distortedimages-code.github.io/REPLIKANT/
 
+## La version 0.4.25 : les noms et les liserés
+
+- **Les noms des boutons** : le deuxième argument de `D (param, label)` / `S (id, label)` dans `Machine.cpp`, la définition (`DrumCore.cpp`, `Sound.cpp`) intacte : les listes de modulation et l'état gardent leurs noms. Le liseré dit le groupe, le bouton dit le réglage (FILTER ENV : AMOUNT, ATTACK, DECAY).
+- **Les liserés** : `deco (page, bank, { { de, à, nom, picto } })`, les indices comptés parmi tous les contrôles de la banque (un contrôle caché est sauté, le liseré se resserre).
+- **Les graduations** : `scaleOf` (DRUM) écrit les bouts de la vraie course (`d.lo`, `d.hi`) et seulement les valeurs rondes qui tombent entre 20 et 80 % de la course, assez loin l'une de l'autre ; `decades` (son) saute une décade à moins de 6 % de la précédente.
+- **Outils** : `RK_SNAP_DECK=1 Snapshot <dossier>` photographie chaque banque de chaque mode (et la page RÉÉCHANTILLONNER) ; `RK_SNAP_LABELS=1` imprime pages, banques, liserés, contrôles et graduations.
+
 ## La version 0.4.24 : le rééchantillon vers la DRUM et WEAVE
 
 - **`ResampleOptions::dest`** (`toSampler`, `toDrum`, `toWeave`) et **`sens`**, gardés dans l'état (`rsDest`, `rsSens`). `injectResample` (public, les tests lui donnent une prise) : hors SAMPLER, `resampleToDrum` ou `resampleToWeave`, les effets à zéro si demandé, `player.stopResample()` (la boucle de passation s'efface en 30 ms), `releaseNeutralIn = 2`.
 - **`resampleToDrum`** : `radio::slice` (16, `sens`) ; une tranche ajoutée en 0 quand la première attaque trouvée est à plus de 5 ms et que ce qui la précède n'est pas silencieux (au-delà de 16, la plus faible fusionnée dans la précédente). La piste : la première sans pas dans le motif joué, sinon `drumTrack` (ses pas, répétitions et verrous de SLICE vidés). Mesures entières (longueur à 3 % de `barres × 240 / tempo`, 64 pas au plus) : chaque tranche sur le pas le plus proche de son début (le premier arrivé garde le pas), `len = 16 × barres` ; sinon une par pas. `useDrumSound` (le WAV écrit dans `Drums/`), source SLICES, `soundAsIs`, moteur DRUM.
 - **`resampleToWeave`** / **`weaveAddAudio`** : un son de plus (16 au plus), son WAV écrit dans `Weave/` en arrière-plan, puis son chemin noté ; moteur WEAVE.
-- **Fenêtre** : TO en tête de la page RÉÉCHANTILLONNER, NOTE seulement pour le SAMPLER, SENS seulement pour la DRUM ; le schéma du chemin et les sous-titres suivent la destination. **Test** : `ProcessorTests::resampleElsewhere` (une mesure à 120, des coups sur les pas 0, 4, 6, 10, 12, 14 : six tranches sur ces pas, dans l'ordre ; puis WEAVE). Capture `21b`.
+- **Fenêtre** : DESTINATION en tête de la page RÉÉCHANTILLONNER, NOTE seulement pour le SAMPLER, SENSITIVITY seulement pour la DRUM ; le schéma du chemin et les sous-titres suivent la destination. **Test** : `ProcessorTests::resampleElsewhere` (une mesure à 120, des coups sur les pas 0, 4, 6, 10, 12, 14 : six tranches sur ces pas, dans l'ordre ; puis WEAVE). Capture `21b`.
 
 ## La version 0.4.22 : les légendes entières
 

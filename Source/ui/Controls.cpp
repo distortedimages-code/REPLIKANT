@@ -37,9 +37,11 @@ namespace
         // values along a log or power scale: decades, the ends written when nothing sits near them
         auto decades = [&] (std::initializer_list<double> vs, const char* suffixOver1000)
         {
+            float last = -1.0f;
             for (double v : vs)
-                if (v >= d.lo - 1.0e-6 && v <= d.hi + 1.0e-6)
+                if (v >= d.lo - 1.0e-6 && v <= d.hi + 1.0e-6 && (last < 0.0f || at (v) - last >= 0.06f))      // (0.4.25: never two on top of each other)
                 {
+                    last = at (v);
                     juce::String l = suffixOver1000 != nullptr && v >= 1000.0 ? juce::String ((int) (v / 1000.0)) + suffixOver1000 : shortNumber (v);
                     add (at (v), l);
                 }
